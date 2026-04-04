@@ -1,9 +1,814 @@
-   1	<!DOCTYPE html>
-     2	<html lang="ko">
-     3	<head>
-...
-  1163	    });
-  1164	  </script>
-  1165	</body>
-  1166	</html>
-  1167	
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Log AI</title>
+  <!-- 보안 메타 태그 -->
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
+  <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+  <!-- 보안 모듈: 가장 먼저 로드 -->
+  <script src="js/security.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: 'Noto Sans KR', sans-serif;
+      background: linear-gradient(135deg, #1e3a5f 0%, #2d5986 50%, #1a4a7a 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      position: relative;
+      overflow-x: hidden;
+      overflow-y: auto;
+      padding: 32px 0;
+    }
+    body::before {
+      content: '';
+      position: absolute;
+      width: 600px; height: 600px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 50%;
+      top: -200px; left: -200px;
+    }
+    body::after {
+      content: '';
+      position: absolute;
+      width: 400px; height: 400px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 50%;
+      bottom: -100px; right: -100px;
+    }
+    .login-container {
+      width: 100%;
+      max-width: 440px;
+      padding: 20px;
+      position: relative;
+      z-index: 1;
+      margin: auto 0;
+    }
+    .logo-area {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+    .logo-icon {
+      width: 68px; height: 68px;
+      background: linear-gradient(135deg, #4f8fda, #2d6bb5);
+      border-radius: 18px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    }
+    .logo-icon i { font-size: 30px; color: #fff; }
+    .logo-text-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+    .logo-title {
+      font-size: 26px;
+      font-weight: 800;
+      color: #fff;
+      letter-spacing: -0.5px;
+      line-height: 1.1;
+      text-align: center;
+    }
+    .login-card {
+      background: #fff;
+      border-radius: 20px;
+      padding: 40px 36px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+    }
+    .card-title { font-size: 20px; font-weight: 700; color: #1a2b45; margin-bottom: 6px; }
+    .card-desc { font-size: 13px; color: #8a95a3; margin-bottom: 28px; }
+    .form-group { margin-bottom: 18px; }
+    .form-label { display: block; font-size: 13px; font-weight: 600; color: #3d4f63; margin-bottom: 8px; }
+    .input-wrapper { position: relative; }
+    .input-wrapper .input-icon {
+      position: absolute; left: 14px; top: 50%;
+      transform: translateY(-50%);
+      color: #9aa4b2; font-size: 14px; pointer-events: none;
+    }
+    .form-input {
+      width: 100%;
+      padding: 12px 14px 12px 40px;
+      border: 1.5px solid #dde3ec;
+      border-radius: 10px;
+      font-size: 14px;
+      font-family: 'Noto Sans KR', sans-serif;
+      color: #1a2b45;
+      background: #f8fafc;
+      transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+      outline: none;
+    }
+    .form-input:focus { border-color: #2d6bb5; background: #fff; box-shadow: 0 0 0 3px rgba(45,107,181,0.12); }
+    .form-input.error { border-color: #e53e3e; background: #fff5f5; }
+    .toggle-pw {
+      position: absolute; right: 12px; top: 50%;
+      transform: translateY(-50%);
+      background: none; border: none; cursor: pointer;
+      color: #9aa4b2; font-size: 14px; padding: 4px;
+      transition: color 0.2s;
+    }
+    .toggle-pw:hover { color: #2d6bb5; }
+    .form-options { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+    .remember-me { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: #5a6878; user-select: none; }
+    .remember-me input[type="checkbox"] { width: 16px; height: 16px; accent-color: #2d6bb5; cursor: pointer; }
+    .btn-login {
+      width: 100%; padding: 14px;
+      background: linear-gradient(135deg, #2d6bb5, #1e4f8a);
+      color: #fff; border: none; border-radius: 10px;
+      font-size: 15px; font-weight: 600;
+      font-family: 'Noto Sans KR', sans-serif;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s, box-shadow 0.2s;
+      box-shadow: 0 4px 14px rgba(45,107,181,0.35);
+      display: flex; align-items: center; justify-content: center;
+      gap: 8px; letter-spacing: 0.2px;
+    }
+    .btn-login:hover { opacity: 0.92; box-shadow: 0 6px 20px rgba(45,107,181,0.45); }
+    .btn-login:active { transform: translateY(1px); }
+    .btn-login:disabled { opacity: 0.65; cursor: not-allowed; transform: none; }
+    .btn-login .spinner {
+      display: none; width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: #fff; border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    .btn-login.loading .spinner { display: block; }
+    .btn-login.loading .btn-text { display: none; }
+    .error-msg {
+      display: none; align-items: center; gap: 8px;
+      background: #fff5f5; border: 1px solid #feb2b2;
+      border-radius: 8px; padding: 11px 14px;
+      margin-bottom: 16px; font-size: 13px; color: #c53030;
+    }
+    .error-msg.show { display: flex; }
+    .error-msg i { font-size: 14px; flex-shrink: 0; }
+    .divider { display: flex; align-items: center; gap: 12px; margin: 24px 0; color: #c4cdd6; font-size: 12px; }
+    .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #edf1f5; }
+    .admin-contact { text-align: center; font-size: 12.5px; color: #8a95a3; margin-top: 20px; line-height: 1.6; }
+    .admin-contact a { color: #2d6bb5; text-decoration: none; font-weight: 500; }
+    .admin-contact a:hover { text-decoration: underline; }
+    .info-box {
+      background: #eff6ff; border: 1px solid #bfdbfe;
+      border-radius: 8px; padding: 11px 14px; margin-bottom: 20px;
+      font-size: 12.5px; color: #1d4ed8;
+      display: flex; align-items: flex-start; gap: 8px; line-height: 1.55;
+    }
+    .info-box i { margin-top: 1px; flex-shrink: 0; }
+    .footer-note { text-align: center; margin-top: 24px; font-size: 11.5px; color: rgba(255,255,255,0.45); }
+    .modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5); z-index: 1000;
+      align-items: center; justify-content: center; padding: 20px;
+    }
+    .modal-overlay.show { display: flex; }
+    .modal {
+      background: #fff; border-radius: 16px; padding: 32px;
+      max-width: 400px; width: 100%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    .modal-title { font-size: 18px; font-weight: 700; color: #1a2b45; margin-bottom: 8px; }
+    .modal-desc { font-size: 13px; color: #6b7a8d; margin-bottom: 24px; line-height: 1.6; }
+    .modal .form-group { margin-bottom: 16px; }
+    .btn-modal-submit {
+      width: 100%; padding: 12px;
+      background: linear-gradient(135deg, #2d6bb5, #1e4f8a);
+      color: #fff; border: none; border-radius: 8px;
+      font-size: 14px; font-weight: 600;
+      font-family: 'Noto Sans KR', sans-serif;
+      cursor: pointer; margin-top: 8px; transition: opacity 0.2s;
+    }
+    .btn-modal-submit:hover { opacity: 0.9; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (max-width: 480px) {
+      .login-card { padding: 28px 22px; }
+      .logo-area { gap: 10px; }
+      .logo-area img { height: 46px; }
+      .logo-title { font-size: 22px; }
+    }
+    .pw-change-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.65); z-index: 2000;
+      align-items: center; justify-content: center; padding: 20px;
+    }
+    .pw-change-overlay.show { display: flex; }
+    .pw-change-modal {
+      background: #fff; border-radius: 18px;
+      padding: 36px 32px 30px; max-width: 420px; width: 100%;
+      box-shadow: 0 24px 70px rgba(0,0,0,0.35);
+    }
+    .pw-change-header { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+    .pw-change-icon {
+      width: 44px; height: 44px;
+      background: linear-gradient(135deg, #e53e3e, #c53030);
+      border-radius: 12px; display: flex;
+      align-items: center; justify-content: center;
+      font-size: 20px; color: #fff; flex-shrink: 0;
+    }
+    .pw-change-title { font-size: 17px; font-weight: 700; color: #1a2b45; }
+    .pw-change-desc {
+      font-size: 12.5px; color: #6b7a8d;
+      margin-bottom: 22px; margin-top: 10px; line-height: 1.65;
+      padding: 12px 14px; background: #fff8f0;
+      border: 1px solid #fdd0a0; border-radius: 8px;
+    }
+    .pw-change-desc strong { color: #c05621; }
+    .pw-strength { margin-top: 6px; height: 5px; border-radius: 3px; background: #eef1f5; overflow: hidden; }
+    .pw-strength-bar { height: 100%; border-radius: 3px; transition: width 0.3s, background 0.3s; width: 0%; }
+    .pw-strength-text { font-size: 11px; margin-top: 4px; color: #8a95a3; }
+    .pw-change-error {
+      display: none; align-items: center; gap: 8px;
+      background: #fff5f5; border: 1px solid #feb2b2;
+      border-radius: 8px; padding: 10px 13px;
+      margin-bottom: 14px; font-size: 12.5px; color: #c53030;
+    }
+    .pw-change-error.show { display: flex; }
+    .btn-pw-change {
+      width: 100%; padding: 13px;
+      background: linear-gradient(135deg, #2d6bb5, #1e4f8a);
+      color: #fff; border: none; border-radius: 10px;
+      font-size: 14px; font-weight: 600;
+      font-family: 'Noto Sans KR', sans-serif;
+      cursor: pointer; transition: opacity 0.2s; margin-top: 6px;
+    }
+    .btn-pw-change:hover { opacity: 0.9; }
+    .btn-pw-change:disabled { opacity: 0.6; cursor: not-allowed; }
+    .pw-days-badge {
+      display: inline-block; background: #fed7d7; color: #c53030;
+      font-size: 11px; font-weight: 700; padding: 2px 8px;
+      border-radius: 20px; margin-left: 6px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="login-container">
+    <div class="logo-area">
+      <img src="images/logo.png" alt="HANJOO"
+           style="height:58px;width:auto;object-fit:contain;filter:brightness(0) invert(1)" />
+      <div class="logo-text-wrap">
+        <div class="logo-title">Smart Log AI</div>
+      </div>
+    </div>
+
+    <div class="login-card">
+      <div class="card-title">로그인</div>
+      <div class="card-desc">등록된 이메일과 비밀번호를 입력하세요.</div>
+
+      <div class="error-msg" id="errorMsg">
+        <i class="fas fa-exclamation-circle"></i>
+        <span id="errorText">이메일 또는 비밀번호가 올바르지 않습니다.</span>
+      </div>
+
+      <form id="loginForm" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label class="form-label" for="email">이메일</label>
+          <div class="input-wrapper">
+            <i class="fas fa-envelope input-icon"></i>
+            <input type="email" id="email" class="form-input"
+              placeholder="이메일 주소를 입력하세요"
+              autocomplete="email" required />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="password">비밀번호</label>
+          <div class="input-wrapper">
+            <i class="fas fa-lock input-icon"></i>
+            <input type="password" id="password" class="form-input"
+              placeholder="비밀번호를 입력하세요"
+              autocomplete="current-password" required />
+            <button type="button" class="toggle-pw" onclick="togglePassword()" id="togglePwBtn">
+              <i class="fas fa-eye" id="togglePwIcon"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="form-options">
+          <label class="remember-me">
+            <input type="checkbox" id="rememberMe" />
+            로그인 상태 유지
+          </label>
+        </div>
+
+        <button type="submit" class="btn-login" id="loginBtn">
+          <div class="spinner"></div>
+          <span class="btn-text">
+            <i class="fas fa-sign-in-alt"></i>&nbsp; 로그인
+          </span>
+        </button>
+      </form>
+
+      <div class="admin-contact">
+        계정이 없거나 비밀번호를 잊으셨나요?<br />
+        Administrator에게 문의하세요.
+      </div>
+    </div>
+
+    <div class="footer-note">
+      © 2026 Smart Log AI. All rights reserved.
+    </div>
+  </div>
+
+  <!-- 첫 관리자 계정 초기 설정 모달 -->
+  <div class="modal-overlay" id="setupModal">
+    <div class="modal">
+      <div class="modal-title">⚙️ 초기 Administrator 계정 설정</div>
+      <div class="modal-desc">
+        등록된 사용자가 없습니다.<br />
+        최초 Administrator 계정을 생성해주세요.
+      </div>
+      <div class="info-box">
+        <i class="fas fa-info-circle"></i>
+        <span>이 계정은 <strong>Administrator</strong>로 생성됩니다. 이후 Staff 관리 메뉴에서 직원을 추가할 수 있습니다.</span>
+      </div>
+      <form id="setupForm" onsubmit="handleSetup(event)">
+        <div class="form-group">
+          <label class="form-label">이름 *</label>
+          <div class="input-wrapper">
+            <i class="fas fa-user input-icon"></i>
+            <input type="text" id="setupName" class="form-input" placeholder="실명을 입력하세요" required />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">이메일 *</label>
+          <div class="input-wrapper">
+            <i class="fas fa-envelope input-icon"></i>
+            <input type="email" id="setupEmail" class="form-input" placeholder="관리자 이메일 주소" required />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">비밀번호 * <span style="font-size:11px;color:#8a95a3;font-weight:400;">(8자 이상)</span></label>
+          <div class="input-wrapper">
+            <i class="fas fa-lock input-icon"></i>
+            <input type="password" id="setupPw" class="form-input"
+              placeholder="비밀번호 (8자 이상)" minlength="8"
+              autocomplete="new-password" required />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">비밀번호 확인 *</label>
+          <div class="input-wrapper">
+            <i class="fas fa-lock input-icon"></i>
+            <input type="password" id="setupPwConfirm" class="form-input"
+              placeholder="비밀번호를 다시 입력하세요"
+              autocomplete="new-password" required />
+          </div>
+        </div>
+        <div class="error-msg" id="setupError" style="margin-bottom:12px;">
+          <i class="fas fa-exclamation-circle"></i>
+          <span id="setupErrorText"></span>
+        </div>
+        <button type="submit" class="btn-modal-submit" id="setupBtn">
+          <i class="fas fa-user-plus"></i> 관리자 계정 생성
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 비밀번호 변경 강제 모달 -->
+  <div class="pw-change-overlay" id="pwChangeModal">
+    <div class="pw-change-modal">
+      <div class="pw-change-header">
+        <div class="pw-change-icon"><i class="fas fa-key"></i></div>
+        <div>
+          <div class="pw-change-title">비밀번호 변경 필요</div>
+        </div>
+      </div>
+      <div class="pw-change-desc" id="pwChangeDesc">
+        마지막 비밀번호 변경 후 <strong id="pwDaysElapsed">90일</strong> 이상 경과되었습니다.<br/>
+        보안 정책에 따라 <strong>3개월(90일)마다</strong> 비밀번호를 변경해야 합니다.<br/>
+        새 비밀번호를 설정한 후 서비스를 이용할 수 있습니다.
+      </div>
+
+      <div class="pw-change-error" id="pwChangeError">
+        <i class="fas fa-exclamation-circle"></i>
+        <span id="pwChangeErrorText"></span>
+      </div>
+
+      <form id="pwChangeForm" onsubmit="handlePwChange(event)">
+        <div class="form-group">
+          <label class="form-label">현재 비밀번호 *</label>
+          <div class="input-wrapper">
+            <i class="fas fa-lock input-icon"></i>
+            <input type="password" id="pwOld" class="form-input"
+              placeholder="현재 비밀번호" autocomplete="current-password" required />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">새 비밀번호 * <span style="font-size:11px;color:#8a95a3;font-weight:400;">(8자 이상, 이전 비밀번호와 달라야 함)</span></label>
+          <div class="input-wrapper">
+            <i class="fas fa-lock input-icon"></i>
+            <input type="password" id="pwNew" class="form-input"
+              placeholder="새 비밀번호 (8자 이상)" minlength="8"
+              autocomplete="new-password" required
+              oninput="checkPwStrength(this.value)" />
+          </div>
+          <div class="pw-strength"><div class="pw-strength-bar" id="pwStrengthBar"></div></div>
+          <div class="pw-strength-text" id="pwStrengthText"></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">새 비밀번호 확인 *</label>
+          <div class="input-wrapper">
+            <i class="fas fa-lock input-icon"></i>
+            <input type="password" id="pwNewConfirm" class="form-input"
+              placeholder="새 비밀번호 확인" autocomplete="new-password" required />
+          </div>
+        </div>
+        <button type="submit" class="btn-pw-change" id="pwChangeBtn">
+          <i class="fas fa-check"></i> 비밀번호 변경 및 로그인
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    async function hashPassword(pw) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(pw);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    const SUPABASE_URL = 'https://dvjagzcqdgolspyngtxj.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR2amFnemNxZGdvbHNweW5ndHhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNjU5MjYsImV4cCI6MjA5MDg0MTkyNn0.J3G3zHvIlCgpYaST9PCAJtd9n8OoXMZZmP5i920cfUg';
+
+    async function apiFetch(path, opts = {}) {
+      let url = path;
+      let resultWrapper = null;
+
+      if (path.startsWith('tables/')) {
+        const withoutPrefix = path.replace('tables/', '');
+        const [tablePart, queryPart] = withoutPrefix.split('?');
+
+        if (opts.method === 'PATCH') {
+          const parts = tablePart.split('/');
+          const tbl   = parts[0];
+          const id    = parts[1];
+          url = `${SUPABASE_URL}/rest/v1/${tbl}?id=eq.${id}`;
+          const res = await fetch(url, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`,
+              'Prefer': 'return=representation',
+            },
+            body: opts.body,
+          });
+          if (!res.ok) throw new Error(`API Error: ${res.status}`);
+          const data = await res.json().catch(() => []);
+          return Array.isArray(data) ? data[0] : data;
+        }
+
+        const params = new URLSearchParams(queryPart || '');
+        const limit  = params.get('limit') || 500;
+        url = `${SUPABASE_URL}/rest/v1/${tablePart}?limit=${limit}&order=created_at.desc&deleted.is.null`;
+        resultWrapper = true;
+      }
+
+      const res = await fetch(url, {
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+          'Prefer': 'count=exact',
+          ...(opts.headers || {})
+        },
+        ...opts,
+      });
+      if (!res.ok && res.status !== 404) throw new Error(`API Error: ${res.status}`);
+      if (res.status === 204) return null;
+      const data = await res.json().catch(() => null);
+
+      if (resultWrapper) {
+        const total = parseInt(res.headers.get('content-range')?.split('/')[1] || (Array.isArray(data) ? data.length : 0));
+        return { data: Array.isArray(data) ? data : [], total: total || (Array.isArray(data) ? data.length : 0) };
+      }
+      return data;
+    }
+
+    let _pendingUser       = null;
+    let _pendingRememberMe = false;
+
+    function _completeLogin(user, rememberMe) {
+      const sessionData = {
+        id:           user.id,
+        name:         user.name,
+        email:        user.email,
+        role:         user.role,
+        dept_id:      user.dept_id      || '',
+        dept_name:    user.dept_name    || '',
+        hq_id:        user.hq_id        || '',
+        hq_name:      user.hq_name      || '',
+        cs_team_id:   user.cs_team_id   || '',
+        cs_team_name: user.cs_team_name || '',
+        approver_id:   user.approver_id   || '',
+        approver_name: user.approver_name || '',
+        reviewer2_id:   user.reviewer2_id   || '',
+        reviewer2_name: user.reviewer2_name || '',
+        is_timesheet_target: user.is_timesheet_target !== false,
+        team_name:    user.team_name || '',
+        loggedInAt:   Date.now(),
+        loggedInUA:   navigator.userAgent.slice(0, 120),
+        tabId:        Math.random().toString(36).slice(2),
+      };
+      if (rememberMe) {
+        localStorage.setItem('wt_session', JSON.stringify(sessionData));
+      } else {
+        sessionStorage.setItem('wt_session', JSON.stringify(sessionData));
+      }
+      window.location.href = 'main.html';
+    }
+
+    function checkPwStrength(pw) {
+      const bar  = document.getElementById('pwStrengthBar');
+      const text = document.getElementById('pwStrengthText');
+      if (!bar || !text) return;
+      let score = 0;
+      if (pw.length >= 8)  score++;
+      if (pw.length >= 12) score++;
+      if (/[A-Z]/.test(pw)) score++;
+      if (/[0-9]/.test(pw)) score++;
+      if (/[^A-Za-z0-9]/.test(pw)) score++;
+      const levels = [
+        { pct: '0%',   color: '#eef1f5', label: '' },
+        { pct: '25%',  color: '#fc8181', label: '매우 약함' },
+        { pct: '50%',  color: '#f6ad55', label: '약함' },
+        { pct: '70%',  color: '#68d391', label: '보통' },
+        { pct: '85%',  color: '#48bb78', label: '강함' },
+        { pct: '100%', color: '#2f855a', label: '매우 강함' },
+      ];
+      const lv = levels[Math.min(score, 5)];
+      bar.style.width      = lv.pct;
+      bar.style.background = lv.color;
+      text.textContent     = lv.label;
+      text.style.color     = lv.color;
+    }
+
+    async function handlePwChange(e) {
+      e.preventDefault();
+      const errEl   = document.getElementById('pwChangeError');
+      const errText = document.getElementById('pwChangeErrorText');
+      const showPwErr = (msg) => { errText.textContent = msg; errEl.classList.add('show'); };
+      errEl.classList.remove('show');
+
+      if (!_pendingUser) { showPwErr('세션 오류. 페이지를 새로고침 해주세요.'); return; }
+
+      const oldPw        = document.getElementById('pwOld').value;
+      const newPw        = document.getElementById('pwNew').value;
+      const newPwConfirm = document.getElementById('pwNewConfirm').value;
+
+      if (!oldPw || !newPw || !newPwConfirm) { showPwErr('모든 항목을 입력해주세요.'); return; }
+      if (newPw.length < 8) { showPwErr('새 비밀번호는 8자 이상이어야 합니다.'); return; }
+      if (newPw !== newPwConfirm) { showPwErr('새 비밀번호가 일치하지 않습니다.'); return; }
+
+      const oldHash = await hashPassword(oldPw);
+      if (_pendingUser.password !== oldHash) { showPwErr('현재 비밀번호가 올바르지 않습니다.'); return; }
+
+      const newHash = await hashPassword(newPw);
+      if (newHash === _pendingUser.password) { showPwErr('이전 비밀번호와 동일한 비밀번호는 사용할 수 없습니다.'); return; }
+
+      const btn = document.getElementById('pwChangeBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 변경 중...';
+
+      try {
+        const res = await apiFetch(`tables/users/${_pendingUser.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ password: newHash, pw_changed_at: Date.now() }),
+        });
+        if (res && res.id) {
+          document.getElementById('pwChangeModal').classList.remove('show');
+          const updatedUser = { ..._pendingUser, password: newHash, pw_changed_at: Date.now() };
+          _completeLogin(updatedUser, _pendingRememberMe);
+        } else {
+          showPwErr('비밀번호 변경에 실패했습니다. 다시 시도해주세요.');
+        }
+      } catch (err) {
+        console.error(err);
+        showPwErr('서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-check"></i> 비밀번호 변경 및 로그인';
+      }
+    }
+
+    async function checkFirstRun() {
+      try {
+        const data = await apiFetch('tables/users?limit=1');
+        if (!data || !data.total || data.total === 0) {
+          document.getElementById('setupModal').classList.add('show');
+        }
+      } catch (e) {
+        console.warn('[checkFirstRun] API 오류 (setupModal 표시 안함):', e.message);
+      }
+    }
+
+    function togglePassword() {
+      const input = document.getElementById('password');
+      const icon = document.getElementById('togglePwIcon');
+      if (input.type === 'password') {
+        input.type = 'text';
+        icon.className = 'fas fa-eye-slash';
+      } else {
+        input.type = 'password';
+        icon.className = 'fas fa-eye';
+      }
+    }
+
+    function showError(msg) {
+      const box = document.getElementById('errorMsg');
+      document.getElementById('errorText').textContent = msg;
+      box.classList.add('show');
+      document.getElementById('email').classList.add('error');
+      document.getElementById('password').classList.add('error');
+    }
+    function hideError() {
+      document.getElementById('errorMsg').classList.remove('show');
+      document.getElementById('email').classList.remove('error');
+      document.getElementById('password').classList.remove('error');
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      hideError();
+
+      const email      = document.getElementById('email').value.trim().toLowerCase();
+      const password   = document.getElementById('password').value;
+      const rememberMe = document.getElementById('rememberMe').checked;
+
+      if (!email || !password) { showError('이메일과 비밀번호를 모두 입력해주세요.'); return; }
+
+      const btn = document.getElementById('loginBtn');
+      btn.classList.add('loading');
+      btn.disabled = true;
+
+      try {
+        const data = await apiFetch('tables/users?limit=500');
+
+        if (!data || !data.data || data.data.length === 0) {
+          showError('등록된 계정이 없습니다. 관리자에게 문의하세요.');
+          return;
+        }
+
+        const users = data.data.filter(u => u.email && u.email.trim().toLowerCase() === email);
+
+        if (users.length === 0) {
+          showError('등록되지 않은 이메일입니다. 관리자에게 문의하세요.');
+          return;
+        }
+
+        const user = users[0];
+        if (user.is_active === false) {
+          showError('비활성화된 계정입니다. 관리자에게 문의하세요.');
+          return;
+        }
+        if (!user.password) {
+          showError('비밀번호가 설정되지 않은 계정입니다. 관리자에게 문의하세요.');
+          return;
+        }
+
+        const pwHash = await hashPassword(password);
+        if (user.password !== pwHash) {
+          showError('비밀번호가 올바르지 않습니다.');
+          return;
+        }
+
+        const PW_EXPIRY_DAYS = 90;
+        const PW_EXPIRY_MS   = PW_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
+        const now            = Date.now();
+        const lastChanged    = user.pw_changed_at
+          ? Number(user.pw_changed_at)
+          : (user.created_at ? Number(user.created_at) : 0);
+        const elapsed     = now - lastChanged;
+        const elapsedDays = Math.floor(elapsed / (24 * 60 * 60 * 1000));
+
+        if (lastChanged > 0 && elapsed > PW_EXPIRY_MS) {
+          _pendingUser       = user;
+          _pendingRememberMe = rememberMe;
+          const displayDays  = lastChanged === 0 ? '90+' : elapsedDays;
+          document.getElementById('pwDaysElapsed').textContent = displayDays + '일';
+          document.getElementById('pwChangeModal').classList.add('show');
+          return;
+        }
+
+        _completeLogin(user, rememberMe);
+
+      } catch (err) {
+        console.error(err);
+        showError('서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+      } finally {
+        btn.classList.remove('loading');
+        btn.disabled = false;
+      }
+    }
+
+    async function handleSetup(e) {
+      e.preventDefault();
+      const name      = document.getElementById('setupName').value.trim();
+      const email     = document.getElementById('setupEmail').value.trim().toLowerCase();
+      const pw        = document.getElementById('setupPw').value;
+      const pwConfirm = document.getElementById('setupPwConfirm').value;
+
+      const errEl   = document.getElementById('setupError');
+      const errText = document.getElementById('setupErrorText');
+      const showSetupError = (msg) => { errText.textContent = msg; errEl.classList.add('show'); };
+      errEl.classList.remove('show');
+
+      if (!name || !email || !pw) { showSetupError('모든 항목을 입력해주세요.'); return; }
+      if (pw.length < 8) { showSetupError('비밀번호는 8자 이상이어야 합니다.'); return; }
+      if (pw !== pwConfirm) { showSetupError('비밀번호가 일치하지 않습니다.'); return; }
+
+      const btn = document.getElementById('setupBtn');
+      btn.disabled = true;
+      btn.textContent = '생성 중...';
+
+      try {
+        const pwHash = await hashPassword(pw);
+        const now    = Date.now();
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/users`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Prefer': 'return=representation',
+          },
+          body: JSON.stringify({
+            name, email,
+            password:      pwHash,
+            role:          'admin',
+            team_name:     '관리팀',
+            is_active:     true,
+            pw_changed_at: now,
+            created_at:    now,
+            updated_at:    now,
+          }),
+        });
+
+        const created = await res.json().catch(() => null);
+        const user    = Array.isArray(created) ? created[0] : created;
+
+        if (res.ok && user && user.id) {
+          document.getElementById('setupModal').classList.remove('show');
+          alert('관리자 계정이 생성되었습니다. 직원 관리에서 팀원을 추가할 수 있습니다.');
+          _completeLogin(user, true);
+        } else {
+          showSetupError('계정 생성에 실패했습니다. 다시 시도해주세요.');
+        }
+      } catch (err) {
+        console.error(err);
+        showSetupError('오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-user-plus"></i> 관리자 계정 생성';
+      }
+    }
+
+    function checkExistingSession() {
+      const session = localStorage.getItem('wt_session') || sessionStorage.getItem('wt_session');
+      if (session) {
+        try {
+          const s   = JSON.parse(session);
+          const TTL = 8 * 60 * 60 * 1000;
+          if (s && s.id && s.loggedInAt && (Date.now() - s.loggedInAt < TTL)) {
+            window.location.href = 'main.html';
+            return true;
+          } else {
+            localStorage.removeItem('wt_session');
+            sessionStorage.removeItem('wt_session');
+          }
+        } catch(e) {}
+      }
+      return false;
+    }
+
+    document.getElementById('email').addEventListener('input', hideError);
+    document.getElementById('password').addEventListener('input', hideError);
+
+    window.addEventListener('DOMContentLoaded', () => {
+      if (!checkExistingSession()) {
+        checkFirstRun();
+      }
+    });
+  </script>
+</body>
+</html>
