@@ -1,1556 +1,1393 @@
-/* ============================================================
-   entry.js  –  업무일지 입력 / 목록 / 수정
-   ============================================================ */
-'use strict';
+/* ============================================
+   entry.js — 타임시트 등록 / 나의 타임시트
+   ============================================ */
 
-/* ── 상수 ── */
-const ENTRY_PAGE_SIZE = 20;
-const DRAFT_KEY = 'entry_draft_v2';
+function _injectDescTableStyle(html) {
+  if (!html) return html;
+  try {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    tmp.querySelectorAll('o\\:p, w\\:sdt, w\\:sdtContent').forEach(el => {
+      el.replaceWith(...Array.from(el.childNodes));
+    });
+    tmp.querySelectorAll('*').forEach(el => {
+      const st = el.getAttribute('style') || '';
+      if (st) {
+        const cleaned = st.split(';').map(s => s.trim())
+          .filter(s => s && !s.startsWith('mso-') && !s.startsWith('-mso')).join('; ');
+        if (cleaned) el.setAttribute('style', cleaned);
+        else el.removeAttribute('style');
+      }
+      el.removeAttribute('class');
+    });
+    tmp.querySelectorAll('table').forEach(t => {
+      t.style.borderCollapse = 'collapse'; t.style.maxWidth = '100%';
+      t.style.fontSize = '13px'; t.style.tableLayout = 'auto';
+      t.removeAttribute('width'); t.style.width = 'auto';
+    });
+    tmp.querySelectorAll('th').forEach(el => {
+      el.style.border = '1px solid #cbd5e1'; el.style.padding = '4px 8px';
+      el.style.background = '#f1f5f9'; el.style.fontWeight = '700';
+      el.style.textAlign = 'center'; el.style.verticalAlign = 'top';
+      el.style.whiteSpace = 'pre-wrap'; el.style.wordBreak = 'break-word';
+      el.removeAttribute('width'); el.removeAttribute('height');
+    });
+    tmp.querySelectorAll('td').forEach(el => {
+      el.style.border = '1px solid #cbd5e1'; el.style.padding = '4px 8px';
+      el.style.verticalAlign = 'top'; el.style.whiteSpace = 'pre-wrap';
+      el.style.wordBreak = 'break-word';
+      el.removeAttribute('width'); el.removeAttribute('height');
+    });
+    return tmp.innerHTML;
+  } catch(e) { return html; }
+}
 
-/* ── 상태 ── */
-let _session = null;
-let _entries = [];
-let _filteredEntries = [];
-let _currentPage = 1;
-let _totalCount = 0;
-let _masters = {};
-let _editingId = null;
+let _allCategories    = [];
+let _allSubcategories = [];
+let _currentCategoryType = '';
+let _pendingFiles     = [];
+let _editEntryId    = null;
+let _editMode       = false;
+let _deletedAttIds  = [];
+let _entriesPage  = 1;
+const ENTRIES_PER_PAGE = 20;
+
 let _quill = null;
-let _filterState = {
-  search: '', status: '', client_id: '', category_id: '',
-  date_from: '', date_to: '', my_only: false
-};
+let _turndown = null;
 
-/* ══════════════════════════════════════════════
-   진입점
-══════════════════════════════════════════════ */
-async function init_entry() {
-  _session = Session.require();
-  if (!_session) return;
-
-  _masters = await Master.load();
-  _setupFilterUI();
-  _setupFormUI();
-  _bindEvents();
-  await _loadEntries();
-  _restoreDraft();
-}
-
-/* ══════════════════════════════════════════════
-   필터 UI 셋업
-══════════════════════════════════════════════ */
-function _setupFilterUI() {
-  /* 고객사 셀렉트 */
-  const cliSel = document.getElementById('filter-client');
-  if (cliSel) {
-    cliSel.innerHTML = '<option value="">전체 고객사</option>';
-    (_masters.clients || []).forEach(c => {
-      cliSel.innerHTML += `<option value="${c.id}">${Utils.escHtml(c.name)}</option>`;
-    });
-  }
-
-  /* 카테고리 셀렉트 */
-  const catSel = document.getElementById('filter-category');
-  if (catSel) {
-    catSel.innerHTML = '<option value="">전체 카테고리</option>';
-    (_masters.categories || []).forEach(c => {
-      catSel.innerHTML += `<option value="${c.id}">${Utils.escHtml(c.name)}</option>`;
-    });
-  }
-
-  /* 내 항목만 체크박스 – staff는 기본 체크 */
-  const myOnly = document.getElementById('filter-my-only');
-  if (myOnly && Auth.isStaff(_session)) {
-    myOnly.checked = true;
-    _filterState.my_only = true;
-  }
-}
-
-/* ══════════════════════════════════════════════
-   폼 UI 셋업
-══════════════════════════════════════════════ */
-function _setupFormUI() {
-  /* 날짜 기본값 오늘 */
-  const dateEl = document.getElementById('entry-date');
-  if (dateEl && !dateEl.value) dateEl.value = Utils.todayStr();
-
-  /* 고객사 검색 셀렉트 */
-  const clients = [
-    { id: 'internal', name: '내부 업무' },
-    ...(_masters.clients || [])
-  ];
-  ClientSearchSelect.init('entry-client', clients, {
-    placeholder: '고객사 검색…',
-    onChange: (id, name) => _onClientChange(id, name)
-  });
-
-  /* 카테고리 */
-  const catSel = document.getElementById('entry-category');
-  if (catSel) {
-    catSel.innerHTML = '<option value="">카테고리 선택</option>';
-    (_masters.categories || []).forEach(c => {
-      catSel.innerHTML += `<option value="${c.id}">${Utils.escHtml(c.name)}</option>`;
-    });
-  }
-
-  /* Quill 에디터 초기화 */
-  _initQuill();
-
-  /* 시간 입력 자동 계산 */
-  const startEl = document.getElementById('entry-start');
-  const endEl   = document.getElementById('entry-end');
-  if (startEl && endEl) {
-    startEl.addEventListener('change', _calcDuration);
-    endEl.addEventListener('change', _calcDuration);
-  }
-}
-
-/* ── Quill 초기화 ── */
 function _initQuill() {
-  const container = document.getElementById('entry-content-editor');
-  if (!container || _quill) return;
-  if (typeof Quill === 'undefined') return;
-
-  _quill = new Quill('#entry-content-editor', {
+  if (_quill) return;
+  _quill = new Quill('#quill-editor', {
     theme: 'snow',
-    placeholder: '업무 내용을 상세히 입력하세요…',
+    placeholder: '메일 본문 또는 의견서 전문을 그대로 붙여넣기 하세요 (요약 불필요)',
     modules: {
       toolbar: [
         [{ header: [1, 2, 3, false] }],
         ['bold', 'italic', 'underline'],
         [{ list: 'ordered' }, { list: 'bullet' }],
-        ['link'],
         ['clean']
-      ]
+      ],
+      clipboard: { matchVisual: false }
     }
   });
 
-  _quill.on('text-change', () => _saveDraft());
-}
+  let _quillPasteLock = false;
+  _quill.root.addEventListener('paste', function(e) {
+    if (_quillPasteLock) return;
+    const cd = e.clipboardData || window.clipboardData;
+    if (!cd) return;
+    const htmlData = cd.getData('text/html');
+    if (htmlData && htmlData.includes('<table')) {
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      _quillPasteLock = true;
+      const cleanHtml = _injectDescTableStyle(htmlData);
+      const editor = _quill.root;
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = cleanHtml;
+      const existingText = editor.innerText.trim();
+      if (!existingText) editor.innerHTML = '';
+      const nodes = Array.from(tempDiv.childNodes).filter(n => {
+        if (n.nodeType === Node.TEXT_NODE) return n.textContent.trim() !== '';
+        if (n.nodeType === Node.ELEMENT_NODE) {
+          if (['P','DIV','SPAN'].includes(n.tagName) && n.innerText?.trim() === '' && !n.querySelector('table')) return false;
+        }
+        return true;
+      });
+      const sel = window.getSelection();
+      let insertBefore = null;
+      if (sel && sel.rangeCount) {
+        const r = sel.getRangeAt(0);
+        if (editor.contains(r.commonAncestorContainer)) {
+          r.deleteContents();
+          insertBefore = (r.endContainer === editor) ? null : r.endContainer;
+        }
+      }
+      nodes.forEach(n => {
+        if (insertBefore && editor.contains(insertBefore)) editor.insertBefore(n.cloneNode(true), insertBefore);
+        else editor.appendChild(n.cloneNode(true));
+      });
+      _quill.update('user');
+      setTimeout(() => {
+        _quillPasteLock = false;
+        _syncQuillToHidden();
+        const len = editor.innerText.trim().length;
+        const counter = document.getElementById('desc-char-count');
+        if (counter) { counter.textContent = `${len}자`; counter.style.color = len > 15 ? '#f59e0b' : '#6b7280'; }
+      }, 150);
+    }
+  }, true);
 
-/* ── 고객사 변경 시 사건/사업 목록 갱신 ── */
-async function _onClientChange(clientId, clientName) {
-  const caseWrap = document.getElementById('entry-case-wrap');
-  const caseSel  = document.getElementById('entry-case');
-  if (!caseSel) return;
-
-  if (!clientId || clientId === 'internal') {
-    caseSel.innerHTML = '<option value="">-</option>';
-    if (caseWrap) caseWrap.style.display = 'none';
-    return;
-  }
-
-  if (caseWrap) caseWrap.style.display = '';
-  caseSel.innerHTML = '<option value="">사건/사업 선택 (선택)</option>';
-
-  const cases = (_masters.cases || []).filter(c => c.client_id === clientId);
-  cases.forEach(c => {
-    caseSel.innerHTML += `<option value="${c.id}">${Utils.escHtml(c.name)}</option>`;
+  _quill.on('text-change', () => {
+    const len = _quill.getText().trim().length;
+    const counter = document.getElementById('desc-char-count');
+    if (counter) { counter.textContent = `${len}자`; counter.style.color = len > 15 ? '#f59e0b' : '#6b7280'; }
   });
+
+  _turndown = new TurndownService({ headingStyle: 'atx', bulletListMarker: '-' });
+  const gfm = turndownPluginGfm.gfm;
+  _turndown.use(gfm);
 }
 
-/* ── 시작/종료 → 소요시간 자동 계산 ── */
-function _calcDuration() {
-  const startEl = document.getElementById('entry-start');
-  const endEl   = document.getElementById('entry-end');
-  const durEl   = document.getElementById('entry-duration');
-  const dispEl  = document.getElementById('entry-duration-display');
-  if (!startEl || !endEl || !durEl) return;
-
-  const [sh, sm] = (startEl.value || '').split(':').map(Number);
-  const [eh, em] = (endEl.value || '').split(':').map(Number);
-  if (isNaN(sh) || isNaN(eh)) return;
-
-  let mins = (eh * 60 + em) - (sh * 60 + sm);
-  if (mins < 0) mins += 1440;
-  durEl.value = mins;
-  if (dispEl) dispEl.textContent = Utils.minToHM(mins);
+function _resetQuill() {
+  if (!_quill) return;
+  _quill.setText('');
+  const counter = document.getElementById('desc-char-count');
+  if (counter) { counter.textContent = '0자'; counter.style.color = '#6b7280'; }
 }
 
-/* ══════════════════════════════════════════════
-   이벤트 바인딩
-══════════════════════════════════════════════ */
-function _bindEvents() {
-  /* 필터 변경 */
-  const bindFilter = (id, key, isCheck = false) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.addEventListener(isCheck ? 'change' : 'input', () => {
-      _filterState[key] = isCheck ? el.checked : el.value;
-      _currentPage = 1;
-      _applyFilter();
+function _syncQuillToHidden() {
+  if (!_quill) return;
+  const html = _quill.root.innerHTML;
+  const isEmpty = html === '<p><br></p>' || html.trim() === '' || html.trim() === '<p></p>';
+  const finalHtml = isEmpty ? '' : html;
+  const hidHtml = document.getElementById('entry-description');
+  const hidMd   = document.getElementById('entry-description-md');
+  if (hidHtml) hidHtml.value = finalHtml;
+  if (hidMd && _turndown && finalHtml) {
+    try { hidMd.value = _turndown.turndown(finalHtml); }
+    catch(err) { console.warn('[Quill] turndown 변환 실패:', err); hidMd.value = _quill.getText().trim(); }
+  } else if (hidMd) { hidMd.value = ''; }
+}
+
+const FILE_MAX_BYTES  = 10 * 1024 * 1024;
+const FILE_WARN_BYTES = 7 * 1024 * 1024;
+
+function updateDescCount(el) {
+  const len = (el ? el.value || '' : '').length;
+  const counter = document.getElementById('desc-char-count');
+  if (counter) { counter.textContent = `${len}자`; counter.style.color = len > 15 ? '#f59e0b' : '#6b7280'; }
+}
+
+async function init_entry_new() {
+  if (_editMode) { _editMode = false; return; }
+  const session = getSession();
+  if (!Auth.canWriteEntry(session)) {
+    if (Auth.isManager(session) && session.is_timesheet_target === false) {
+      navigateTo('dashboard'); Toast.warning('타임시트 대상자로 지정되지 않았습니다.'); return;
+    }
+    if (!Auth.isStaff(session) && !Auth.isManager(session)) {
+      navigateTo('dashboard'); Toast.warning('타임시트 작성 권한이 없습니다.'); return;
+    }
+    if (Auth.isStaff(session) && !Auth.hasApprover(session)) {
+      navigateTo('archive'); Toast.warning('승인자가 지정되지 않아 타임시트를 작성할 수 없습니다.'); return;
+    }
+  }
+  _editEntryId  = null;
+  _pendingFiles = [];
+  _currentCategoryType = '';
+  document.getElementById('fileList').innerHTML = '';
+
+  const _resetFormFields = () => {
+    ['entry-category','entry-subcategory','entry-team','entry-client',
+     'entry-start','entry-end','entry-duration',
+     'kw-query-hidden','law-refs-hidden','kw-reason-hidden'
+    ].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (el.tagName === 'SELECT') el.selectedIndex = 0;
+      else el.value = el.id === 'law-refs-hidden' ? '[]' : '';
     });
   };
-  bindFilter('filter-search',   'search');
-  bindFilter('filter-status',   'status');
-  bindFilter('filter-client',   'client_id');
-  bindFilter('filter-category', 'category_id');
-  bindFilter('filter-date-from','date_from');
-  bindFilter('filter-date-to',  'date_to');
-  bindFilter('filter-my-only',  'my_only', true);
-
-  /* 저장 버튼 */
-  const saveBtn = document.getElementById('entry-save-btn');
-  if (saveBtn) saveBtn.addEventListener('click', _handleSave);
-
-  /* 임시저장 버튼 */
-  const draftBtn = document.getElementById('entry-draft-btn');
-  if (draftBtn) draftBtn.addEventListener('click', _handleDraftSave);
-
-  /* 폼 초기화 버튼 */
-  const resetBtn = document.getElementById('entry-reset-btn');
-  if (resetBtn) resetBtn.addEventListener('click', _resetForm);
-
-  /* 폼 자동 임시저장 */
-  ['entry-date','entry-category','entry-start','entry-end','entry-title'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('input', Utils.debounce(_saveDraft, 800));
-  });
-}
-
-/* ══════════════════════════════════════════════
-   데이터 로드
-══════════════════════════════════════════════ */
-async function _loadEntries(page = 1) {
-  _currentPage = page;
-  const listWrap = document.getElementById('entry-list-wrap');
-  if (listWrap) listWrap.innerHTML = _skeletonRows(5);
+  _resetFormFields();
+  document.getElementById('duration-text').textContent = '시작/종료 시간을 입력하면 자동 계산됩니다.';
+  document.getElementById('entry-duration').value = '';
+  _clearDurationInput();
+  document.getElementById('entry-user-name').value = session.name;
+  _initQuill(); _resetQuill();
+  const mfn = document.getElementById('manual-file-name');
+  const mfu = document.getElementById('manual-file-url');
+  if (mfn) mfn.value = '';
+  if (mfu) mfu.value = '';
+  _clearKwTags('kw-query'); _clearKwTags('kw-reason'); _clearLawRefs(); _updateKwExamples();
+  const memoEl = document.getElementById('entry-memo');
+  if (memoEl) memoEl.value = '';
+  _ensureLawMaster();
+  _loadClientNamesForMask().catch(() => {});
 
   try {
-    const params = {
-      page: _currentPage,
-      limit: ENTRY_PAGE_SIZE,
-      sort: '-work_date'
-    };
+    const [teams, clients, categories, subcategories] = await Promise.all([
+      Master.teams(), Master.clients(), Master.categories(), Master.subcategories()
+    ]);
+    _allCategories    = categories;
+    _allSubcategories = subcategories;
+    const catEl = document.getElementById('entry-category');
+    catEl.innerHTML = '<option value="">대분류 선택</option>';
+    categories.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id; opt.textContent = c.category_name;
+      opt.dataset.type = c.category_type || 'client';
+      catEl.appendChild(opt);
+    });
+    await fillSelect('entry-team', teams, 'id', 'team_name', '팀 선택');
+    ClientSearchSelect.init('entry-client-wrap', clients, {
+      placeholder: '고객사 검색/선택...',
+      onSelect: (id, name) => { document.getElementById('entry-client').value = id; }
+    });
+    document.getElementById('entry-client').value = '';
+    updateClientSection();
+    try {
+      const userRecord       = await API.get('users', session.id);
+      const approverNotice   = document.getElementById('entry-approver-notice');
+      const noApproverNotice = document.getElementById('entry-no-approver-notice');
+      const approverNameText = document.getElementById('entry-approver-name-text');
+      const noApproverSpan   = noApproverNotice ? noApproverNotice.querySelector('span') : null;
+      const isManager = session.role === 'manager';
+      if (isManager) {
+        const directorId   = (userRecord && userRecord.reviewer2_id)   || session.reviewer2_id   || '';
+        const directorName = (userRecord && userRecord.reviewer2_name) || session.reviewer2_name || '';
+        if (directorId) {
+          approverNameText.textContent = 'Director: ' + (directorName || '지정됨');
+          approverNotice.style.display = 'flex'; noApproverNotice.style.display = 'none';
+        } else {
+          if (noApproverSpan) noApproverSpan.textContent = 'Director가 지정되지 않았습니다.';
+          approverNotice.style.display = 'none'; noApproverNotice.style.display = 'flex';
+        }
+      } else {
+        const approverId   = (userRecord && userRecord.approver_id)   || session.approver_id   || '';
+        const approverName = (userRecord && userRecord.approver_name) || session.approver_name || '';
+        if (approverId) {
+          approverNameText.textContent = approverName || '승인자 지정됨';
+          approverNotice.style.display = 'flex'; noApproverNotice.style.display = 'none';
+        } else {
+          if (noApproverSpan) noApproverSpan.textContent = '승인자가 지정되지 않았습니다.';
+          approverNotice.style.display = 'none'; noApproverNotice.style.display = 'flex';
+        }
+      }
+    } catch { /* 배너 표시 실패 무시 */ }
+  } catch (err) { console.error(err); Toast.error('데이터 로드 실패'); }
+}
 
-    if (_filterState.search)      params.search = _filterState.search;
-    if (_filterState.status)      params['filter[status]'] = _filterState.status;
-    if (_filterState.client_id)   params['filter[client_id]'] = _filterState.client_id;
-    if (_filterState.category_id) params['filter[category_id]'] = _filterState.category_id;
-    if (_filterState.date_from)   params['filter[work_date][gte]'] = _filterState.date_from;
-    if (_filterState.date_to)     params['filter[work_date][lte]'] = _filterState.date_to;
-    if (_filterState.my_only)     params['filter[user_id]'] = _session.userId;
+function onCategoryChange() {
+  const catEl = document.getElementById('entry-category');
+  const selectedOpt = catEl.options[catEl.selectedIndex];
+  const catId  = catEl.value;
+  const catType = selectedOpt ? selectedOpt.dataset.type : 'client';
+  _currentCategoryType = catType || 'client';
+  const subs = _allSubcategories.filter(s => s.category_id === catId);
+  const subEl = document.getElementById('entry-subcategory');
+  subEl.innerHTML = '<option value="">소분류 선택</option>';
+  subs.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.id; opt.textContent = s.sub_category_name;
+    subEl.appendChild(opt);
+  });
+  updateClientSection();
+}
 
-    const r = await API.list('time_entries', params);
-    _entries = r?.data ?? [];
-    _totalCount = r?.total ?? 0;
-    _filteredEntries = _entries;
+function updateClientSection() {
+  const isClient   = _currentCategoryType === 'client';
+  const isInternal = _currentCategoryType === 'internal';
+  const isNone     = !_currentCategoryType;
+  const metaPanel      = document.querySelector('.entry-panel-meta');
+  const descPanel      = document.querySelector('.entry-panel-desc');
+  const filePanel      = document.getElementById('filePanel');
+  const kwSection      = document.getElementById('kwSection');
+  const clientSection  = document.getElementById('clientSection');
+  const attachRequired = document.getElementById('attachRequired');
+  const attachOptional = document.getElementById('attachOptional');
+  const memoSection    = document.getElementById('internalMemoSection');
 
-    _renderList();
-    _renderPagination();
-  } catch (e) {
-    console.error('[entry] 로드 오류:', e);
-    if (listWrap) listWrap.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#dc2626;padding:20px;">데이터 로드 실패</td></tr>';
+  if (isNone) {
+    if (metaPanel)  metaPanel.classList.add('span-full');
+    if (descPanel)  descPanel.style.display = 'none';
+    if (filePanel)  { filePanel.style.display = 'none'; filePanel.classList.remove('span-full'); }
+    if (kwSection)  kwSection.style.display  = 'none';
+    if (clientSection) clientSection.style.display = 'none';
+    if (attachRequired) attachRequired.style.display = 'none';
+    if (attachOptional) attachOptional.style.display = 'none';
+    if (memoSection) memoSection.style.display = 'none';
+  } else if (isClient) {
+    if (metaPanel)  metaPanel.classList.remove('span-full');
+    if (descPanel)  descPanel.style.display = '';
+    if (filePanel)  { filePanel.style.display = ''; filePanel.classList.remove('span-full'); }
+    if (kwSection)  kwSection.style.display  = '';
+    if (clientSection) clientSection.style.display = '';
+    if (attachRequired) attachRequired.style.display = '';
+    if (attachOptional) attachOptional.style.display = 'none';
+    if (memoSection) memoSection.style.display = 'none';
+  } else {
+    if (metaPanel)  metaPanel.classList.add('span-full');
+    if (descPanel)  descPanel.style.display = 'none';
+    if (filePanel)  { filePanel.style.display = 'none'; filePanel.classList.remove('span-full'); }
+    if (kwSection)  kwSection.style.display  = 'none';
+    if (clientSection) clientSection.style.display = 'none';
+    if (attachRequired) attachRequired.style.display = 'none';
+    if (attachOptional) attachOptional.style.display = 'none';
+    if (memoSection) memoSection.style.display = '';
   }
 }
 
-/* ── 필터 적용 (debounce) ── */
-const _applyFilter = Utils.debounce(() => _loadEntries(1), 400);
+function onSubcategoryChange() { _updateKwExamples(); }
 
-/* ══════════════════════════════════════════════
-   목록 렌더
-══════════════════════════════════════════════ */
-function _renderList() {
-  const tbody = document.getElementById('entry-list-wrap');
-  if (!tbody) return;
+const _KW_EXAMPLES = {
+  '품목분류': { query:'예: 스마트워치+HS 품목분류 쟁점', reason:'예: 기본 통칙 적용, GRI 3(b) 본질적 특성' },
+  '과세가격': { query:'예: 수입자+특수관계 Management Fee 가산여부', reason:'예: 거래가격 인정, 특수관계 영향 없음' },
+  '원산지판정': { query:'예: 중국산 원자재+완전생산기준 충족여부', reason:'예: 세번변경기준(CTH) 충족, 부가가치기준 60% 초과' },
+  '전략물자': { query:'예: 탄소섬유+전략물자 해당여부', reason:'예: 통제번호(ECCN) 미해당, EAR99 해당' },
+  '요건대상': { query:'예: 의료기기+수입요건 해당여부', reason:'예: HS코드 기준 요건 미해당, 면제조건 충족' },
+  'FTA활용': { query:'예: 한-EU FTA+원산지증명서 발급', reason:'예: 세번변경기준 충족, 원산지신고서 발급' },
+  '관세환급': { query:'예: 수출제품+수입원자재 간이정액환급', reason:'예: 소요량 산정 기준 충족, 환급신청기한 내' },
+  '기타': { query:'예: 수입통관+세관 심사 대응', reason:'예: 관련 법령 해석, 행정해석 참고' }
+};
 
-  if (!_filteredEntries.length) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:32px;">
-      <i class="fa-solid fa-inbox" style="font-size:24px;display:block;margin-bottom:8px;opacity:0.4;"></i>
-      업무 내역이 없습니다.
-    </td></tr>`;
-    return;
+function _updateKwExamples() {
+  const subEl  = document.getElementById('entry-subcategory');
+  const subTxt = subEl ? (subEl.options[subEl.selectedIndex]?.text || '') : '';
+  let exampleSet = null;
+  for (const [key, val] of Object.entries(_KW_EXAMPLES)) {
+    if (subTxt.includes(key)) { exampleSet = val; break; }
   }
+  const qEl = document.getElementById('kw-query-example');
+  const rEl = document.getElementById('kw-reason-example');
+  if (qEl) qEl.textContent = exampleSet ? exampleSet.query  : '예: 권리사용료+과세가격 가산';
+  if (rEl) rEl.textContent = exampleSet ? exampleSet.reason : '예: 관련성 불충족, 거래조건불충족';
+}
 
-  const cliMap  = Object.fromEntries((_masters.clients || []).map(c => [c.id, c.name]));
-  const catMap  = Object.fromEntries((_masters.categories || []).map(c => [c.id, c.name]));
-  const userMap = Object.fromEntries((_masters.users || []).map(u => [u.id, u.name]));
+function _initKwEvents() {
+  const qInput  = document.getElementById('kw-query-input');
+  const qAddBtn = document.getElementById('kw-query-add-btn');
+  const rInput  = document.getElementById('kw-reason-input');
+  const rAddBtn = document.getElementById('kw-reason-add-btn');
+  const lawInput  = document.getElementById('law-search-input');
+  const artInput  = document.getElementById('law-article-input');
+  const lawAddBtn = document.getElementById('law-add-btn');
+  if (qInput)   qInput.addEventListener('keydown',  function(e){ if(e.key==='Enter'){e.preventDefault();_kwAdd('kw-query');} });
+  if (qAddBtn)  qAddBtn.addEventListener('click',   function(){ _kwAdd('kw-query'); });
+  if (rInput)   rInput.addEventListener('keydown',  function(e){ if(e.key==='Enter'){e.preventDefault();_kwAdd('kw-reason');} });
+  if (rAddBtn)  rAddBtn.addEventListener('click',   function(){ _kwAdd('kw-reason'); });
+  if (lawInput) {
+    lawInput.addEventListener('input',   function(){ onLawSearchInput(this.value); });
+    lawInput.addEventListener('keydown', function(e){ onLawSearchKeydown(e); });
+  }
+  if (artInput)  artInput.addEventListener('keydown',  function(e){ if(e.key==='Enter'){e.preventDefault();addLawRef();} });
+  if (lawAddBtn) lawAddBtn.addEventListener('click', function(){ addLawRef(); });
+}
 
-  tbody.innerHTML = _filteredEntries.map(e => {
-    const canEdit   = Auth.canWriteEntry(_session) && (e.user_id === _session.userId || Auth.isAdmin(_session));
-    const canDelete = canEdit && (e.status === 'draft' || Auth.isAdmin(_session));
-    const cliName   = e.client_id === 'internal' ? '내부' : (cliMap[e.client_id] || '-');
-    const catName   = catMap[e.category_id] || '-';
-    const userName  = userMap[e.user_id] || '-';
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', _initKwEvents);
+} else {
+  _initKwEvents();
+}
+function _kwAdd(ns) {
+  const wrap = document.getElementById(ns + '-wrap');
+  const inp  = wrap ? wrap.querySelector('input[type="text"]') : null;
+  if (!inp) return;
+  const val = inp.value.trim();
+  if (!val) return;
+  _addKwTag(ns, val); inp.value = ''; inp.focus();
+}
+function kwTagKeydown(e, ns) { if (e.key !== 'Enter') return; e.preventDefault(); _kwAdd(ns); }
+function _kwAddBtnClick(ns) { _kwAdd(ns); }
 
-    return `<tr data-id="${e.id}" class="entry-row">
-      <td>${e.work_date || '-'}</td>
-      <td title="${Utils.escHtml(e.title || '')}">${Utils.escHtml((e.title || '-').slice(0, 30))}${(e.title || '').length > 30 ? '…' : ''}</td>
-      <td>${Utils.escHtml(cliName)}</td>
-      <td>${Utils.escHtml(catName)}</td>
-      <td style="text-align:center;">${Utils.minToHM(e.duration_min || 0)}</td>
-      <td style="text-align:center;">${Utils.statusBadge(e.status || 'draft')}</td>
-      <td>${Auth.isAdmin(_session) || Auth.isDirector(_session) || Auth.isManager(_session) ? Utils.escHtml(userName) : ''}</td>
-      <td style="text-align:center;white-space:nowrap;">
-        <button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;" onclick="openEntryDetail('${e.id}')">
-          <i class="fa-solid fa-eye"></i>
-        </button>
-        ${canEdit ? `<button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;" onclick="openEntryEdit('${e.id}')">
-          <i class="fa-solid fa-pen"></i>
-        </button>` : ''}
-        ${canDelete ? `<button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;color:#dc2626;" onclick="deleteEntry('${e.id}')">
-          <i class="fa-solid fa-trash"></i>
-        </button>` : ''}
-        ${e.status === 'draft' && e.user_id === _session.userId ? `<button class="btn btn-primary" style="font-size:11px;padding:3px 10px;" onclick="submitEntry('${e.id}')">
-          결재요청
-        </button>` : ''}
-      </td>
-    </tr>`;
+function _addKwTag(ns, text) {
+  const wrap = document.getElementById(ns + '-wrap');
+  if (!wrap || !text) return;
+  const existing = Array.from(wrap.querySelectorAll('span[data-value]')).map(s => s.dataset.value);
+  if (existing.includes(text)) return;
+  const inp = wrap.querySelector('input[type="text"]');
+  const tag = document.createElement('span');
+  tag.dataset.value = text;
+  tag.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:#e0e7ff;color:#3730a3;border-radius:6px;padding:3px 9px;font-size:12px;font-weight:500;white-space:nowrap';
+  const label = document.createTextNode(text);
+  const btn   = document.createElement('button');
+  btn.type = 'button'; btn.textContent = '×';
+  btn.style.cssText = 'background:none;border:none;cursor:pointer;color:#6366f1;padding:0;font-size:14px;line-height:1;margin-left:2px';
+  btn.addEventListener('click', function() { tag.remove(); _syncKwHidden(ns); });
+  tag.appendChild(label); tag.appendChild(btn);
+  if (inp) wrap.insertBefore(tag, inp); else wrap.appendChild(tag);
+  _syncKwHidden(ns);
+}
+function _removeKwTag(btn, ns) { btn.parentElement.remove(); _syncKwHidden(ns); }
+function _syncKwHidden(ns) {
+  const wrap = document.getElementById(ns + '-wrap');
+  if (!wrap) return;
+  const tags = Array.from(wrap.querySelectorAll('span[data-value]')).map(s => s.dataset.value);
+  const hid = document.getElementById(ns + '-hidden');
+  if (hid) hid.value = JSON.stringify(tags);
+}
+function _clearKwTags(ns) {
+  const wrap = document.getElementById(ns + '-wrap');
+  if (!wrap) return;
+  wrap.querySelectorAll('span[data-value]').forEach(t => t.remove());
+  const inp = wrap.querySelector('input[type="text"]');
+  if (inp) inp.value = '';
+  const hid = document.getElementById(ns + '-hidden');
+  if (hid) hid.value = JSON.stringify([]);
+}
+function _setKwTags(ns, arr) {
+  _clearKwTags(ns);
+  if (Array.isArray(arr)) arr.forEach(v => v && _addKwTag(ns, v));
+}
+
+let _lawMasterCache = [];
+let _lawDropdownIdx = -1;
+
+async function _ensureLawMaster() {
+  if (_lawMasterCache.length) return _lawMasterCache;
+  try {
+    const res = await API.list('law_master', { limit: 200 });
+    _lawMasterCache = (res && res.data) ? res.data : [];
+  } catch { _lawMasterCache = []; }
+  return _lawMasterCache;
+}
+function onLawSearchInput(q) {
+  const dd = document.getElementById('law-dropdown');
+  if (!dd) return;
+  if (!q.trim()) { dd.style.display = 'none'; return; }
+  const hits = _lawMasterCache.filter(l => (l.full_name || l.law_name || '').toLowerCase().includes(q.toLowerCase()));
+  if (!hits.length) { dd.style.display = 'none'; return; }
+  const typeLabel = { law:'법', decree:'시행령', rule:'시행규칙', notice:'고시' };
+  dd.innerHTML = hits.slice(0, 12).map((l, i) => {
+    const tl = typeLabel[l.law_type] || l.law_type || '';
+    return `<div data-idx="${i}" data-name="${Utils.escHtml(l.law_name)}" data-fullname="${Utils.escHtml(l.full_name||l.law_name)}"
+      style="padding:7px 12px;font-size:13px;cursor:pointer;border-bottom:1px solid #f1f5f9"
+      onmousedown="_pickLawDropdown(this)" onmouseover="_hoverLawDd(this)">
+      <span style="font-weight:500">${Utils.escHtml(l.law_name)}</span>
+      ${tl ? `<span style="font-size:10px;background:#f1f5f9;color:#64748b;border-radius:3px;padding:0 5px;margin-left:5px">${tl}</span>` : ''}
+    </div>`;
+  }).join('');
+  _lawDropdownIdx = -1; dd.style.display = 'block';
+}
+function _hoverLawDd(el) {
+  const dd = document.getElementById('law-dropdown');
+  if (!dd) return;
+  dd.querySelectorAll('[data-idx]').forEach(e => e.style.background = '');
+  el.style.background = '#e0e7ff';
+}
+function _pickLawDropdown(el) {
+  const inp = document.getElementById('law-search-input');
+  if (inp) inp.value = el.dataset.name;
+  const dd = document.getElementById('law-dropdown');
+  if (dd) dd.style.display = 'none';
+}
+function onLawSearchKeydown(e) {
+  const dd = document.getElementById('law-dropdown');
+  if (!dd || dd.style.display === 'none') {
+    if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); addLawRef(); } return;
+  }
+  const items = Array.from(dd.querySelectorAll('[data-idx]'));
+  if (e.key === 'ArrowDown') { e.preventDefault(); _lawDropdownIdx = Math.min(_lawDropdownIdx + 1, items.length - 1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); _lawDropdownIdx = Math.max(_lawDropdownIdx - 1, 0); }
+  else if (e.key === 'Enter') {
+    e.preventDefault(); e.stopPropagation();
+    if (_lawDropdownIdx >= 0 && items[_lawDropdownIdx]) _pickLawDropdown(items[_lawDropdownIdx]);
+    else addLawRef(); return;
+  } else if (e.key === 'Escape') { dd.style.display = 'none'; return; } else { return; }
+  items.forEach((it, i) => it.style.background = i === _lawDropdownIdx ? '#e0e7ff' : '');
+}
+function addLawRef() {
+  const lawInp = document.getElementById('law-search-input');
+  const artInp = document.getElementById('law-article-input');
+  const dd     = document.getElementById('law-dropdown');
+  if (!lawInp) return;
+  const law = (lawInp.value || '').trim();
+  if (!law) { Toast.warning('법령명을 입력하세요.'); lawInp.focus(); return; }
+  const article = (artInp ? artInp.value : '').trim();
+  _addLawRefTag(law, article);
+  lawInp.value = ''; if (artInp) artInp.value = '';
+  if (dd) dd.style.display = 'none';
+}
+function _addLawRefTag(law, article) {
+  const container = document.getElementById('law-refs-tags');
+  if (!container) return;
+  const label = article ? `${law} ${article}` : law;
+  const tag = document.createElement('span');
+  tag.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:#ede9fe;color:#5b21b6;border-radius:6px;padding:3px 9px;font-size:12px;font-weight:500;white-space:nowrap;margin-right:4px;margin-bottom:4px';
+  tag.dataset.law = law; tag.dataset.article = article;
+  tag.innerHTML = `<i class="fas fa-balance-scale" style="font-size:10px"></i>${Utils.escHtml(label)}<button type="button" onclick="_removeLawRefTag(this)" style="background:none;border:none;cursor:pointer;color:#7c3aed;padding:0;font-size:12px;line-height:1;margin-left:2px">&times;</button>`;
+  container.appendChild(tag); _syncLawRefsHidden();
+}
+function _removeLawRefTag(btn) { btn.parentElement.remove(); _syncLawRefsHidden(); }
+function _syncLawRefsHidden() {
+  const container = document.getElementById('law-refs-tags');
+  const hid = document.getElementById('law-refs-hidden');
+  if (!container || !hid) return;
+  const arr = Array.from(container.querySelectorAll('[data-law]')).map(t => ({ law: t.dataset.law, article: t.dataset.article || '' }));
+  hid.value = JSON.stringify(arr);
+}
+function _clearLawRefs() {
+  const container = document.getElementById('law-refs-tags');
+  if (container) container.innerHTML = '';
+  const hid = document.getElementById('law-refs-hidden');
+  if (hid) hid.value = '[]';
+}
+function _setLawRefs(arr) {
+  _clearLawRefs();
+  if (!Array.isArray(arr)) {
+    if (typeof arr === 'string') { try { arr = JSON.parse(arr); } catch { arr = []; } } else { arr = []; }
+  }
+  arr.forEach(r => _addLawRefTag(r.law || '', r.article || ''));
+}
+document.addEventListener('click', e => {
+  const dd = document.getElementById('law-dropdown');
+  const inp = document.getElementById('law-search-input');
+  if (dd && inp && !inp.contains(e.target) && !dd.contains(e.target)) dd.style.display = 'none';
+}, true);
+
+async function checkTimeOverlap(newStart, newEnd, excludeId = '') {
+  try {
+    const session = getSession();
+    const res = await API.list('time_entries', { limit: 500 });
+    const entries = (res && res.data) ? res.data : [];
+    const mine = entries.filter(e => String(e.user_id) === String(session.id) && !e.deleted && e.id !== excludeId && e.work_start_at && e.work_end_at);
+    for (const e of mine) {
+      const eStart = Number(e.work_start_at); const eEnd = Number(e.work_end_at);
+      if (newStart < eEnd && newEnd > eStart) return { overlap: true, conflict: e };
+    }
+    return { overlap: false, conflict: null };
+  } catch { return { overlap: false, conflict: null }; }
+}
+
+let _overlapWarnTimer = null;
+async function calcDuration() {
+  const start   = document.getElementById('entry-start').value;
+  const end     = document.getElementById('entry-end').value;
+  const minutes = Utils.calcDurationMinutes(start, end);
+  const display = document.getElementById('duration-display');
+  const text    = document.getElementById('duration-text');
+  const hidden  = document.getElementById('entry-duration');
+  const prevWarn = document.getElementById('overlap-warn-banner');
+  if (prevWarn) prevWarn.remove();
+  if (minutes > 0) {
+    text.textContent  = '참고: 시작~종료 기준 ' + Utils.formatDurationLong(minutes);
+    display.style.borderColor = '#bbf7d0'; display.style.background = '#f0fdf4'; display.style.color = '#15803d';
+    _setDurationInputIfEmpty(minutes); syncActualDuration();
+    clearTimeout(_overlapWarnTimer);
+    _overlapWarnTimer = setTimeout(async () => {
+      const newStart = new Date(start).getTime(); const newEnd = new Date(end).getTime();
+      const { overlap, conflict } = await checkTimeOverlap(newStart, newEnd, _editEntryId || '');
+      if (overlap && conflict) _showOverlapBanner(conflict, newStart, newEnd, false);
+    }, 300);
+  } else if (start && end) {
+    text.textContent = '⚠️ 종료시간이 시작시간보다 빠릅니다.';
+    display.style.borderColor = 'var(--danger)'; display.style.background = 'var(--danger-bg)'; display.style.color = '';
+    hidden.value = '';
+  } else {
+    text.textContent = '시작/종료 시간을 입력하면 자동 계산됩니다.';
+    display.style.borderColor = '#bbf7d0'; display.style.background = '#f0fdf4'; display.style.color = '#15803d';
+    hidden.value = '';
+  }
+}
+function syncActualDuration() {
+  const hEl = document.getElementById('entry-duration-h');
+  const mEl = document.getElementById('entry-duration-m');
+  const hidden = document.getElementById('entry-duration');
+  if (!hEl || !mEl || !hidden) return;
+  const h = parseInt(hEl.value) || 0; const m = parseInt(mEl.value) || 0;
+  const total = h * 60 + m; hidden.value = total > 0 ? total : '';
+}
+function _setDurationInputIfEmpty(minutes) {
+  const hEl = document.getElementById('entry-duration-h');
+  const mEl = document.getElementById('entry-duration-m');
+  if (!hEl || !mEl) return;
+  if (!hEl.value && !mEl.value) { hEl.value = Math.floor(minutes / 60); mEl.value = minutes % 60; }
+}
+function _setDurationInput(minutes) {
+  const hEl = document.getElementById('entry-duration-h');
+  const mEl = document.getElementById('entry-duration-m');
+  if (!hEl || !mEl) return;
+  hEl.value = Math.floor(minutes / 60); mEl.value = minutes % 60; syncActualDuration();
+}
+function _clearDurationInput() {
+  const hEl = document.getElementById('entry-duration-h');
+  const mEl = document.getElementById('entry-duration-m');
+  if (hEl) hEl.value = ''; if (mEl) mEl.value = '';
+  const hidden = document.getElementById('entry-duration');
+  if (hidden) hidden.value = '';
+}
+function _showOverlapBanner(conflict, newStart, newEnd, isBlocking) {
+  const prev = document.getElementById('overlap-warn-banner');
+  if (prev) prev.remove();
+  const fmt = (ts) => { const d = new Date(Number(ts)); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
+  const fmtDate = (ts) => { const d = new Date(Number(ts)); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+  const cDate = fmtDate(conflict.work_start_at); const cStart = fmt(conflict.work_start_at); const cEnd = fmt(conflict.work_end_at);
+  const nStart = fmt(newStart); const nEnd = fmt(newEnd);
+  const clientLabel = conflict.client_name || '내부업무'; const subLabel = conflict.work_subcategory_name || conflict.work_category_name || '-';
+  const banner = document.createElement('div');
+  banner.id = 'overlap-warn-banner';
+  banner.style.cssText = 'margin-top:8px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;font-size:12px;line-height:1.7;color:#1e293b;display:flex;gap:10px;align-items:flex-start';
+  banner.innerHTML = `<i class="fas fa-exclamation-triangle" style="color:#f59e0b;margin-top:2px;flex-shrink:0"></i>
+    <div><div style="font-weight:700;margin-bottom:3px;color:#92400e">⚠️ 시간이 겹치는 업무가 있습니다</div>
+    <div style="color:#475569">기존: <b>[${cDate}] ${cStart} ~ ${cEnd}</b>&nbsp;·&nbsp; ${clientLabel} / ${subLabel}</div>
+    <div style="color:#64748b;margin-top:2px">입력: ${fmtDate(newStart)} ${nStart} ~ ${nEnd}</div>
+    <div style="margin-top:6px;padding-top:6px;border-top:1px dashed #fde68a;color:#92400e;font-size:11px">
+      💡 두 업무의 실제 소요시간 합계가 전체 시간을 초과하지 않는지 확인하고,<br>필요 시 각 업무의 <b>실제 소요시간을 직접 수정</b>해 주세요.</div></div>`;
+  const display = document.getElementById('duration-display');
+  if (display && display.parentNode) display.parentNode.insertBefore(banner, display.nextSibling);
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = e => resolve(e.target.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+function onDragOver(e)  { e.preventDefault(); document.getElementById('fileDropZone').classList.add('dragover'); }
+function onDragLeave(e) { document.getElementById('fileDropZone').classList.remove('dragover'); }
+function onFileDrop(e) { e.preventDefault(); document.getElementById('fileDropZone').classList.remove('dragover'); addFiles(Array.from(e.dataTransfer.files)); }
+function onFileSelect(e) { addFiles(Array.from(e.target.files)); e.target.value = ''; }
+
+async function addFiles(files) {
+  for (const file of files) {
+    const type = Utils.getFileType(file.name);
+    if (!type) { Toast.warning(`${file.name}: 허용되지 않은 파일 형식`); continue; }
+    if (file.size > FILE_MAX_BYTES) { Toast.error(`${file.name}: 10MB 초과`); continue; }
+    if (file.size > FILE_WARN_BYTES) Toast.warning(`${file.name}: 파일이 큽니다.`);
+    const progressId = `prog_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    _pendingFiles.push({ file, type, docType:'', summary:'', fileUrl:'', fileName:file.name, content:null, sizeKB:Math.round(file.size/1024), uploadMode:'base64', _id:progressId, _loading:true, extractedText:null, extractStatus:'' });
+    renderFileList();
+    try {
+      const base64 = await fileToBase64(file);
+      const { text: rawText, status: extStatus } = await _extractTextFromFile(file);
+      let maskedText = null;
+      if (rawText) maskedText = await _maskSensitiveText(rawText);
+      const idx = _pendingFiles.findIndex(p => p._id === progressId);
+      if (idx !== -1) { _pendingFiles[idx].content = base64; _pendingFiles[idx]._loading = false; _pendingFiles[idx].extractedText = maskedText; _pendingFiles[idx].extractStatus = extStatus; }
+      if (extStatus === 'ok' && maskedText) Toast.success(`✅ ${file.name}: 텍스트 추출 완료`);
+      else if (extStatus === 'scan_pdf') Toast.warning(`⚠️ ${file.name}: 스캔 PDF`);
+      else if (extStatus === 'ppt') Toast.warning(`⚠️ ${file.name}: PPT → PDF 변환 권장`);
+    } catch (err) {
+      const idx = _pendingFiles.findIndex(p => p._id === progressId);
+      if (idx !== -1) _pendingFiles.splice(idx, 1);
+      Toast.error(`${file.name}: 파일 읽기 실패`);
+    }
+    renderFileList();
+  }
+}
+
+function addFileByUrl() {
+  const nameEl = document.getElementById('manual-file-name');
+  const urlEl  = document.getElementById('manual-file-url');
+  const typeEl = document.getElementById('manual-file-type');
+  const name = nameEl.value.trim(); const url = urlEl.value.trim(); const type = typeEl.value;
+  if (!name) { Toast.warning('파일명을 입력하세요.'); return; }
+  if (!url)  { Toast.warning('파일 URL을 입력하세요.'); return; }
+  if (!url.startsWith('http')) { Toast.warning('올바른 URL을 입력하세요.'); return; }
+  _pendingFiles.push({ file:null, type, docType:'', summary:'', fileUrl:url, fileName:name, content:null, sizeKB:0, uploadMode:'url', _id:`url_${Date.now()}`, _loading:false });
+  nameEl.value = ''; urlEl.value = ''; renderFileList(); Toast.success('파일 링크가 추가되었습니다.');
+}
+
+function renderFileList() {
+  const list = document.getElementById('fileList');
+  if (_pendingFiles.length === 0) { list.innerHTML = ''; return; }
+  const icons  = { excel:'fa-file-excel', word:'fa-file-word', ppt:'fa-file-powerpoint', pdf:'fa-file-pdf', link:'fa-link' };
+  const colors = { excel:'#16a34a', word:'#1d4ed8', ppt:'#c2410c', pdf:'#b91c1c', link:'#7c3aed' };
+  const docTypes = ['보고서', '회의록', '의견서', '검토의견서', '기타'];
+  list.innerHTML = _pendingFiles.map((pf, i) => {
+    const name = pf.file ? pf.file.name : (pf.fileName || '이름 없음');
+    const isUrl = pf.uploadMode === 'url'; const isLoading = pf._loading;
+    let statusBadge = '';
+    if (isLoading) statusBadge = `<span style="background:#fef9c3;color:#92400e;border:1px solid #fde68a;border-radius:5px;padding:2px 8px;font-size:11px"><i class="fas fa-spinner fa-spin"></i> 추출 중...</span>`;
+    else if (isUrl) statusBadge = `<span style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;border-radius:5px;padding:2px 8px;font-size:11px"><i class="fas fa-link"></i> 링크</span>`;
+    else if (pf.content) statusBadge = `<span style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:5px;padding:2px 8px;font-size:11px"><i class="fas fa-check-circle"></i> 저장가능 · ${pf.sizeKB}KB</span>`;
+    return `<div class="file-item" style="${isLoading?'opacity:0.65;':''}">
+      <i class="fas ${icons[pf.type]||'fa-file'} file-icon" style="color:${colors[pf.type]||'#666'}"></i>
+      <div class="file-info" style="flex:1;min-width:0">
+        <div class="file-name" style="word-break:break-all;font-weight:500">${name}</div>
+        <div class="file-meta" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:3px">${statusBadge}</div>
+      </div>
+      <select style="font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:5px;margin-right:6px;flex-shrink:0"
+        onchange="_pendingFiles[${i}].docType=this.value" ${isLoading?'disabled':''}>
+        <option value="">문서유형</option>
+        ${docTypes.map(t => `<option value="${t}" ${pf.docType===t?'selected':''}>${t}</option>`).join('')}
+      </select>
+      <button class="btn-remove" onclick="_pendingFiles.splice(${i},1);renderFileList()" title="제거"><i class="fas fa-times"></i></button>
+    </div>`;
   }).join('');
 }
-
-/* ── 페이지네이션 ── */
-function _renderPagination() {
-  const wrap = document.getElementById('entry-pagination');
-  if (!wrap) return;
-  wrap.innerHTML = Utils.paginationHTML(_currentPage, Math.ceil(_totalCount / ENTRY_PAGE_SIZE), 'entryGoPage');
-  const info = document.getElementById('entry-count-info');
-  if (info) info.textContent = `총 ${_totalCount}건`;
+function _showPendingExtractedText(idx) {
+  const pf = _pendingFiles[idx];
+  if (!pf || !pf.extractedText) { Toast.warning('추출된 텍스트가 없습니다.'); return; }
+  _openExtractedTextModal({ file_name: pf.file ? pf.file.name : (pf.fileName||'파일'), extracted_text: pf.extractedText });
 }
-window.entryGoPage = (p) => _loadEntries(p);
 
-/* ── 스켈레톤 ── */
-function _skeletonRows(n) {
-  return Array(n).fill(0).map(() => `<tr>${Array(8).fill(0).map(() =>
-    `<td><div style="height:14px;background:linear-gradient(90deg,#f1f5f9 25%,#e2e8f0 50%,#f1f5f9 75%);background-size:200% 100%;animation:arch-shimmer 1.4s infinite;border-radius:4px;"></div></td>`
-  ).join('')}</tr>`).join('');
-}
-/* ══════════════════════════════════════════════
-   임시저장 (Draft)
-══════════════════════════════════════════════ */
-function _saveDraft() {
+let _clientNamesCache = null;
+async function _loadClientNamesForMask() {
+  if (_clientNamesCache !== null) return _clientNamesCache;
   try {
-    const draft = _collectFormData();
-    if (draft.title || draft.content) {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...draft, savedAt: Date.now() }));
+    const res = await API.list('clients', { limit: 500 });
+    _clientNamesCache = ((res && res.data) ? res.data : []).map(c => (c.company_name || '').trim()).filter(Boolean);
+  } catch { _clientNamesCache = []; }
+  return _clientNamesCache;
+}
+
+const MASK_PATTERNS = [
+  { re: /USD\s*[\d,]+|US\$[\d,]+|\$[\d,]+/gi,              label: '[금액(USD)]' },
+  { re: /￦[\d,]+|KRW\s*[\d,]+/gi,                          label: '[금액(원화)]' },
+  { re: /[\d,]+\s*(달러|원|천원|만원|억원|백만원)/gi,         label: '[금액]' },
+  { re: /\d{5}-\d{2}-\d{6}[A-Z]/g,                          label: '[수입신고번호]' },
+];
+
+async function _maskSensitiveText(text) {
+  if (!text) return text;
+  let result = text;
+  for (const { re, label } of MASK_PATTERNS) result = result.replace(new RegExp(re.source, re.flags), label);
+  const clientNames = await _loadClientNamesForMask();
+  for (const name of clientNames) {
+    if (!name) continue;
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    result = result.replace(new RegExp(escaped, 'gi'), '[고객사명]');
+  }
+  return result;
+}
+
+async function _extractTextFromFile(file) {
+  const name = file.name.toLowerCase(); const ext = name.split('.').pop();
+  if (ext === 'pptx' || ext === 'ppt') return { text: null, status: 'ppt' };
+  if (ext === 'pdf') {
+    try {
+      await LibLoader.load('pdfjs');
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      let fullText = '';
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i); const content = await page.getTextContent();
+        fullText += `\n--- 페이지 ${i} ---\n${content.items.map(item => item.str).join(' ')}`;
+      }
+      const trimmed = fullText.trim();
+      if (trimmed.length < 10) return { text: null, status: 'scan_pdf' };
+      return { text: trimmed, status: 'ok' };
+    } catch (err) { console.warn('[extractText] PDF 추출 오류:', err); return { text: null, status: 'error' }; }
+  }
+  if (ext === 'docx' || ext === 'doc') {
+    try {
+      await LibLoader.load('mammoth'); const arrayBuffer = await file.arrayBuffer();
+      const result = await mammoth.extractRawText({ arrayBuffer });
+      return { text: (result.value || '').trim() || null, status: 'ok' };
+    } catch (err) { return { text: null, status: 'error' }; }
+  }
+  if (ext === 'xlsx' || ext === 'xls') {
+    try {
+      await LibLoader.load('xlsx'); const arrayBuffer = await file.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      let fullText = '';
+      for (const sheetName of workbook.SheetNames) {
+        fullText += `\n[시트명: ${sheetName}]\n${XLSX.utils.sheet_to_csv(workbook.Sheets[sheetName])}`;
+      }
+      return { text: fullText.trim() || null, status: 'ok' };
+    } catch (err) { return { text: null, status: 'error' }; }
+  }
+  return { text: null, status: 'unsupported' };
+}
+
+const SENSITIVE_PATTERNS = [
+  { name: '금액(USD)',    pattern: /USD\s*[\d,]+|US\$[\d,]+|\$[\d,]+/gi },
+  { name: '금액(원화)',   pattern: /￦[\d,]+|KRW\s*[\d,]+/gi },
+  { name: '금액(한글단위)', pattern: /[\d,]+\s*(달러|원|천원|만원|억원|백만원)/gi },
+  { name: '수입신고번호', pattern: /\d{5}-\d{2}-\d{6}[A-Z]/g }
+];
+
+async function _detectSensitiveInfo(text) {
+  const results = []; const seen = new Set();
+  for (const { name, pattern } of SENSITIVE_PATTERNS) {
+    const re = new RegExp(pattern.source, pattern.flags); let m;
+    while ((m = re.exec(text)) !== null) {
+      const key = `${name}::${m[0]}`;
+      if (!seen.has(key)) { seen.add(key); results.push({ type: name, value: m[0] }); }
     }
-  } catch (e) {}
-}
-
-function _restoreDraft() {
+  }
   try {
-    const raw = localStorage.getItem(DRAFT_KEY);
-    if (!raw) return;
-    const draft = JSON.parse(raw);
-    if (!draft || Date.now() - draft.savedAt > 86400000) return; // 24시간 초과 무시
-
-    const age = Math.round((Date.now() - draft.savedAt) / 60000);
-    Toast.info(`임시저장된 내용이 있습니다. (${age}분 전) 복원하려면 아래 버튼을 클릭하세요.`, 5000);
-
-    const restoreBtn = document.getElementById('entry-restore-btn');
-    if (restoreBtn) {
-      restoreBtn.style.display = '';
-      restoreBtn.onclick = () => {
-        _fillForm(draft);
-        restoreBtn.style.display = 'none';
-        Toast.success('임시저장 내용을 복원했습니다.');
-      };
+    const res = await API.list('clients', { limit: 500 });
+    const clients = (res && res.data) ? res.data : [];
+    const lowerText = text.toLowerCase();
+    for (const c of clients) {
+      const name = (c.company_name || '').trim();
+      if (!name) continue;
+      if (lowerText.includes(name.toLowerCase())) {
+        const key = `고객사명::${name}`;
+        if (!seen.has(key)) { seen.add(key); results.push({ type: '고객사명', value: name }); }
+      }
     }
-  } catch (e) {}
+  } catch {}
+  return results;
 }
 
-function _clearDraft() {
-  localStorage.removeItem(DRAFT_KEY);
-  const restoreBtn = document.getElementById('entry-restore-btn');
-  if (restoreBtn) restoreBtn.style.display = 'none';
+function _showSensitiveWarning(results, onProceed) {
+  const modal = document.getElementById('sensitiveWarnModal');
+  const list  = document.getElementById('sensitiveWarnList');
+  const editBtn = document.getElementById('sensitiveWarnEditBtn');
+  const procBtn = document.getElementById('sensitiveWarnProceedBtn');
+  if (!modal || !list) return;
+  list.innerHTML = results.map(r => `
+    <li style="display:flex;align-items:baseline;gap:8px;background:#fffbeb;border:1px solid #fde68a;border-radius:7px;padding:7px 12px;font-size:12px">
+      <span style="color:#f59e0b;font-size:13px;flex-shrink:0">•</span>
+      <span><span style="font-weight:700;color:#92400e;min-width:90px;display:inline-block">${Utils.escHtml(r.type)}</span>
+      <span style="color:#475569">${Utils.escHtml(r.value)}</span></span></li>`).join('');
+  editBtn.onclick = () => { modal.classList.remove('show'); if (_quill) _quill.focus(); };
+  procBtn.onclick = () => { modal.classList.remove('show'); onProceed(); };
+  modal.classList.add('show');
 }
 
-/* ══════════════════════════════════════════════
-   폼 데이터 수집 / 채우기
-══════════════════════════════════════════════ */
-function _collectFormData() {
-  const clientVal = ClientSearchSelect.getValue('entry-client');
-  const content   = _quill ? _quill.root.innerHTML : (document.getElementById('entry-content')?.value || '');
-  const contentText = _quill ? _quill.getText().trim() : '';
+async function submitEntry(e) { e.preventDefault(); await saveEntry('submitted'); }
+async function saveEntryDraft() { await saveEntry('draft'); }
 
-  return {
-    work_date:    document.getElementById('entry-date')?.value || '',
-    title:        document.getElementById('entry-title')?.value?.trim() || '',
-    client_id:    clientVal.id || '',
-    client_name:  clientVal.name || '',
-    category_id:  document.getElementById('entry-category')?.value || '',
-    case_id:      document.getElementById('entry-case')?.value || '',
-    start_time:   document.getElementById('entry-start')?.value || '',
-    end_time:     document.getElementById('entry-end')?.value || '',
-    duration_min: parseInt(document.getElementById('entry-duration')?.value || '0', 10),
-    content:      content,
-    content_text: contentText,
-    is_billable:  document.getElementById('entry-billable')?.checked ?? true,
-  };
-}
+async function saveEntry(status) {
+  const session = getSession();
+  if (_pendingFiles.some(pf => pf._loading)) { Toast.warning('파일 변환 중입니다.'); return; }
 
-function _fillForm(data) {
-  if (!data) return;
-  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
-  set('entry-date', data.work_date);
-  set('entry-title', data.title);
-  set('entry-category', data.category_id);
-  set('entry-case', data.case_id);
-  set('entry-start', data.start_time);
-  set('entry-end', data.end_time);
-  set('entry-duration', data.duration_min);
-
-  const dispEl = document.getElementById('entry-duration-display');
-  if (dispEl) dispEl.textContent = Utils.minToHM(data.duration_min || 0);
-
-  if (data.client_id) {
-    ClientSearchSelect.setValue('entry-client', data.client_id, data.client_name || '');
-    _onClientChange(data.client_id, data.client_name || '');
-  }
-
-  if (_quill && data.content) {
-    _quill.root.innerHTML = data.content;
-  }
-
-  const billable = document.getElementById('entry-billable');
-  if (billable) billable.checked = data.is_billable !== false;
-}
-
-function _resetForm() {
-  _editingId = null;
-  const formTitle = document.getElementById('entry-form-title');
-  if (formTitle) formTitle.textContent = '업무 입력';
-
-  ['entry-title','entry-category','entry-case','entry-start','entry-end'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.value = '';
-  });
-  const dateEl = document.getElementById('entry-date');
-  if (dateEl) dateEl.value = Utils.todayStr();
-  const durEl = document.getElementById('entry-duration');
-  if (durEl) durEl.value = '0';
-  const dispEl = document.getElementById('entry-duration-display');
-  if (dispEl) dispEl.textContent = '0h 00m';
-
-  ClientSearchSelect.clear('entry-client');
-  if (_quill) _quill.setText('');
-
-  const billable = document.getElementById('entry-billable');
-  if (billable) billable.checked = true;
-
-  const saveBtn = document.getElementById('entry-save-btn');
-  if (saveBtn) saveBtn.textContent = '저장';
-
-  _clearDraft();
-}
-
-/* ══════════════════════════════════════════════
-   저장 처리
-══════════════════════════════════════════════ */
-async function _handleSave() {
-  const data = _collectFormData();
-
-  /* 유효성 검사 */
-  if (!data.work_date)   { Toast.error('날짜를 선택하세요.'); return; }
-  if (!data.title)       { Toast.error('업무 제목을 입력하세요.'); return; }
-  if (!data.client_id)   { Toast.error('고객사를 선택하세요.'); return; }
-  if (!data.category_id) { Toast.error('카테고리를 선택하세요.'); return; }
-  if (!data.duration_min || data.duration_min <= 0) {
-    Toast.error('소요 시간을 입력하세요.'); return;
-  }
-
-  const saveBtn = document.getElementById('entry-save-btn');
-  const restore = BtnLoading.start(saveBtn, '저장 중…');
-
+  let approverInfo = { approver_id: session.approver_id||'', approver_name: session.approver_name||'', reviewer2_id: session.reviewer2_id||'', reviewer2_name: session.reviewer2_name||'' };
   try {
-    const payload = {
-      work_date:    data.work_date,
-      title:        data.title,
-      client_id:    data.client_id,
-      category_id:  data.category_id,
-      case_id:      data.case_id || null,
-      start_time:   data.start_time || null,
-      end_time:     data.end_time || null,
-      duration_min: data.duration_min,
-      content:      data.content || '',
-      content_text: data.content_text || '',
-      is_billable:  data.is_billable,
-      user_id:      _session.userId,
-      status:       'draft',
-    };
-
-    let result;
-    if (_editingId) {
-      result = await API.update('time_entries', _editingId, payload);
-      Toast.success('업무 내역이 수정되었습니다.');
-    } else {
-      result = await API.create('time_entries', payload);
-      Toast.success('업무 내역이 저장되었습니다.');
-    }
-
-    _clearDraft();
-    _resetForm();
-    sessionStorage.setItem('dash_invalidate', '1');
-    await _loadEntries(_currentPage);
-  } catch (err) {
-    console.error('[entry] 저장 오류:', err);
-    Toast.error('저장 중 오류가 발생했습니다.');
-  } finally {
-    restore();
-  }
-}
-
-/* ── 임시저장 버튼 ── */
-async function _handleDraftSave() {
-  const data = _collectFormData();
-  if (!data.title && !data.content_text) {
-    Toast.warning('제목 또는 내용을 입력하세요.');
-    return;
-  }
-
-  const btn = document.getElementById('entry-draft-btn');
-  const restore = BtnLoading.start(btn, '저장 중…');
-
-  try {
-    const payload = {
-      work_date:    data.work_date || Utils.todayStr(),
-      title:        data.title || '(임시저장)',
-      client_id:    data.client_id || 'internal',
-      category_id:  data.category_id || null,
-      case_id:      data.case_id || null,
-      start_time:   data.start_time || null,
-      end_time:     data.end_time || null,
-      duration_min: data.duration_min || 0,
-      content:      data.content || '',
-      content_text: data.content_text || '',
-      is_billable:  data.is_billable,
-      user_id:      _session.userId,
-      status:       'draft',
-    };
-
-    if (_editingId) {
-      await API.update('time_entries', _editingId, payload);
-    } else {
-      await API.create('time_entries', payload);
-    }
-
-    _clearDraft();
-    Toast.success('임시저장되었습니다.');
-    await _loadEntries(_currentPage);
-  } catch (err) {
-    Toast.error('임시저장 실패');
-  } finally {
-    restore();
-  }
-}
-
-/* ══════════════════════════════════════════════
-   결재 요청
-══════════════════════════════════════════════ */
-async function submitEntry(id) {
-  const entry = _entries.find(e => e.id === id);
-  if (!entry) return;
-
-  /* 승인자 확인 */
-  const userR = await API.get('users', _session.userId);
-  const user  = userR?.data ?? userR;
-  if (!user?.approver_id) {
-    Toast.error('결재자가 지정되어 있지 않습니다. 관리자에게 문의하세요.');
-    return;
-  }
-
-  const ok = await Confirm.show({
-    title: '결재 요청',
-    message: `"${entry.title}" 항목을 결재 요청하시겠습니까?`,
-    confirmText: '요청',
-    confirmClass: 'btn-primary'
-  });
-  if (!ok) return;
-
-  try {
-    await API.patch('time_entries', id, {
-      status: 'pending',
-      submitted_at: new Date().toISOString(),
-      approver_id: user.approver_id
-    });
-    Toast.success('결재 요청이 완료되었습니다.');
-    sessionStorage.setItem('dash_invalidate', '1');
-    await _loadEntries(_currentPage);
-  } catch (err) {
-    Toast.error('결재 요청 중 오류가 발생했습니다.');
-  }
-}
-window.submitEntry = submitEntry;
-
-/* ══════════════════════════════════════════════
-   삭제
-══════════════════════════════════════════════ */
-async function deleteEntry(id) {
-  const entry = _entries.find(e => e.id === id);
-  if (!entry) return;
-
-  const ok = await Confirm.show({
-    title: '업무 내역 삭제',
-    message: `"${entry.title}" 항목을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`,
-    confirmText: '삭제',
-    confirmClass: 'btn-danger'
-  });
-  if (!ok) return;
-
-  try {
-    await API.delete('time_entries', id);
-    Toast.success('삭제되었습니다.');
-    sessionStorage.setItem('dash_invalidate', '1');
-    await _loadEntries(_currentPage);
-  } catch (err) {
-    Toast.error('삭제 중 오류가 발생했습니다.');
-  }
-}
-window.deleteEntry = deleteEntry;
-/* ══════════════════════════════════════════════
-   상세보기 모달
-══════════════════════════════════════════════ */
-async function openEntryDetail(id) {
-  const modal = document.getElementById('entry-detail-modal');
-  if (!modal) return;
-
-  modal.style.display = 'flex';
-  const body = document.getElementById('entry-detail-body');
-  if (body) body.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8;"><i class="fa-solid fa-spinner fa-spin"></i> 로딩 중…</div>';
-
-  try {
-    const r = await API.get('time_entries', id);
-    const e = r?.data ?? r;
-    if (!e) throw new Error('데이터 없음');
-
-    const cliMap  = Object.fromEntries((_masters.clients || []).map(c => [c.id, c.name]));
-    const catMap  = Object.fromEntries((_masters.categories || []).map(c => [c.id, c.name]));
-    const caseMap = Object.fromEntries((_masters.cases || []).map(c => [c.id, c.name]));
-    const userMap = Object.fromEntries((_masters.users || []).map(u => [u.id, u.name]));
-
-    const cliName  = e.client_id === 'internal' ? '내부 업무' : (cliMap[e.client_id] || '-');
-    const catName  = catMap[e.category_id] || '-';
-    const caseName = e.case_id ? (caseMap[e.case_id] || '-') : '-';
-    const userName = userMap[e.user_id] || '-';
-
-    const timeStr = (e.start_time && e.end_time)
-      ? `${e.start_time} ~ ${e.end_time} (${Utils.minToHM(e.duration_min || 0)})`
-      : Utils.minToHM(e.duration_min || 0);
-
-    const contentHtml = e.content
-      ? `<div class="arch-desc-view">${e.content}</div>`
-      : '<span style="color:#94a3b8;font-size:13px;">내용 없음</span>';
-
-    body.innerHTML = `
-      <div style="display:flex;flex-direction:column;gap:14px;">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-          <div class="ep-panel" style="border-top:3px solid #2d6bb5;">
-            <div class="ep-panel-header" style="background:#eff6ff;color:#2d6bb5;">기본 정보</div>
-            <div class="ep-panel-body">
-              <div class="ep-label">날짜</div>
-              <div class="ep-ctrl">${e.work_date || '-'}</div>
-              <div class="ep-label">작성자</div>
-              <div class="ep-ctrl">${Utils.escHtml(userName)}</div>
-              <div class="ep-label">상태</div>
-              <div class="ep-ctrl">${Utils.statusBadge(e.status || 'draft')}</div>
-              <div class="ep-label">청구 여부</div>
-              <div class="ep-ctrl">${e.is_billable !== false
-                ? '<span style="color:#16a34a;font-weight:600;">청구</span>'
-                : '<span style="color:#94a3b8;">비청구</span>'}</div>
-            </div>
-          </div>
-          <div class="ep-panel" style="border-top:3px solid #7c3aed;">
-            <div class="ep-panel-header" style="background:#f5f3ff;color:#7c3aed;">업무 분류</div>
-            <div class="ep-panel-body">
-              <div class="ep-label">고객사</div>
-              <div class="ep-ctrl">${Utils.escHtml(cliName)}</div>
-              <div class="ep-label">카테고리</div>
-              <div class="ep-ctrl">${Utils.escHtml(catName)}</div>
-              <div class="ep-label">사건/사업</div>
-              <div class="ep-ctrl">${Utils.escHtml(caseName)}</div>
-              <div class="ep-label">소요 시간</div>
-              <div class="ep-ctrl"><strong>${timeStr}</strong></div>
-            </div>
-          </div>
-        </div>
-        <div class="ep-panel" style="border-top:3px solid #0891b2;">
-          <div class="ep-panel-header" style="background:#f0f9ff;color:#0891b2;">업무 제목</div>
-          <div class="ep-panel-body">
-            <div style="font-size:14px;font-weight:600;color:#1e293b;padding:4px 0;">${Utils.escHtml(e.title || '-')}</div>
-          </div>
-        </div>
-        <div class="ep-panel" style="border-top:3px solid #16a34a;">
-          <div class="ep-panel-header" style="background:#f0fdf4;color:#16a34a;">업무 내용</div>
-          <div class="ep-panel-body">${contentHtml}</div>
-        </div>
-        ${_buildApprovalHistoryHtml(e)}
-      </div>`;
-
-    /* 수정/삭제 버튼 */
-    const actWrap = document.getElementById('entry-detail-actions');
-    if (actWrap) {
-      const canEdit   = Auth.canWriteEntry(_session) && (e.user_id === _session.userId || Auth.isAdmin(_session));
-      const canDelete = canEdit && (e.status === 'draft' || Auth.isAdmin(_session));
-      actWrap.innerHTML = `
-        ${canEdit ? `<button class="btn btn-outline" onclick="closeEntryDetail();openEntryEdit('${e.id}')">
-          <i class="fa-solid fa-pen"></i> 수정
-        </button>` : ''}
-        ${canDelete ? `<button class="btn btn-danger" onclick="closeEntryDetail();deleteEntry('${e.id}')">
-          <i class="fa-solid fa-trash"></i> 삭제
-        </button>` : ''}
-        ${e.status === 'draft' && e.user_id === _session.userId ? `<button class="btn btn-primary" onclick="closeEntryDetail();submitEntry('${e.id}')">
-          <i class="fa-solid fa-paper-plane"></i> 결재 요청
-        </button>` : ''}`;
-    }
-  } catch (err) {
-    console.error('[entry] 상세 오류:', err);
-    if (body) body.innerHTML = '<div style="padding:40px;text-align:center;color:#dc2626;">데이터를 불러올 수 없습니다.</div>';
-  }
-}
-window.openEntryDetail = openEntryDetail;
-
-/* ── 결재 이력 HTML ── */
-function _buildApprovalHistoryHtml(e) {
-  const steps = [];
-
-  if (e.submitted_at) {
-    steps.push({ label: '결재 요청', date: e.submitted_at, color: '#d97706', icon: 'fa-paper-plane' });
-  }
-  if (e.approved1_at) {
-    steps.push({ label: '1차 승인', date: e.approved1_at, color: '#16a34a', icon: 'fa-circle-check' });
-  }
-  if (e.rejected1_at) {
-    steps.push({ label: '1차 반려', date: e.rejected1_at, color: '#dc2626', icon: 'fa-circle-xmark', note: e.reject_reason });
-  }
-  if (e.approved2_at) {
-    steps.push({ label: '2차 승인', date: e.approved2_at, color: '#16a34a', icon: 'fa-circle-check' });
-  }
-  if (e.rejected2_at) {
-    steps.push({ label: '2차 반려', date: e.rejected2_at, color: '#dc2626', icon: 'fa-circle-xmark', note: e.reject_reason2 });
-  }
-
-  if (!steps.length) return '';
-
-  const stepsHtml = steps.map(s => `
-    <div style="display:flex;align-items:flex-start;gap:10px;padding:6px 0;">
-      <i class="fa-solid ${s.icon}" style="color:${s.color};margin-top:2px;flex-shrink:0;"></i>
-      <div>
-        <div style="font-size:12.5px;font-weight:600;color:${s.color};">${s.label}</div>
-        <div style="font-size:11px;color:#94a3b8;">${Utils.formatDatetime(s.date)}</div>
-        ${s.note ? `<div style="font-size:12px;color:#64748b;margin-top:2px;">${Utils.escHtml(s.note)}</div>` : ''}
-      </div>
-    </div>`).join('');
-
-  return `<div class="ep-panel" style="border-top:3px solid #94a3b8;">
-    <div class="ep-panel-header" style="background:#f8fafc;color:#64748b;">결재 이력</div>
-    <div class="ep-panel-body">${stepsHtml}</div>
-  </div>`;
-}
-
-/* ── 상세 모달 닫기 ── */
-function closeEntryDetail() {
-  const modal = document.getElementById('entry-detail-modal');
-  if (modal) modal.style.display = 'none';
-}
-window.closeEntryDetail = closeEntryDetail;
-
-/* ══════════════════════════════════════════════
-   수정 모드
-══════════════════════════════════════════════ */
-async function openEntryEdit(id) {
-  try {
-    const r = await API.get('time_entries', id);
-    const e = r?.data ?? r;
-    if (!e) { Toast.error('데이터를 불러올 수 없습니다.'); return; }
-
-    /* 권한 체크 */
-    if (e.user_id !== _session.userId && !Auth.isAdmin(_session)) {
-      Toast.error('수정 권한이 없습니다.'); return;
-    }
-    if (!['draft', 'rejected'].includes(e.status) && !Auth.isAdmin(_session)) {
-      Toast.error('결재 진행 중인 항목은 수정할 수 없습니다.'); return;
-    }
-
-    _editingId = id;
-
-    /* 폼 상단으로 스크롤 */
-    const formSection = document.getElementById('entry-form-section');
-    if (formSection) formSection.scrollIntoView({ behavior: 'smooth' });
-
-    /* 폼 타이틀 변경 */
-    const formTitle = document.getElementById('entry-form-title');
-    if (formTitle) formTitle.textContent = '업무 수정';
-
-    const saveBtn = document.getElementById('entry-save-btn');
-    if (saveBtn) saveBtn.textContent = '수정 저장';
-
-    /* 폼 채우기 */
-    _fillForm({
-      work_date:    e.work_date,
-      title:        e.title,
-      client_id:    e.client_id,
-      client_name:  (_masters.clients || []).find(c => c.id === e.client_id)?.name || '',
-      category_id:  e.category_id,
-      case_id:      e.case_id,
-      start_time:   e.start_time,
-      end_time:     e.end_time,
-      duration_min: e.duration_min,
-      content:      e.content,
-      is_billable:  e.is_billable !== false,
-    });
-
-    await _onClientChange(e.client_id, '');
-    const caseSel = document.getElementById('entry-case');
-    if (caseSel && e.case_id) caseSel.value = e.case_id;
-
-  } catch (err) {
-    console.error('[entry] 수정 로드 오류:', err);
-    Toast.error('수정 데이터 로드 실패');
-  }
-}
-window.openEntryEdit = openEntryEdit;
-
-/* ══════════════════════════════════════════════
-   일괄 결재 요청
-══════════════════════════════════════════════ */
-async function submitAllDrafts() {
-  const drafts = _entries.filter(e => e.status === 'draft' && e.user_id === _session.userId);
-  if (!drafts.length) { Toast.warning('결재 요청할 임시저장 항목이 없습니다.'); return; }
-
-  const userR = await API.get('users', _session.userId);
-  const user  = userR?.data ?? userR;
-  if (!user?.approver_id) {
-    Toast.error('결재자가 지정되어 있지 않습니다.'); return;
-  }
-
-  const ok = await Confirm.show({
-    title: '일괄 결재 요청',
-    message: `임시저장 항목 ${drafts.length}건을 모두 결재 요청하시겠습니까?`,
-    confirmText: '일괄 요청',
-    confirmClass: 'btn-primary'
-  });
-  if (!ok) return;
-
-  const btn = document.getElementById('entry-submit-all-btn');
-  const restore = BtnLoading.start(btn, '처리 중…');
-
-  try {
-    let success = 0;
-    for (const e of drafts) {
-      await API.patch('time_entries', e.id, {
-        status: 'pending',
-        submitted_at: new Date().toISOString(),
-        approver_id: user.approver_id
-      });
-      success++;
-    }
-    Toast.success(`${success}건 결재 요청 완료`);
-    sessionStorage.setItem('dash_invalidate', '1');
-    await _loadEntries(1);
-  } catch (err) {
-    Toast.error('일괄 요청 중 오류 발생');
-  } finally {
-    restore();
-  }
-}
-window.submitAllDrafts = submitAllDrafts;
-/* ══════════════════════════════════════════════
-   Excel 가져오기
-══════════════════════════════════════════════ */
-async function openExcelImport() {
-  const modal = document.getElementById('excel-import-modal');
-  if (modal) modal.style.display = 'flex';
-}
-window.openExcelImport = openExcelImport;
-
-function closeExcelImport() {
-  const modal = document.getElementById('excel-import-modal');
-  if (modal) modal.style.display = 'none';
-  const preview = document.getElementById('excel-preview');
-  if (preview) preview.innerHTML = '';
-  const fileInput = document.getElementById('excel-file-input');
-  if (fileInput) fileInput.value = '';
-}
-window.closeExcelImport = closeExcelImport;
-
-async function handleExcelFile(input) {
-  const file = input.files[0];
-  if (!file) return;
-
-  const preview = document.getElementById('excel-preview');
-  if (preview) preview.innerHTML = '<div style="padding:16px;color:#94a3b8;text-align:center;"><i class="fa-solid fa-spinner fa-spin"></i> 파일 분석 중…</div>';
-
-  try {
-    const rows = await Utils.parseExcel(file);
-    if (!rows || !rows.length) {
-      if (preview) preview.innerHTML = '<div style="padding:16px;color:#dc2626;">데이터를 읽을 수 없습니다.</div>';
-      return;
-    }
-
-    const cliMap  = Object.fromEntries((_masters.clients || []).map(c => [c.name.trim(), c.id]));
-    const catMap  = Object.fromEntries((_masters.categories || []).map(c => [c.name.trim(), c.id]));
-
-    const parsed = rows.slice(1).map((row, idx) => {
-      const workDate    = String(row[0] || '').trim();
-      const title       = String(row[1] || '').trim();
-      const clientName  = String(row[2] || '').trim();
-      const catName     = String(row[3] || '').trim();
-      const durationStr = String(row[4] || '').trim();
-      const content     = String(row[5] || '').trim();
-
-      const clientId  = cliMap[clientName] || 'internal';
-      const categoryId = catMap[catName] || null;
-      const durationMin = _parseDurationStr(durationStr);
-
-      const errors = [];
-      if (!workDate) errors.push('날짜 없음');
-      if (!title)    errors.push('제목 없음');
-      if (!categoryId) errors.push('카테고리 불일치');
-
-      return { idx: idx + 2, workDate, title, clientName, clientId, catName, categoryId, durationMin, content, errors };
-    }).filter(r => r.title || r.workDate);
-
-    if (!parsed.length) {
-      if (preview) preview.innerHTML = '<div style="padding:16px;color:#dc2626;">유효한 데이터 행이 없습니다.</div>';
-      return;
-    }
-
-    window._excelParsedRows = parsed;
-
-    const rows_html = parsed.map(r => `
-      <tr style="border-bottom:1px solid #f1f5f9;${r.errors.length ? 'background:#fff7f7;' : ''}">
-        <td style="padding:6px 8px;font-size:12px;">${r.idx}</td>
-        <td style="padding:6px 8px;font-size:12px;">${r.workDate || '-'}</td>
-        <td style="padding:6px 8px;font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${Utils.escHtml(r.title || '-')}</td>
-        <td style="padding:6px 8px;font-size:12px;">${Utils.escHtml(r.clientName || '내부')}</td>
-        <td style="padding:6px 8px;font-size:12px;">${Utils.escHtml(r.catName || '-')}</td>
-        <td style="padding:6px 8px;font-size:12px;text-align:center;">${Utils.minToHM(r.durationMin)}</td>
-        <td style="padding:6px 8px;font-size:11px;color:${r.errors.length ? '#dc2626' : '#16a34a'};">
-          ${r.errors.length ? r.errors.join(', ') : '✓'}
-        </td>
-      </tr>`).join('');
-
-    const validCount   = parsed.filter(r => !r.errors.length).length;
-    const invalidCount = parsed.length - validCount;
-
-    if (preview) preview.innerHTML = `
-      <div style="margin-bottom:10px;font-size:13px;color:#334155;">
-        총 <strong>${parsed.length}행</strong> 인식 — 
-        <span style="color:#16a34a;">정상 ${validCount}건</span>
-        ${invalidCount ? ` / <span style="color:#dc2626;">오류 ${invalidCount}건</span>` : ''}
-      </div>
-      <div style="overflow-x:auto;max-height:280px;overflow-y:auto;">
-        <table style="width:100%;border-collapse:collapse;font-size:12px;">
-          <thead style="background:#f8fafc;position:sticky;top:0;">
-            <tr>
-              <th style="padding:6px 8px;text-align:left;font-size:11px;color:#64748b;">#</th>
-              <th style="padding:6px 8px;text-align:left;font-size:11px;color:#64748b;">날짜</th>
-              <th style="padding:6px 8px;text-align:left;font-size:11px;color:#64748b;">제목</th>
-              <th style="padding:6px 8px;text-align:left;font-size:11px;color:#64748b;">고객사</th>
-              <th style="padding:6px 8px;text-align:left;font-size:11px;color:#64748b;">카테고리</th>
-              <th style="padding:6px 8px;text-align:center;font-size:11px;color:#64748b;">시간</th>
-              <th style="padding:6px 8px;text-align:left;font-size:11px;color:#64748b;">상태</th>
-            </tr>
-          </thead>
-          <tbody>${rows_html}</tbody>
-        </table>
-      </div>
-      <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
-        <button class="btn btn-outline" onclick="closeExcelImport()">취소</button>
-        <button class="btn btn-primary" onclick="confirmExcelImport()" ${validCount === 0 ? 'disabled' : ''}>
-          <i class="fa-solid fa-file-import"></i> ${validCount}건 가져오기
-        </button>
-      </div>`;
-  } catch (err) {
-    console.error('[entry] Excel 파싱 오류:', err);
-    if (preview) preview.innerHTML = '<div style="padding:16px;color:#dc2626;">파일을 읽는 중 오류가 발생했습니다.</div>';
-  }
-}
-window.handleExcelFile = handleExcelFile;
-
-function _parseDurationStr(str) {
-  if (!str) return 0;
-  str = str.toString().trim();
-  const hmMatch = str.match(/(\d+)[h시]\s*(\d*)[m분]?/i);
-  if (hmMatch) return parseInt(hmMatch[1]) * 60 + parseInt(hmMatch[2] || '0');
-  const mMatch = str.match(/^(\d+)$/);
-  if (mMatch) return parseInt(mMatch[1]);
-  const dotMatch = str.match(/^(\d+)\.(\d+)$/);
-  if (dotMatch) return Math.round(parseFloat(str) * 60);
-  return 0;
-}
-
-async function confirmExcelImport() {
-  const rows = (window._excelParsedRows || []).filter(r => !r.errors.length);
-  if (!rows.length) return;
-
-  const btn = document.querySelector('#excel-import-modal .btn-primary');
-  const restore = btn ? BtnLoading.start(btn, '가져오는 중…') : () => {};
-
-  try {
-    let success = 0;
-    for (const r of rows) {
-      await API.create('time_entries', {
-        work_date:    r.workDate,
-        title:        r.title,
-        client_id:    r.clientId,
-        category_id:  r.categoryId,
-        duration_min: r.durationMin,
-        content:      r.content || '',
-        content_text: r.content || '',
-        is_billable:  true,
-        user_id:      _session.userId,
-        status:       'draft',
-      });
-      success++;
-    }
-    Toast.success(`${success}건 가져오기 완료`);
-    closeExcelImport();
-    sessionStorage.setItem('dash_invalidate', '1');
-    await _loadEntries(1);
-  } catch (err) {
-    Toast.error('가져오기 중 오류 발생');
-  } finally {
-    restore();
-    window._excelParsedRows = null;
-  }
-}
-window.confirmExcelImport = confirmExcelImport;
-
-/* ══════════════════════════════════════════════
-   월별 집계 뷰
-══════════════════════════════════════════════ */
-async function renderEntryMonthlyView() {
-  const wrap = document.getElementById('entry-monthly-wrap');
-  if (!wrap) return;
-
-  wrap.innerHTML = '<div style="padding:24px;text-align:center;color:#94a3b8;"><i class="fa-solid fa-spinner fa-spin"></i></div>';
-
-  try {
-    const r = await API.list('time_entries', {
-      limit: 1000,
-      'filter[user_id]': _session.userId
-    });
-    const entries = r?.data ?? [];
-
-    const monthMap = {};
-    entries.forEach(e => {
-      const m = (e.work_date || '').slice(0, 7);
-      if (!m) return;
-      if (!monthMap[m]) monthMap[m] = { total: 0, cli: 0, int: 0, count: 0 };
-      monthMap[m].total += (e.duration_min || 0);
-      monthMap[m].count++;
-      if (e.client_id && e.client_id !== 'internal') {
-        monthMap[m].cli += (e.duration_min || 0);
+    const userRecord = await API.get('users', session.id);
+    if (!userRecord) throw new Error('userRecord null');
+    if (session.role === 'manager') {
+      if (userRecord.reviewer2_id) {
+        approverInfo = { approver_id: userRecord.reviewer2_id, approver_name: userRecord.reviewer2_name||'', reviewer2_id: userRecord.reviewer2_id, reviewer2_name: userRecord.reviewer2_name||'' };
       } else {
-        monthMap[m].int += (e.duration_min || 0);
+        const allUsers = await Master.users();
+        const myDirector = allUsers.find(u => u.role==='director' && u.is_active!==false && Auth.scopeMatch(u, userRecord));
+        if (myDirector) approverInfo = { approver_id: myDirector.id, approver_name: myDirector.name||'', reviewer2_id: myDirector.id, reviewer2_name: myDirector.name||'' };
       }
-    });
-
-    const months = Object.keys(monthMap).sort().reverse();
-    if (!months.length) {
-      wrap.innerHTML = '<div style="padding:24px;text-align:center;color:#94a3b8;">데이터가 없습니다.</div>';
-      return;
+    } else {
+      if (userRecord.approver_id) approverInfo = { approver_id: userRecord.approver_id, approver_name: userRecord.approver_name||'', reviewer2_id: userRecord.reviewer2_id||'', reviewer2_name: userRecord.reviewer2_name||'' };
+      if (!approverInfo.approver_id && status === 'submitted') { Toast.warning('승인자가 지정되지 않았습니다.'); return; }
     }
-
-    const rows = months.map(m => {
-      const d = monthMap[m];
-      const cliPct = d.total ? Math.round((d.cli / d.total) * 100) : 0;
-      return `<tr style="border-bottom:1px solid #f1f5f9;">
-        <td style="padding:8px;font-size:13px;font-weight:600;color:#1e293b;">${m}</td>
-        <td style="padding:8px;font-size:13px;text-align:center;">${d.count}건</td>
-        <td style="padding:8px;font-size:13px;font-weight:600;text-align:center;color:#2d6bb5;">${Utils.minToHM(d.total)}</td>
-        <td style="padding:8px;font-size:12px;text-align:center;color:#0891b2;">${Utils.minToHM(d.cli)}</td>
-        <td style="padding:8px;font-size:12px;text-align:center;color:#7c3aed;">${Utils.minToHM(d.int)}</td>
-        <td style="padding:8px;">
-          <div style="display:flex;align-items:center;gap:6px;">
-            <div style="flex:1;height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;">
-              <div style="width:${cliPct}%;height:100%;background:#2d6bb5;border-radius:4px;"></div>
-            </div>
-            <span style="font-size:11px;color:#64748b;width:32px;text-align:right;">${cliPct}%</span>
-          </div>
-        </td>
-      </tr>`;
-    }).join('');
-
-    wrap.innerHTML = `
-      <table style="width:100%;border-collapse:collapse;">
-        <thead>
-          <tr style="background:#f8fafc;">
-            <th style="padding:8px;font-size:11px;color:#64748b;text-align:left;font-weight:600;">월</th>
-            <th style="padding:8px;font-size:11px;color:#64748b;text-align:center;font-weight:600;">건수</th>
-            <th style="padding:8px;font-size:11px;color:#64748b;text-align:center;font-weight:600;">총 시간</th>
-            <th style="padding:8px;font-size:11px;color:#64748b;text-align:center;font-weight:600;">고객사</th>
-            <th style="padding:8px;font-size:11px;color:#64748b;text-align:center;font-weight:600;">내부</th>
-            <th style="padding:8px;font-size:11px;color:#64748b;text-align:left;font-weight:600;">고객사 비율</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>`;
   } catch (err) {
-    wrap.innerHTML = '<div style="padding:24px;text-align:center;color:#dc2626;">로드 실패</div>';
+    console.warn('[saveEntry] approverInfo 조회 실패:', err);
+    if (session.role === 'manager' && !approverInfo.reviewer2_id && status === 'submitted') { Toast.warning('2차 승인자(Director)가 지정되지 않았습니다.'); return; }
   }
-}
-window.renderEntryMonthlyView = renderEntryMonthlyView;
 
-/* ══════════════════════════════════════════════
-   탭 전환
-══════════════════════════════════════════════ */
-function switchEntryTab(tab) {
-  const tabs = ['list', 'form', 'monthly'];
-  tabs.forEach(t => {
-    const el = document.getElementById(`entry-tab-${t}`);
-    const btn = document.querySelector(`[data-entry-tab="${t}"]`);
-    if (el) el.style.display = t === tab ? '' : 'none';
-    if (btn) btn.classList.toggle('active', t === tab);
-  });
+  const catEl = document.getElementById('entry-category'); const subEl = document.getElementById('entry-subcategory'); const teamEl = document.getElementById('entry-team');
+  const catId = catEl.value; const catName = catEl.options[catEl.selectedIndex]?.textContent||''; const catType = catEl.options[catEl.selectedIndex]?.dataset.type||'client';
+  const subId = subEl.value; const subName = subEl.options[subEl.selectedIndex]?.textContent||'';
+  const teamId = teamEl.value; const teamName = teamEl.options[teamEl.selectedIndex]?.textContent||'';
+  const csVal = ClientSearchSelect.getValue('entry-client-wrap');
+  const clientId = csVal.id || document.getElementById('entry-client').value||''; const clientName = csVal.name||'';
+  const startAt = document.getElementById('entry-start').value; const endAt = document.getElementById('entry-end').value;
+  syncActualDuration();
+  const duration = parseInt(document.getElementById('entry-duration').value)||0;
 
-  if (tab === 'monthly') renderEntryMonthlyView();
-  if (tab === 'form' && !_editingId) _resetForm();
+  let description = '', descriptionMd = '';
+  if (catType === 'client') { _syncQuillToHidden(); description = document.getElementById('entry-description').value.trim(); descriptionMd = document.getElementById('entry-description-md')?.value.trim()||''; }
+  else { const memoEl = document.getElementById('entry-memo'); description = memoEl ? memoEl.value.trim() : ''; descriptionMd = description; }
+
+  if (!catId || !subId) { Toast.warning('대분류와 소분류를 선택하세요.'); return; }
+  if (!teamId) { Toast.warning('수행 팀을 선택하세요.'); return; }
+  if (!startAt || !endAt) { Toast.warning('업무 시작/종료 일시를 입력하세요.'); return; }
+  if (duration <= 0) { Toast.warning('실제 소요시간을 입력하세요.'); return; }
+  if (catType === 'client' && !description) { Toast.warning('수행 내용을 입력하세요.'); if (_quill) _quill.focus(); return; }
+  if (catType === 'client' && !clientId) { Toast.warning('고객사를 선택하세요.'); return; }
+  if (catType === 'client' && status === 'submitted') {
+    let kwArr = []; try { kwArr = JSON.parse(document.getElementById('kw-query-hidden')?.value||'[]'); } catch {}
+    if (!kwArr.length) { Toast.warning('핵심키워드를 1개 이상 입력하세요.'); return; }
+  }
+  if (catType === 'client' && status === 'submitted' && _pendingFiles.length === 0) { Toast.warning('고객업무는 자문 결과물을 첨부해야 합니다.'); return; }
+
+  const newStart = new Date(startAt).getTime(); const newEnd = new Date(endAt).getTime();
+  const { overlap, conflict } = await checkTimeOverlap(newStart, newEnd, _editEntryId||'');
+  if (overlap && conflict) _showOverlapBanner(conflict, newStart, newEnd, false);
+
+  if (catType === 'client') {
+    const quillText = _quill ? _quill.getText() : description;
+    let kwQueryText = ''; try { const kwArr = JSON.parse(document.getElementById('kw-query-hidden')?.value||'[]'); kwQueryText = Array.isArray(kwArr)?kwArr.join(' '):''; } catch {}
+    let kwReasonText = ''; try { const krArr = JSON.parse(document.getElementById('kw-reason-hidden')?.value||'[]'); kwReasonText = Array.isArray(krArr)?krArr.join(' '):''; } catch {}
+    const combinedText = [quillText, kwQueryText, kwReasonText].filter(Boolean).join(' ');
+    if (combinedText.trim()) {
+      const sensitiveResults = await _detectSensitiveInfo(combinedText);
+      if (sensitiveResults.length > 0) { _showSensitiveWarning(sensitiveResults, () => _doSaveEntry(status, approverInfo)); return; }
+    }
+  }
+  await _doSaveEntry(status, approverInfo);
 }
-window.switchEntryTab = switchEntryTab;
-/* ══════════════════════════════════════════════
-   Excel 내보내기
-══════════════════════════════════════════════ */
-async function exportEntriesToExcel() {
-  const btn = document.getElementById('entry-export-btn');
-  const restore = BtnLoading.start(btn, '내보내는 중…');
+
+async function _doSaveEntry(status, approverInfo) {
+  const session = getSession();
+  if (!approverInfo) approverInfo = { approver_id: session.approver_id||'', approver_name: session.approver_name||'', reviewer2_id: session.reviewer2_id||'', reviewer2_name: session.reviewer2_name||'' };
+  const catEl = document.getElementById('entry-category'); const subEl = document.getElementById('entry-subcategory'); const teamEl = document.getElementById('entry-team');
+  const catId = catEl.value; const catName = catEl.options[catEl.selectedIndex]?.textContent||''; const catType = catEl.options[catEl.selectedIndex]?.dataset.type||'client';
+  const subId = subEl.value; const subName = subEl.options[subEl.selectedIndex]?.textContent||'';
+  const teamId = teamEl.value; const teamName = teamEl.options[teamEl.selectedIndex]?.textContent||'';
+  const csVal = ClientSearchSelect.getValue('entry-client-wrap');
+  const clientId = csVal.id || document.getElementById('entry-client').value||''; const clientName = csVal.name||'';
+  const startAt = document.getElementById('entry-start').value; const endAt = document.getElementById('entry-end').value;
+  syncActualDuration();
+  const duration = parseInt(document.getElementById('entry-duration').value)||0;
+  let description = '', descriptionMd = '';
+  if (catType === 'client') { _syncQuillToHidden(); description = document.getElementById('entry-description').value.trim(); descriptionMd = document.getElementById('entry-description-md')?.value.trim()||''; }
+  else { const memoEl = document.getElementById('entry-memo'); description = memoEl ? memoEl.value.trim() : ''; descriptionMd = description; }
+
+  const isSubmit = status === 'submitted';
+  const submitBtn = document.getElementById('submitEntryBtn'); const draftBtn = document.getElementById('draftEntryBtn');
+  const restoreSubmit = BtnLoading.start(isSubmit ? submitBtn : draftBtn, isSubmit ? '제출 중...' : '저장 중...');
+  const restoreOther = BtnLoading.disableAll(isSubmit ? draftBtn : submitBtn);
 
   try {
-    const r = await API.list('time_entries', {
-      limit: 2000,
-      sort: '-work_date',
-      ..._filterState.my_only ? { 'filter[user_id]': _session.userId } : {}
-    });
-    const entries = r?.data ?? [];
-
-    const cliMap  = Object.fromEntries((_masters.clients || []).map(c => [c.id, c.name]));
-    const catMap  = Object.fromEntries((_masters.categories || []).map(c => [c.id, c.name]));
-    const caseMap = Object.fromEntries((_masters.cases || []).map(c => [c.id, c.name]));
-    const userMap = Object.fromEntries((_masters.users || []).map(u => [u.id, u.name]));
-
-    const STATUS_LABEL = {
-      draft: '임시저장', pending: '1차 대기', pending2: '2차 대기',
-      approved: '승인완료', rejected: '반려'
+    const entryData = {
+      user_id: session.id, user_name: session.name, team_id: teamId, team_name: teamName,
+      client_id: catType==='client'?clientId:'', client_name: catType==='client'?clientName:'',
+      work_category_id: catId, work_category_name: catName,
+      work_subcategory_id: subId, work_subcategory_name: subName,
+      time_category: catType,
+      work_start_at: new Date(startAt).getTime(), work_end_at: new Date(endAt).getTime(),
+      duration_minutes: duration,
+      work_description: description, work_description_md: descriptionMd,
+      approver_id: approverInfo.approver_id, approver_name: approverInfo.approver_name,
+      reviewer2_id: approverInfo.reviewer2_id||'', reviewer2_name: approverInfo.reviewer2_name||'',
+      status,
+      kw_query:  catType==='client'?(()=>{try{return JSON.parse(document.getElementById('kw-query-hidden')?.value||'[]');}catch{return[];}})():[],
+      law_refs:  catType==='client'?(document.getElementById('law-refs-hidden')?.value||'[]'):'[]',
+      kw_reason: catType==='client'?(()=>{try{return JSON.parse(document.getElementById('kw-reason-hidden')?.value||'[]');}catch{return[];}})():[],
     };
+    let entry;
+    if (_editEntryId) entry = await API.update('time_entries', _editEntryId, entryData);
+    else entry = await API.create('time_entries', entryData);
 
-    const data = [
-      ['날짜', '작성자', '제목', '고객사', '카테고리', '사건/사업', '시작', '종료', '소요(분)', '소요(H:MM)', '청구여부', '상태', '내용']
-    ];
-
-    entries.forEach(e => {
-      data.push([
-        e.work_date || '',
-        userMap[e.user_id] || '',
-        e.title || '',
-        e.client_id === 'internal' ? '내부 업무' : (cliMap[e.client_id] || ''),
-        catMap[e.category_id] || '',
-        e.case_id ? (caseMap[e.case_id] || '') : '',
-        e.start_time || '',
-        e.end_time || '',
-        e.duration_min || 0,
-        Utils.minToHM(e.duration_min || 0),
-        e.is_billable !== false ? '청구' : '비청구',
-        STATUS_LABEL[e.status] || e.status || '',
-        e.content_text || ''
-      ]);
+    if (_deletedAttIds.length > 0) {
+      for (const attId of _deletedAttIds) { try { await API.delete('attachments', attId); } catch(e) { console.warn('첨부파일 삭제 실패:', attId, e); } }
+      _deletedAttIds = [];
+    }
+    for (const pf of _pendingFiles) {
+      await API.create('attachments', { entry_id:entry.id, file_name:pf.file?pf.file.name:(pf.fileName||''), file_type:pf.type||'link', file_size:pf.sizeKB||0, doc_type:pf.docType||'', summary:pf.summary||'', file_content:pf.content||'', file_url:pf.fileUrl||'', extracted_text:pf.extractedText||null });
+    }
+    if (status === 'submitted' && typeof createNotification === 'function') {
+      const catLabel = catType==='client'?(clientName||'고객사'):catName;
+      const summary = `${catLabel} | ${subName||catName}`;
+      if (approverInfo.approver_id) createNotification({ toUserId:approverInfo.approver_id, toUserName:approverInfo.approver_name, fromUserId:session.id, fromUserName:session.name, type:'submitted', entryId:entry.id, entrySummary:summary, message:`${session.name}님이 타임시트 승인을 요청했습니다.`, targetMenu:'approval' });
+    }
+    Toast.success(status==='submitted'?'타임시트가 제출되었습니다.':'임시저장되었습니다.');
+    window._dashNeedsRefresh = true;
+    _editEntryId = null; _pendingFiles = []; _deletedAttIds = []; _existingAtts = [];
+    document.getElementById('fileList').innerHTML = '';
+    ['entry-category','entry-subcategory','entry-team','entry-client','entry-start','entry-end','entry-duration','kw-query-hidden','law-refs-hidden','kw-reason-hidden'].forEach(id => {
+      const el = document.getElementById(id); if (!el) return;
+      if (el.tagName==='SELECT') el.selectedIndex=0; else el.value = el.id==='law-refs-hidden'?'[]':'';
     });
-
-    await Utils.xlsxDownload(data, `업무내역_${Utils.todayStr()}.xlsx`, '업무내역');
-    Toast.success(`${entries.length}건 내보내기 완료`);
-  } catch (err) {
-    console.error('[entry] 내보내기 오류:', err);
-    Toast.error('내보내기 중 오류가 발생했습니다.');
-  } finally {
-    restore();
-  }
+    document.getElementById('duration-text').textContent = '시작/종료 시간을 입력하면 자동 계산됩니다.';
+    _clearDurationInput(); document.getElementById('entry-user-name').value = session.name;
+    _resetQuill(); ClientSearchSelect.clear('entry-client-wrap'); document.getElementById('entry-client').value='';
+    _clearKwTags('kw-query'); _clearKwTags('kw-reason'); _clearLawRefs(); updateClientSection();
+    await updateApprovalBadge(session); restoreSubmit(); restoreOther(); navigateTo('my-entries');
+  } catch (err) { console.error(err); restoreSubmit(); restoreOther(); Toast.error('저장 실패: ' + err.message); }
 }
-window.exportEntriesToExcel = exportEntriesToExcel;
+async function init_my_entries() {
+  const session = getSession();
+  if (!Auth.canWriteEntry(session)) {
+    if (!Auth.isStaff(session) && !Auth.isManager(session)) { navigateTo('dashboard'); Toast.warning('My Time Sheet는 Staff/Manager만 접근 가능합니다.'); return; }
+    if (Auth.isStaff(session) && !Auth.hasApprover(session)) { navigateTo('archive'); Toast.warning('승인자가 지정되지 않아 타임시트를 조회할 수 없습니다.'); return; }
+  }
+  _entriesPage = 1;
+  const now = new Date(); const y = now.getFullYear(); const m = now.getMonth();
+  const from = new Date(y, m, 1); const to = new Date(y, m+1, 0);
+  const fmt = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  document.getElementById('filter-entry-date-from').value = fmt(from);
+  document.getElementById('filter-entry-date-to').value   = fmt(to);
+  const [clients, categories, subcategories] = await Promise.all([Master.clients(), Master.categories(), Master.subcategories()]);
+  await fillSelect('filter-entry-client', clients, 'id', 'company_name', '전체 고객사');
+  const catEl = document.getElementById('filter-entry-category');
+  catEl.innerHTML = '<option value="">전체 대분류</option>';
+  categories.forEach(c => { const opt = document.createElement('option'); opt.value=c.id; opt.textContent=c.category_name; catEl.appendChild(opt); });
+  const subEl = document.getElementById('filter-entry-subcategory');
+  subEl.innerHTML = '<option value="">전체 소분류</option>';
+  subcategories.forEach(s => { const opt = document.createElement('option'); opt.value=s.id; opt.textContent=s.sub_category_name; opt.dataset.categoryId=s.category_id; subEl.appendChild(opt); });
+  await loadMyEntries();
+}
 
-/* ══════════════════════════════════════════════
-   관리자 전용 – 일괄 상태 변경
-══════════════════════════════════════════════ */
-async function adminBulkStatusChange(status) {
-  if (!Auth.isAdmin(_session)) { Toast.error('권한 없음'); return; }
+function onEntryFilterCategoryChange() {
+  const catId = document.getElementById('filter-entry-category').value;
+  const subEl = document.getElementById('filter-entry-subcategory');
+  subEl.value = '';
+  Array.from(subEl.options).forEach(opt => { if (!opt.value) return; opt.style.display = (!catId || opt.dataset.categoryId===catId)?'':'none'; });
+  const selected = subEl.options[subEl.selectedIndex];
+  if (selected && selected.style.display==='none') subEl.value='';
+}
 
-  const checked = Array.from(document.querySelectorAll('.entry-row-check:checked')).map(el => el.value);
-  if (!checked.length) { Toast.warning('항목을 선택하세요.'); return; }
-
-  const STATUS_LABEL = {
-    draft: '임시저장', pending: '결재대기', approved: '승인완료', rejected: '반려'
-  };
-
-  const ok = await Confirm.show({
-    title: '일괄 상태 변경',
-    message: `선택한 ${checked.length}건을 "${STATUS_LABEL[status] || status}"으로 변경하시겠습니까?`,
-    confirmText: '변경',
-    confirmClass: 'btn-primary'
-  });
-  if (!ok) return;
-
+async function loadMyEntries() {
+  const session = getSession();
+  const dateFrom = document.getElementById('filter-entry-date-from').value;
+  const dateTo   = document.getElementById('filter-entry-date-to').value;
+  const clientId     = document.getElementById('filter-entry-client').value;
+  const categoryId   = document.getElementById('filter-entry-category').value;
+  const subcategoryId= document.getElementById('filter-entry-subcategory').value;
+  const status       = document.getElementById('filter-entry-status').value;
+  const tsFrom = dateFrom ? new Date(dateFrom+'T00:00:00').getTime() : null;
+  const tsTo   = dateTo   ? new Date(dateTo  +'T23:59:59').getTime() : null;
   try {
-    for (const id of checked) {
-      await API.patch('time_entries', id, { status });
+    const r = await API.list('time_entries', { limit: 500 });
+    let entries = (r && r.data) ? r.data : [];
+    if (session.role==='staff' || session.role==='manager') entries = entries.filter(e => String(e.user_id)===String(session.id));
+    if (tsFrom || tsTo) {
+      entries = entries.filter(e => {
+        if (!e.work_start_at) return false;
+        const raw=e.work_start_at; const num=Number(raw); let ts;
+        if (!isNaN(num) && num>1000000000000) ts=num;
+        else if (!isNaN(num) && num>1000000000) ts=num*1000;
+        else ts=new Date(raw).getTime();
+        if (isNaN(ts)) return false;
+        if (tsFrom && ts<tsFrom) return false;
+        if (tsTo   && ts>tsTo)   return false;
+        return true;
+      });
     }
-    Toast.success(`${checked.length}건 상태 변경 완료`);
-    await _loadEntries(_currentPage);
-  } catch (err) {
-    Toast.error('상태 변경 중 오류 발생');
-  }
+    if (clientId)      entries = entries.filter(e => e.client_id===clientId);
+    if (categoryId)    entries = entries.filter(e => e.work_category_id===categoryId);
+    if (subcategoryId) entries = entries.filter(e => e.work_subcategory_id===subcategoryId);
+    if (status)        entries = entries.filter(e => e.status===status);
+    entries.sort((a,b) => new Date(b.work_start_at||0) - new Date(a.work_start_at||0));
+    const totalH = entries.reduce((s,e) => s+(e.duration_minutes||0), 0);
+    document.getElementById('entry-total-badge').textContent  = `전체 ${entries.length}건`;
+    document.getElementById('entry-total-hours').textContent  = `총 ${(totalH/60).toFixed(1)}시간`;
+    const start = (_entriesPage-1)*ENTRIES_PER_PAGE;
+    const paged = entries.slice(start, start+ENTRIES_PER_PAGE);
+    const attMap = await loadAttachmentsMap(paged.map(e => e.id));
+    const tbody = document.getElementById('my-entries-body');
+    if (paged.length===0) {
+      tbody.innerHTML = `<tr><td colspan="9" class="table-empty"><i class="fas fa-inbox"></i><p>조회된 데이터가 없습니다.</p></td></tr>`;
+    } else {
+      const fmtDate = (ms) => { if(!ms) return '<span style="color:var(--text-muted)">—</span>'; const d=new Date(Number(ms)); return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`; };
+      const fmtDateShort = (ms) => { if(!ms) return '—'; const d=new Date(Number(ms)); return `${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`; };
+      const fmtTime = (ms) => { if(!ms) return '—'; const d=new Date(Number(ms)); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
+      const fmtDatetime = (ms) => { if(!ms) return '<span style="color:var(--text-muted)">—</span>'; return `<span style="font-size:11.5px;white-space:nowrap">${fmtDateShort(ms)}&nbsp;<span style="color:var(--text-secondary)">${fmtTime(ms)}</span></span>`; };
+      tbody.innerHTML = paged.map((e, idx) => {
+        const rowNo = ((_entriesPage-1)*ENTRIES_PER_PAGE)+idx+1;
+        const writtenAt = e.created_at ? fmtDate(e.created_at) : fmtDate(e.work_start_at);
+        const canEdit = e.status==='draft' || e.status==='rejected';
+        const B = 'width:30px;height:30px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;background:transparent;border:none;cursor:pointer;';
+        const btns = [];
+        btns.push(`<button style="${B}" onclick="openApprovalModal('${e.id}')" title="상세보기"><i class="fas fa-eye" style="font-size:13px;color:#94a3b8"></i></button>`);
+        if (canEdit) btns.push(`<button style="${B}" onclick="editEntry('${e.id}')" title="수정"><i class="fas fa-edit" style="font-size:13px;color:#94a3b8"></i></button>`);
+        if (e.status==='draft') btns.push(`<button style="${B}" onclick="submitSingleEntry('${e.id}')" title="제출"><i class="fas fa-paper-plane" style="font-size:13px;color:var(--primary)"></i></button>`);
+        if (canEdit) btns.push(`<button style="${B}" onclick="deleteEntry('${e.id}')" title="삭제"><i class="fas fa-trash" style="font-size:13px;color:#f87171"></i></button>`);
+        if (e.status==='rejected' && e.reviewer_comment) btns.push(`<button style="${B}" onclick="showRejectReason('${(e.reviewer_comment||'').replace(/'/g,"\\'")}')" title="반려사유"><i class="fas fa-comment-alt" style="font-size:13px;color:#e07b3a"></i></button>`);
+        const clientHtml = e.client_name ? `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12.5px">${Utils.escHtml(e.client_name)}</span>` : `<span style="color:var(--text-muted);font-size:11px">내부</span>`;
+        const teamHtml = e.team_name ? `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12px;color:var(--text-secondary)">${Utils.escHtml(e.team_name)}</span>` : `<span style="color:var(--text-muted);font-size:11px">—</span>`;
+        const subHtml = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12.5px">${Utils.escHtml(e.work_subcategory_name||'—')}</span>`;
+        return `<tr>
+          <td style="text-align:center;color:var(--text-muted);font-size:12px">${rowNo}</td>
+          <td style="font-size:12px;white-space:nowrap;color:var(--text-secondary)">${writtenAt}</td>
+          <td style="padding:0 10px">${clientHtml}</td>
+          <td style="padding:0 10px">${teamHtml}</td>
+          <td style="padding:0 10px">${subHtml}</td>
+          <td style="text-align:center;padding:0 6px">${fmtDatetime(e.work_start_at)}</td>
+          <td style="text-align:center;padding:0 6px">${fmtDatetime(e.work_end_at)}</td>
+          <td style="text-align:center;color:var(--text-secondary);font-size:12.5px;font-weight:600">${Utils.formatDuration(e.duration_minutes)}</td>
+          <td style="text-align:center">${Utils.statusBadge(e.status)}</td>
+          <td style="text-align:center;padding:0 4px"><div style="display:flex;gap:4px;justify-content:center">${btns.join('')}</div></td>
+        </tr>`;
+      }).join('');
+    }
+    document.getElementById('entry-pagination').innerHTML = Utils.paginationHTML(_entriesPage, entries.length, ENTRIES_PER_PAGE);
+  } catch (err) { console.error(err); Toast.error('데이터 로드 실패'); }
 }
-window.adminBulkStatusChange = adminBulkStatusChange;
 
-/* ══════════════════════════════════════════════
-   전체 선택 체크박스
-══════════════════════════════════════════════ */
-function toggleAllEntryCheck(masterCb) {
-  const checks = document.querySelectorAll('.entry-row-check');
-  checks.forEach(cb => { cb.checked = masterCb.checked; });
-}
-window.toggleAllEntryCheck = toggleAllEntryCheck;
-
-/* ══════════════════════════════════════════════
-   기간별 통계 (관리자/임원용)
-══════════════════════════════════════════════ */
-async function renderEntryStats() {
-  const wrap = document.getElementById('entry-stats-wrap');
-  if (!wrap) return;
-
-  wrap.innerHTML = '<div style="padding:24px;text-align:center;color:#94a3b8;"><i class="fa-solid fa-spinner fa-spin"></i></div>';
-
+async function loadAttachmentsMap(entryIds) {
+  if (!entryIds.length) return {};
   try {
-    const fromEl = document.getElementById('stats-date-from');
-    const toEl   = document.getElementById('stats-date-to');
-    const from   = fromEl?.value || '';
-    const to     = toEl?.value   || '';
-
-    const params = { limit: 2000, sort: 'work_date' };
-    if (from) params['filter[work_date][gte]'] = from;
-    if (to)   params['filter[work_date][lte]'] = to;
-
-    const r = await API.list('time_entries', params);
-    const entries = r?.data ?? [];
-
-    const cliMap  = Object.fromEntries((_masters.clients || []).map(c => [c.id, c.name]));
-    const catMap  = Object.fromEntries((_masters.categories || []).map(c => [c.id, c.name]));
-    const userMap = Object.fromEntries((_masters.users || []).map(u => [u.id, u.name]));
-
-    /* 고객사별 */
-    const byClient = {};
-    entries.filter(e => e.client_id && e.client_id !== 'internal').forEach(e => {
-      byClient[e.client_id] = (byClient[e.client_id] || 0) + (e.duration_min || 0);
-    });
-
-    /* 카테고리별 */
-    const byCat = {};
-    entries.forEach(e => {
-      if (e.category_id) byCat[e.category_id] = (byCat[e.category_id] || 0) + (e.duration_min || 0);
-    });
-
-    /* 직원별 */
-    const byUser = {};
-    entries.forEach(e => {
-      byUser[e.user_id] = (byUser[e.user_id] || 0) + (e.duration_min || 0);
-    });
-
-    const totalMins = entries.reduce((s, e) => s + (e.duration_min || 0), 0);
-    const cliMins   = Object.values(byClient).reduce((a, b) => a + b, 0);
-
-    const topCli  = Object.entries(byClient).sort((a, b) => b[1] - a[1]).slice(0, 8);
-    const topCat  = Object.entries(byCat).sort((a, b) => b[1] - a[1]).slice(0, 8);
-    const topUser = Object.entries(byUser).sort((a, b) => b[1] - a[1]).slice(0, 10);
-
-    const barRow = (label, mins, max, color) => {
-      const w = Math.round((mins / max) * 120);
-      return `<tr style="border-bottom:1px solid #f1f5f9;">
-        <td style="padding:6px 8px;font-size:12px;color:#334155;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${Utils.escHtml(label)}</td>
-        <td style="padding:6px 8px;">
-          <div style="display:flex;align-items:center;gap:6px;">
-            <div style="width:${w}px;height:8px;background:${color};border-radius:4px;flex-shrink:0;"></div>
-            <span style="font-size:12px;color:#1e293b;font-weight:600;">${Utils.minToHM(mins)}</span>
-          </div>
-        </td>
-      </tr>`;
-    };
-
-    const cliMax  = topCli[0]?.[1]  || 1;
-    const catMax  = topCat[0]?.[1]  || 1;
-    const userMax = topUser[0]?.[1] || 1;
-
-    wrap.innerHTML = `
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;">
-        <div class="kpi-card" style="border-top:3px solid #2d6bb5;">
-          <div class="kpi-icon" style="color:#2d6bb5;"><i class="fa-solid fa-clock"></i></div>
-          <div class="kpi-body">
-            <div class="kpi-label">기간 총 시간</div>
-            <div class="kpi-value">${Utils.minToHM(totalMins)}</div>
-            <div class="kpi-sub">${entries.length}건</div>
-          </div>
-        </div>
-        <div class="kpi-card" style="border-top:3px solid #0891b2;">
-          <div class="kpi-icon" style="color:#0891b2;"><i class="fa-solid fa-building"></i></div>
-          <div class="kpi-body">
-            <div class="kpi-label">고객사 업무</div>
-            <div class="kpi-value">${Utils.minToHM(cliMins)}</div>
-            <div class="kpi-sub">${totalMins ? Math.round((cliMins/totalMins)*100) : 0}%</div>
-          </div>
-        </div>
-        <div class="kpi-card" style="border-top:3px solid #7c3aed;">
-          <div class="kpi-icon" style="color:#7c3aed;"><i class="fa-solid fa-users"></i></div>
-          <div class="kpi-body">
-            <div class="kpi-label">참여 직원</div>
-            <div class="kpi-value">${Object.keys(byUser).length}명</div>
-            <div class="kpi-sub">활동 인원</div>
-          </div>
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
-        <div class="card">
-          <div class="card-header"><span class="card-title">고객사별</span></div>
-          <table style="width:100%;border-collapse:collapse;">
-            ${topCli.map(([id, m]) => barRow(cliMap[id] || id, m, cliMax, '#2d6bb5')).join('')}
-          </table>
-        </div>
-        <div class="card">
-          <div class="card-header"><span class="card-title">카테고리별</span></div>
-          <table style="width:100%;border-collapse:collapse;">
-            ${topCat.map(([id, m]) => barRow(catMap[id] || id, m, catMax, '#0891b2')).join('')}
-          </table>
-        </div>
-        <div class="card">
-          <div class="card-header"><span class="card-title">직원별</span></div>
-          <table style="width:100%;border-collapse:collapse;">
-            ${topUser.map(([id, m]) => barRow(userMap[id] || id, m, userMax, '#7c3aed')).join('')}
-          </table>
-        </div>
-      </div>`;
-  } catch (err) {
-    wrap.innerHTML = '<div style="padding:24px;text-align:center;color:#dc2626;">통계 로드 실패</div>';
-  }
-}
-window.renderEntryStats = renderEntryStats;
-
-/* ══════════════════════════════════════════════
-   드래그 앤 드롭 파일 업로드
-══════════════════════════════════════════════ */
-function initDropZone() {
-  const zone = document.getElementById('entry-drop-zone');
-  if (!zone) return;
-
-  zone.addEventListener('dragover', e => {
-    e.preventDefault();
-    zone.classList.add('drag-over');
-  });
-  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
-  zone.addEventListener('drop', e => {
-    e.preventDefault();
-    zone.classList.remove('drag-over');
-    const file = e.dataTransfer.files[0];
-    if (!file) return;
-    if (!file.name.match(/\.(xlsx|xls)$/i)) {
-      Toast.error('Excel 파일(.xlsx, .xls)만 지원합니다.');
-      return;
-    }
-    const input = document.getElementById('excel-file-input');
-    if (input) {
-      const dt = new DataTransfer();
-      dt.items.add(file);
-      input.files = dt.files;
-      handleExcelFile(input);
-    }
-  });
-}
-window.initDropZone = initDropZone;
-/* ══════════════════════════════════════════════
-   복사하여 새로 만들기
-══════════════════════════════════════════════ */
-async function copyEntry(id) {
-  try {
-    const r = await API.get('time_entries', id);
-    const e = r?.data ?? r;
-    if (!e) { Toast.error('데이터를 불러올 수 없습니다.'); return; }
-
-    _editingId = null;
-    switchEntryTab('form');
-
-    const formTitle = document.getElementById('entry-form-title');
-    if (formTitle) formTitle.textContent = '업무 입력 (복사)';
-
-    _fillForm({
-      work_date:    Utils.todayStr(),
-      title:        e.title ? `[복사] ${e.title}` : '',
-      client_id:    e.client_id,
-      client_name:  (_masters.clients || []).find(c => c.id === e.client_id)?.name || '',
-      category_id:  e.category_id,
-      case_id:      e.case_id,
-      start_time:   e.start_time,
-      end_time:     e.end_time,
-      duration_min: e.duration_min,
-      content:      e.content,
-      is_billable:  e.is_billable !== false,
-    });
-
-    await _onClientChange(e.client_id, '');
-    const caseSel = document.getElementById('entry-case');
-    if (caseSel && e.case_id) caseSel.value = e.case_id;
-
-    Toast.info('복사된 내용을 수정 후 저장하세요.');
-  } catch (err) {
-    Toast.error('복사 중 오류가 발생했습니다.');
-  }
-}
-window.copyEntry = copyEntry;
-
-/* ══════════════════════════════════════════════
-   키보드 단축키
-══════════════════════════════════════════════ */
-function _initKeyboardShortcuts() {
-  document.addEventListener('keydown', e => {
-    /* Ctrl+S → 저장 */
-    if (e.ctrlKey && e.key === 's') {
-      const activeTab = document.querySelector('[data-entry-tab].active')?.dataset?.entryTab;
-      if (activeTab === 'form') {
-        e.preventDefault();
-        _handleSave();
-      }
-    }
-    /* ESC → 모달 닫기 */
-    if (e.key === 'Escape') {
-      closeEntryDetail();
-      closeExcelImport();
-    }
-  });
+    const r = await API.list('attachments', { limit: 500 });
+    const all = (r && r.data) ? r.data : [];
+    const map = {};
+    all.forEach(a => { if (entryIds.includes(a.entry_id)) { if (!map[a.entry_id]) map[a.entry_id]=[]; map[a.entry_id].push(a); } });
+    return map;
+  } catch { return {}; }
 }
 
-/* ══════════════════════════════════════════════
-   모달 오버레이 클릭 닫기
-══════════════════════════════════════════════ */
-function _initModalClose() {
-  ['entry-detail-modal', 'excel-import-modal'].forEach(id => {
-    const modal = document.getElementById(id);
-    if (!modal) return;
-    modal.addEventListener('click', e => {
-      if (e.target === modal) {
-        modal.style.display = 'none';
-      }
-    });
-  });
-}
+function changePage(page) { _entriesPage = page; loadMyEntries(); }
 
-/* ══════════════════════════════════════════════
-   승인 반려된 항목 재제출
-══════════════════════════════════════════════ */
-async function resubmitEntry(id) {
-  const entry = _entries.find(e => e.id === id);
-  if (!entry) return;
-  if (entry.status !== 'rejected') {
-    Toast.warning('반려된 항목만 재제출할 수 있습니다.');
-    return;
-  }
-
-  const userR = await API.get('users', _session.userId);
-  const user  = userR?.data ?? userR;
-  if (!user?.approver_id) {
-    Toast.error('결재자가 지정되어 있지 않습니다.');
-    return;
-  }
-
-  const ok = await Confirm.show({
-    title: '재제출',
-    message: `"${entry.title}" 항목을 재제출하시겠습니까?`,
-    confirmText: '재제출',
-    confirmClass: 'btn-primary'
-  });
-  if (!ok) return;
-
-  try {
-    await API.patch('time_entries', id, {
-      status: 'pending',
-      submitted_at: new Date().toISOString(),
-      approver_id: user.approver_id,
-      reject_reason: null,
-    });
-    Toast.success('재제출 완료');
-    await _loadEntries(_currentPage);
-  } catch (err) {
-    Toast.error('재제출 중 오류가 발생했습니다.');
-  }
-}
-window.resubmitEntry = resubmitEntry;
-
-/* ══════════════════════════════════════════════
-   빠른 시간 입력 버튼
-══════════════════════════════════════════════ */
-function quickSetDuration(mins) {
-  const durEl  = document.getElementById('entry-duration');
-  const dispEl = document.getElementById('entry-duration-display');
-  if (durEl)  durEl.value = mins;
-  if (dispEl) dispEl.textContent = Utils.minToHM(mins);
-  _saveDraft();
-}
-window.quickSetDuration = quickSetDuration;
-
-/* ══════════════════════════════════════════════
-   날짜 네비게이션 (이전/다음 날)
-══════════════════════════════════════════════ */
-function shiftEntryDate(days) {
-  const dateEl = document.getElementById('entry-date');
-  if (!dateEl || !dateEl.value) return;
-  const d = new Date(dateEl.value);
-  d.setDate(d.getDate() + days);
-  dateEl.value = d.toISOString().slice(0, 10);
-  _saveDraft();
-}
-window.shiftEntryDate = shiftEntryDate;
-
-/* ══════════════════════════════════════════════
-   필터 초기화
-══════════════════════════════════════════════ */
 function resetEntryFilter() {
-  _filterState = {
-    search: '', status: '', client_id: '', category_id: '',
-    date_from: '', date_to: '',
-    my_only: Auth.isStaff(_session)
-  };
-
-  ['filter-search','filter-status','filter-client',
-   'filter-category','filter-date-from','filter-date-to'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.value = '';
-  });
-
-  const myOnly = document.getElementById('filter-my-only');
-  if (myOnly) myOnly.checked = _filterState.my_only;
-
-  _loadEntries(1);
+  const now=new Date(); const y=now.getFullYear(); const m=now.getMonth();
+  const from=new Date(y,m,1); const to=new Date(y,m+1,0);
+  const fmt=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  document.getElementById('filter-entry-date-from').value   = fmt(from);
+  document.getElementById('filter-entry-date-to').value     = fmt(to);
+  document.getElementById('filter-entry-client').value      = '';
+  document.getElementById('filter-entry-category').value    = '';
+  document.getElementById('filter-entry-subcategory').value = '';
+  document.getElementById('filter-entry-status').value      = '';
+  const subEl = document.getElementById('filter-entry-subcategory');
+  Array.from(subEl.options).forEach(opt => { opt.style.display=''; });
+  loadMyEntries();
 }
-window.resetEntryFilter = resetEntryFilter;
 
-/* ══════════════════════════════════════════════
-   초기화 완료 후 추가 셋업
-══════════════════════════════════════════════ */
-(function _extraSetup() {
-  document.addEventListener('DOMContentLoaded', () => {
-    _initKeyboardShortcuts();
-    _initModalClose();
-    initDropZone();
+async function editEntry(id) {
+  try {
+    const [entry] = await Promise.all([API.get('time_entries', id)]);
+    if (!entry) { Toast.error('데이터를 찾을 수 없습니다.'); return; }
+    _editEntryId = null; _editMode = false; _deletedAttIds = [];
+    await init_entry_new();
+    _editEntryId = id; _editMode = true; navigateTo('entry-new');
+    const catEl = document.getElementById('entry-category');
+    catEl.value = entry.work_category_id||''; onCategoryChange();
+    const subEl = document.getElementById('entry-subcategory');
+    subEl.value = entry.work_subcategory_id||'';
+    const teamEl = document.getElementById('entry-team');
+    for (const opt of teamEl.options) { if (opt.value===entry.team_id) { opt.selected=true; break; } }
+    ClientSearchSelect.setValue('entry-client-wrap', entry.client_id||'', entry.client_name||'');
+    document.getElementById('entry-client').value = entry.client_id||'';
+    if (entry.work_start_at) { const startDate=new Date(Number(entry.work_start_at)); document.getElementById('entry-start').value=new Date(startDate.getTime()-startDate.getTimezoneOffset()*60000).toISOString().slice(0,16); }
+    if (entry.work_end_at) { const endDate=new Date(Number(entry.work_end_at)); document.getElementById('entry-end').value=new Date(endDate.getTime()-endDate.getTimezoneOffset()*60000).toISOString().slice(0,16); }
+    calcDuration();
+    if (entry.duration_minutes && Number(entry.duration_minutes)>0) _setDurationInput(Number(entry.duration_minutes));
+    const descHtml = entry.work_description||'';
+    if (_quill) {
+      _quill.root.innerHTML = descHtml||'';
+      const len=_quill.getText().trim().length; const counter=document.getElementById('desc-char-count');
+      if (counter) { counter.textContent=`${len}자`; counter.style.color=len>15?'#f59e0b':'#6b7280'; }
+    }
+    const hidHtml = document.getElementById('entry-description'); if (hidHtml) hidHtml.value=descHtml;
+    try { _setKwTags('kw-query', entry.kw_query||[]); _setKwTags('kw-reason', entry.kw_reason||[]); _setLawRefs(entry.law_refs||'[]'); _updateKwExamples(); } catch(kwErr) { console.warn('kw 복원 실패:', kwErr); }
+    updateClientSection();
+    try {
+      const attResp = await API.list('attachments', { limit: 50 });
+      const existingAtts = (attResp?.data||[]).filter(a => a.entry_id===id);
+      if (existingAtts.length>0) _renderExistingAttachments(existingAtts);
+    } catch {}
+    Toast.info('수정 모드: 내용을 수정 후 저장하세요.');
+  } catch (err) { console.error('editEntry error:', err); _editEntryId=null; Toast.error('데이터 로드 실패: '+(err.message||'')); }
+}
+
+let _existingAtts = [];
+function _renderExistingAttachments(atts) { _existingAtts = atts.map(a => ({...a, _deleted:false})); _redrawExistingAttachments(); }
+function _redrawExistingAttachments() {
+  const list = document.getElementById('fileList');
+  const icons={excel:'fa-file-excel',word:'fa-file-word',ppt:'fa-file-powerpoint',pdf:'fa-file-pdf',link:'fa-link'};
+  const colors={excel:'#16a34a',word:'#1d4ed8',ppt:'#c2410c',pdf:'#b91c1c',link:'#7c3aed'};
+  const existingHtml = _existingAtts.map((a,idx) => {
+    if (a._deleted) return '';
+    const type=a.file_type||'link'; const icon=icons[type]||'fa-file'; const color=colors[type]||'#6b7280';
+    return `<div id="existing-att-${idx}" style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:6px">
+      <i class="fas ${icon}" style="color:${color};font-size:18px;flex-shrink:0"></i>
+      <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500;color:#374151;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a.file_name||'이름 없음'}</div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:2px">기존 첨부파일</div></div>
+      <span style="font-size:10px;background:#e0f2fe;color:#0369a1;padding:2px 7px;border-radius:10px;white-space:nowrap;margin-right:4px">저장됨</span>
+      <button onclick="_deleteExistingAtt(${idx})" title="첨부파일 삭제" style="background:none;border:none;cursor:pointer;padding:4px 6px;border-radius:5px;color:#ef4444;font-size:14px">
+        <i class="fas fa-times"></i></button></div>`;
+  }).join('');
+  const activeCount = _existingAtts.filter(a => !a._deleted).length;
+  list.innerHTML = `<div style="font-size:11px;color:#6b7280;margin-bottom:6px;padding:4px 8px;background:#fef9c3;border-radius:6px;border:1px solid #fde68a">
+    <i class="fas fa-info-circle" style="color:#d97706"></i> 기존 첨부파일은 유지됩니다. ✕ 버튼으로 삭제하거나 아래에서 새 파일을 추가하세요.
+    ${activeCount===0?'<span style="color:#ef4444;margin-left:6px">⚠ 첨부파일이 없습니다.</span>':''}</div>${existingHtml}`;
+}
+async function _deleteExistingAtt(idx) {
+  const att = _existingAtts[idx]; if (!att) return;
+  const fileName = att.file_name||'이름 없음';
+  const ok = await new Promise(resolve => {
+    const old = document.getElementById('_attDelConfirm'); if (old) old.remove();
+    const popup = document.createElement('div');
+    popup.id = '_attDelConfirm';
+    popup.style.cssText = 'position:fixed;z-index:9000;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.18);padding:24px 28px;min-width:300px;max-width:400px;font-family:inherit;text-align:center;border:1px solid #e5e7eb';
+    popup.innerHTML = `<div style="font-size:28px;margin-bottom:8px">🗑️</div>
+      <div style="font-size:15px;font-weight:600;color:#111827;margin-bottom:8px">첨부파일 삭제</div>
+      <div style="font-size:13px;color:#374151;line-height:1.6;margin-bottom:20px"><strong style="color:#dc2626">${fileName}</strong>을(를)<br>삭제하시겠습니까?</div>
+      <div style="display:flex;gap:10px;justify-content:center">
+        <button id="_attDelCancel" style="padding:8px 20px;border:1px solid #d1d5db;border-radius:8px;background:#f9fafb;color:#374151;font-size:13px;cursor:pointer">취소</button>
+        <button id="_attDelOk" style="padding:8px 20px;border:none;border-radius:8px;background:#dc2626;color:#fff;font-size:13px;cursor:pointer;font-weight:600">삭제</button></div>`;
+    document.body.appendChild(popup);
+    popup.querySelector('#_attDelCancel').onclick = () => { popup.remove(); resolve(false); };
+    popup.querySelector('#_attDelOk').onclick    = () => { popup.remove(); resolve(true); };
   });
-})();
+  if (!ok) return;
+  _existingAtts[idx]._deleted = true;
+  if (att.id && !_deletedAttIds.includes(att.id)) _deletedAttIds.push(att.id);
+  _redrawExistingAttachments(); Toast.info('저장 시 삭제됩니다.');
+}
 
-/* ══════════════════════════════════════════════
-   외부 노출
-══════════════════════════════════════════════ */
-window.init_entry             = init_entry;
-window.openEntryDetail        = openEntryDetail;
-window.closeEntryDetail       = closeEntryDetail;
-window.openEntryEdit          = openEntryEdit;
-window.deleteEntry            = deleteEntry;
-window.submitEntry            = submitEntry;
-window.submitAllDrafts        = submitAllDrafts;
-window.copyEntry              = copyEntry;
-window.resubmitEntry          = resubmitEntry;
-window.exportEntriesToExcel   = exportEntriesToExcel;
-window.openExcelImport        = openExcelImport;
-window.closeExcelImport       = closeExcelImport;
-window.handleExcelFile        = handleExcelFile;
-window.confirmExcelImport     = confirmExcelImport;
-window.renderEntryMonthlyView = renderEntryMonthlyView;
-window.renderEntryStats       = renderEntryStats;
-window.switchEntryTab         = switchEntryTab;
-window.resetEntryFilter       = resetEntryFilter;
-window.quickSetDuration       = quickSetDuration;
-window.shiftEntryDate         = shiftEntryDate;
-window.toggleAllEntryCheck    = toggleAllEntryCheck;
-window.adminBulkStatusChange  = adminBulkStatusChange;
-window.initDropZone           = initDropZone;
-window.entryGoPage            = entryGoPage;
+async function submitSingleEntry(id) {
+  try {
+    await API.patch('time_entries', id, { status: 'submitted' });
+    Toast.success('제출되었습니다.');
+    if (typeof createNotification === 'function') {
+      try {
+        const session=getSession(); const entry=await API.get('time_entries', id);
+        if (entry && entry.approver_id) createNotification({ toUserId:entry.approver_id, toUserName:entry.approver_name, fromUserId:session.id, fromUserName:session.name, type:'submitted', entryId:id, entrySummary:`${entry.client_name||entry.work_category_name}|${entry.work_subcategory_name||''}`, message:`${session.name}님이 타임시트 승인을 요청했습니다.`, targetMenu:'approval' });
+      } catch {}
+    }
+    await updateApprovalBadge(getSession()); loadMyEntries();
+  } catch { Toast.error('제출 실패'); }
+}
+async function deleteEntry(id) {
+  const ok = await Confirm.delete('업무 기록'); if (!ok) return;
+  try { await API.delete('time_entries', id); Toast.success('삭제되었습니다.'); loadMyEntries(); }
+  catch { Toast.error('삭제 실패'); }
+}
+function showRejectReason(reason) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay show';
+  overlay.innerHTML = `<div class="confirm-dialog"><div class="confirm-icon">💬</div><div class="confirm-title">반려 사유</div>
+    <div class="confirm-desc" style="text-align:left;background:#f8fafc;border:1px solid var(--border-light);border-radius:8px;padding:12px;margin-top:8px;font-size:13px;line-height:1.6;white-space:pre-wrap">${reason}</div>
+    <div class="confirm-actions"><button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove()">확인</button></div></div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target===overlay) overlay.remove(); });
+}
+
+function _base64ToBlob(dataUrl) {
+  const [meta, b64] = dataUrl.split(',');
+  const mime = (meta.match(/:(.*?);/)||['','application/octet-stream'])[1];
+  const binary = atob(b64); const bytes = new Uint8Array(binary.length);
+  for (let i=0; i<binary.length; i++) bytes[i]=binary.charCodeAt(i);
+  return { blob: new Blob([bytes], { type: mime }), mime };
+}
+
+function _openFilePreview(a) {
+  if (!a || !a.file_content || !a.file_content.startsWith('data:')) { Toast.error('저장된 파일 데이터가 없습니다.'); return; }
+  const fileType=(a.file_type||'').toLowerCase(); const fileName=a.file_name||'파일';
+  const { blob, mime } = _base64ToBlob(a.file_content); const blobUrl = URL.createObjectURL(blob);
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.75);display:flex;flex-direction:column;align-items:center;justify-content:flex-start';
+  const toolbar = document.createElement('div');
+  toolbar.style.cssText = 'width:100%;max-width:960px;display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:rgba(15,23,42,0.95);border-bottom:1px solid rgba(255,255,255,0.1);flex-shrink:0';
+  const iconClass={pdf:'fa-file-pdf',excel:'fa-file-excel',word:'fa-file-word',ppt:'fa-file-powerpoint'}[fileType]||'fa-file';
+  const iconColor={pdf:'#f87171',excel:'#4ade80',word:'#60a5fa',ppt:'#fb923c'}[fileType]||'#94a3b8';
+  toolbar.innerHTML=`<div style="color:#fff;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px"><i class="fas ${iconClass}" style="color:${iconColor};font-size:16px"></i><span>${fileName}</span></div>`;
+  const closeBtn=document.createElement('button');
+  closeBtn.style.cssText='background:rgba(255,255,255,0.15);color:#fff;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px';
+  closeBtn.innerHTML='<i class="fas fa-times"></i> 닫기';
+  closeBtn.addEventListener('click',()=>{overlay.remove();URL.revokeObjectURL(blobUrl);});
+  toolbar.appendChild(closeBtn); overlay.appendChild(toolbar);
+  const content=document.createElement('div');
+  content.style.cssText='flex:1;width:100%;max-width:960px;overflow:auto;background:#1e293b;position:relative';
+  if (fileType==='pdf'||mime==='application/pdf') {
+    const iframe=document.createElement('iframe'); iframe.src=blobUrl; iframe.style.cssText='width:100%;height:100%;border:none;min-height:calc(100vh - 60px)'; iframe.setAttribute('type','application/pdf'); content.appendChild(iframe);
+  } else if (fileType==='word'||mime.includes('word')||mime.includes('officedocument.wordprocessing')) {
+    _renderWordPreview(content,blob,blobUrl);
+  } else if (fileType==='excel'||mime.includes('spreadsheet')||mime.includes('excel')) {
+    _renderExcelPreview(content,blob,blobUrl);
+  } else {
+    const msg=document.createElement('div'); msg.style.cssText='display:flex;flex-direction:column;align-items:center;justify-content:center;height:300px;color:#94a3b8;gap:12px';
+    msg.innerHTML=`<i class="fas fa-file-alt" style="font-size:48px;color:#475569"></i><div style="font-size:14px;font-weight:600;color:#cbd5e1">미리보기를 지원하지 않는 형식입니다.</div>`; content.appendChild(msg);
+  }
+  overlay.appendChild(content); document.body.appendChild(overlay);
+  const escHandler=(e)=>{if(e.key==='Escape'){overlay.remove();URL.revokeObjectURL(blobUrl);document.removeEventListener('keydown',escHandler);}};
+  document.addEventListener('keydown',escHandler);
+}
+
+function _renderWordPreview(container,blob,blobUrl) {
+  const loading=_previewLoading(container,'Word 문서 변환 중...');
+  if (typeof mammoth==='undefined') { loading.remove(); _previewError(container,'mammoth.js가 로드되지 않았습니다.'); return; }
+  const reader=new FileReader();
+  reader.onload=async(e)=>{
+    try { const result=await mammoth.convertToHtml({arrayBuffer:e.target.result}); loading.remove();
+      const wrap=document.createElement('div'); wrap.style.cssText='background:#fff;max-width:800px;margin:24px auto;padding:48px 56px;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,0.3);font-family:serif;font-size:14px;line-height:1.8;color:#1e293b';
+      wrap.innerHTML=result.value||'<p style="color:#94a3b8">내용이 없습니다.</p>'; container.appendChild(wrap);
+    } catch(err) { loading.remove(); _previewError(container,'Word 변환 실패: '+err.message); }
+  };
+  reader.readAsArrayBuffer(blob);
+}
+function _renderExcelPreview(container,blob,blobUrl) {
+  const loading=_previewLoading(container,'Excel 데이터 로드 중...');
+  if (typeof XLSX==='undefined') { loading.remove(); _previewError(container,'SheetJS(XLSX)가 로드되지 않았습니다.'); return; }
+  const reader=new FileReader();
+  reader.onload=(e)=>{
+    try { const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'}); loading.remove();
+      const wrap=document.createElement('div'); wrap.style.cssText='padding:16px;overflow:auto;min-height:200px';
+      if (wb.SheetNames.length>1) {
+        const tabs=document.createElement('div'); tabs.style.cssText='display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap';
+        wb.SheetNames.forEach((name,i)=>{ const tab=document.createElement('button'); tab.textContent=name; tab.dataset.sheet=i; tab.style.cssText='padding:4px 12px;border-radius:4px;border:1px solid #475569;background:'+(i===0?'#2563eb':'#334155')+';color:#fff;cursor:pointer;font-size:12px'; tab.addEventListener('click',()=>{tabs.querySelectorAll('button').forEach(b=>b.style.background='#334155');tab.style.background='#2563eb';_renderSheetTable(tableWrap,wb,name);}); tabs.appendChild(tab); }); wrap.appendChild(tabs);
+      }
+      const tableWrap=document.createElement('div'); wrap.appendChild(tableWrap); _renderSheetTable(tableWrap,wb,wb.SheetNames[0]); container.appendChild(wrap);
+    } catch(err) { loading.remove(); _previewError(container,'Excel 로드 실패: '+err.message); }
+  };
+  reader.readAsArrayBuffer(blob);
+}
+function _renderSheetTable(wrap,wb,sheetName) {
+  const ws=wb.Sheets[sheetName]; const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+  if (!rows.length) { wrap.innerHTML='<p style="color:#94a3b8;padding:16px">데이터가 없습니다.</p>'; return; }
+  const maxCols=Math.max(...rows.map(r=>r.length));
+  let html=`<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;color:#e2e8f0;width:100%">`;
+  rows.forEach((row,ri)=>{ const isHeader=ri===0; html+=`<tr style="background:${isHeader?'#1e3a5f':ri%2===0?'#1e293b':'#263245'}">`;
+    for (let ci=0;ci<maxCols;ci++) { const cell=row[ci]!==undefined?String(row[ci]):''; const tag=isHeader?'th':'td'; html+=`<${tag} style="border:1px solid #334155;padding:5px 10px;white-space:nowrap${isHeader?';font-weight:700;color:#93c5fd':''}">`+cell+`</${tag}>`; }
+    html+='</tr>'; });
+  html+='</table></div>'; wrap.innerHTML=html;
+}
+function _previewLoading(container,msg) {
+  const el=document.createElement('div'); el.style.cssText='display:flex;align-items:center;justify-content:center;height:200px;color:#94a3b8;gap:10px;font-size:13px'; el.innerHTML=`<i class="fas fa-spinner fa-spin" style="font-size:20px"></i> ${msg}`; container.appendChild(el); return el;
+}
+function _previewError(container,msg) {
+  const el=document.createElement('div'); el.style.cssText='display:flex;flex-direction:column;align-items:center;justify-content:center;height:200px;color:#f87171;gap:8px;font-size:13px'; el.innerHTML=`<i class="fas fa-exclamation-triangle" style="font-size:24px"></i> ${msg}`; container.appendChild(el);
+}
+function _doDownload(a) { _openFilePreview(a); }
+function downloadBase64File(idx) { _openFilePreview(_viewerAtts[idx]); }
+let _viewerAtts = [];
+
+function openAttachmentViewer(atts,entryId,entryStatus) {
+  if (!atts || atts.length===0) return; _viewerAtts=atts;
+  const iconMap={excel:'fa-file-excel',word:'fa-file-word',ppt:'fa-file-powerpoint',pdf:'fa-file-pdf',link:'fa-link'};
+  const colorMap={excel:'#16a34a',word:'#1d4ed8',ppt:'#c2410c',pdf:'#b91c1c',link:'#7c3aed'};
+  const overlay=document.createElement('div'); overlay.className='modal-overlay show'; overlay.style.zIndex='9999';
+  const modal=document.createElement('div'); modal.className='modal modal-md'; modal.style.maxWidth='560px';
+  const header=document.createElement('div'); header.className='modal-header';
+  header.innerHTML=`<h3><i class="fas fa-paperclip" style="color:var(--primary)"></i>&nbsp;첨부 결과물 확인 (${atts.length}건)</h3>`;
+  const closeBtn=document.createElement('button'); closeBtn.className='btn-close'; closeBtn.textContent='×'; closeBtn.addEventListener('click',()=>overlay.remove()); header.appendChild(closeBtn);
+  const body=document.createElement('div'); body.className='modal-body'; body.style.padding='16px';
+  modal.appendChild(header); modal.appendChild(body); overlay.appendChild(modal); document.body.appendChild(overlay);
+  overlay.addEventListener('click',e=>{if(e.target===overlay)overlay.remove();});
+  atts.forEach((a,idx)=>{
+    const icon=iconMap[a.file_type]||'fa-file'; const color=colorMap[a.file_type]||'#6b7280';
+    const hasContent=a.file_content&&a.file_content.startsWith('data:'); const hasUrl=a.file_url&&a.file_url.startsWith('http');
+    const item=document.createElement('div'); item.style.cssText='display:flex;align-items:flex-start;gap:12px;padding:12px 14px;background:#f8fafc;border:1px solid var(--border-light);border-radius:10px;margin-bottom:8px';
+    const iconEl=document.createElement('i'); iconEl.className=`fas ${icon}`; iconEl.style.cssText=`color:${color};font-size:26px;margin-top:2px;flex-shrink:0`; item.appendChild(iconEl);
+    const info=document.createElement('div'); info.style.cssText='flex:1;min-width:0';
+    const nameEl=document.createElement('div'); nameEl.style.cssText='font-weight:600;font-size:13px;word-break:break-all'; nameEl.textContent=a.file_name||'파일명 없음'; info.appendChild(nameEl);
+    const actionWrap=document.createElement('div'); actionWrap.style.cssText='margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center';
+    if (hasContent) { const btn=document.createElement('button'); btn.className='btn btn-sm btn-primary'; btn.style.whiteSpace='nowrap'; btn.innerHTML='<i class="fas fa-eye"></i> 열어보기'; btn.addEventListener('click',()=>_openFilePreview(a)); actionWrap.appendChild(btn); }
+    else if (hasUrl) { const link=document.createElement('a'); link.href=a.file_url; link.target='_blank'; link.className='btn btn-sm btn-outline'; link.style.cssText='white-space:nowrap;display:inline-block'; link.innerHTML='<i class="fas fa-external-link-alt"></i> 링크 열기'; actionWrap.appendChild(link); }
+    info.appendChild(actionWrap); item.appendChild(info); body.appendChild(item);
+  });
+  const footer=document.createElement('div'); footer.style.cssText='padding:12px 16px 16px;border-top:1px solid var(--border-light)';
+  const closeOnlyBtn=document.createElement('button'); closeOnlyBtn.className='btn btn-outline'; closeOnlyBtn.style.cssText='float:right'; closeOnlyBtn.innerHTML='<i class="fas fa-times"></i> 닫기'; closeOnlyBtn.addEventListener('click',()=>overlay.remove()); footer.appendChild(closeOnlyBtn);
+  modal.appendChild(footer);
+}
+
+async function openAttachmentViewerById(entryId,entryStatus) {
+  try { const r=await API.list('attachments',{limit:500}); const atts=(r&&r.data)?r.data.filter(a=>a.entry_id===entryId):[];
+    if (!atts.length) { Toast.info('첨부 파일이 없습니다.'); return; }
+    openAttachmentViewer(atts,entryId,entryStatus);
+  } catch(err) { Toast.error('첨부파일 조회 실패: '+err.message); }
+}
+
+function _openExtractedTextModal(attachment) {
+  const overlay=document.createElement('div'); overlay.className='modal-overlay show'; overlay.style.zIndex='10000';
+  const modal=document.createElement('div'); modal.className='modal modal-lg'; modal.style.cssText='max-width:680px;border-radius:14px;overflow:hidden';
+  const header=document.createElement('div'); header.className='modal-header'; header.style.cssText='background:#faf5ff;padding:14px 20px;border-bottom:1px solid #e9d5ff;display:flex;align-items:center;justify-content:space-between';
+  header.innerHTML=`<div style="display:flex;align-items:center;gap:8px"><i class="fas fa-shield-alt" style="color:#7c3aed;font-size:14px"></i><span style="font-size:14px;font-weight:700;color:#4c1d95">추출 텍스트 확인</span><span style="background:#ede9fe;color:#6d28d9;border-radius:5px;padding:2px 8px;font-size:11px;font-weight:600">민감정보 마스킹 완료</span></div>`;
+  const closeBtn=document.createElement('button'); closeBtn.className='btn-close'; closeBtn.textContent='×'; closeBtn.addEventListener('click',()=>overlay.remove()); header.appendChild(closeBtn);
+  const body=document.createElement('div'); body.className='modal-body'; body.style.cssText='padding:16px 20px;max-height:60vh;overflow-y:auto';
+  const textBox=document.createElement('pre'); textBox.style.cssText='background:#f8fafc;border:1px solid var(--border-light);border-radius:8px;padding:14px 16px;font-size:12px;line-height:1.8;color:var(--text-primary);white-space:pre-wrap;word-break:break-word;max-height:40vh;overflow-y:auto;font-family:inherit';
+  textBox.textContent=attachment.extracted_text; body.appendChild(textBox);
+  const footer=document.createElement('div'); footer.className='modal-footer'; footer.style.cssText='padding:12px 20px;background:#faf5ff;border-top:1px solid #e9d5ff;display:flex;justify-content:flex-end';
+  const closeFooterBtn=document.createElement('button'); closeFooterBtn.className='btn btn-outline'; closeFooterBtn.innerHTML='<i class="fas fa-times"></i> 닫기'; closeFooterBtn.addEventListener('click',()=>overlay.remove()); footer.appendChild(closeFooterBtn);
+  modal.appendChild(header); modal.appendChild(body); modal.appendChild(footer); overlay.appendChild(modal); document.body.appendChild(overlay);
+  overlay.addEventListener('click',e=>{if(e.target===overlay)overlay.remove();});
+}
+
+async function exportEntriesToExcel() {
+  const btn = document.querySelector('[onclick="exportEntriesToExcel()"]');
+  const origHtml = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled=true; btn.innerHTML='<i class="fas fa-spinner fa-spin"></i> 로딩 중...'; }
+  try {
+    if (typeof XLSX==='undefined') { if (typeof LibLoader!=='undefined') await LibLoader.load('xlsx'); }
+  } catch (loadErr) { Toast.error('엑셀 라이브러리 로드 실패'); if (btn) { btn.disabled=false; btn.innerHTML=origHtml; } return; }
+  if (typeof XLSX==='undefined') { Toast.error('엑셀 라이브러리를 불러올 수 없습니다.'); if (btn) { btn.disabled=false; btn.innerHTML=origHtml; } return; }
+  if (btn) btn.innerHTML='<i class="fas fa-spinner fa-spin"></i> 생성 중...';
+  try {
+    const session=getSession();
+    const r=await API.list('time_entries',{limit:500});
+    let entries=(r&&r.data)?r.data:(Array.isArray(r)?r:[]);
+    if (session.role==='staff') entries=entries.filter(e=>String(e.user_id)===String(session.id));
+    if (!entries.length) { Toast.info('내보낼 데이터가 없습니다.'); return; }
+    const statusLabel={draft:'임시저장',submitted:'검토중',approved:'승인',rejected:'반려'};
+    const toDateOnly=(ms)=>{ if(!ms) return ''; try { const d=new Date(Number(ms)); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; } catch{return '';} };
+    const toTimeOnly=(ms)=>{ if(!ms) return ''; try { const d=new Date(Number(ms)); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; } catch{return '';} };
+    const rows=entries.map((e,i)=>({
+      'No':i+1, '작성일자':toDateOnly(e.created_at||e.work_start_at), 'Staff':e.user_name||'', '업무팀':e.team_name||'',
+      '고객사':e.client_name||'내부업무', '대분류':e.work_category_name||'', '소분류':e.work_subcategory_name||'',
+      '시작일자':toDateOnly(e.work_start_at), '시작시간':toTimeOnly(e.work_start_at),
+      '종료일자':toDateOnly(e.work_end_at), '종료시간':toTimeOnly(e.work_end_at),
+      '업무시간':Utils.formatDuration(e.duration_minutes),
+      '수행내용':(e.work_description||'').replace(/<[^>]+>/g,'').replace(/&nbsp;/g,' ').trim(),
+      '상태':statusLabel[e.status]||e.status||''
+    }));
+    const wb=XLSX.utils.book_new(); const ws=XLSX.utils.json_to_sheet(rows);
+    ws['!cols']=[{wch:5},{wch:12},{wch:10},{wch:14},{wch:16},{wch:16},{wch:20},{wch:12},{wch:8},{wch:12},{wch:8},{wch:8},{wch:40},{wch:8}];
+    XLSX.utils.book_append_sheet(wb,ws,'타임시트');
+    const wbArray=XLSX.write(wb,{bookType:'xlsx',type:'array'});
+    const blob=new Blob([wbArray],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const url=URL.createObjectURL(blob); const today=new Date().toISOString().slice(0,10).replace(/-/g,'');
+    const fname=`타임시트_${today}.xlsx`;
+    const anchor=document.createElement('a'); anchor.href=url; anchor.download=fname; anchor.style.display='none';
+    document.body.appendChild(anchor); anchor.click(); document.body.removeChild(anchor);
+    setTimeout(()=>URL.revokeObjectURL(url),5000);
+    Toast.success(`엑셀 저장 완료 (${entries.length}건)`);
+  } catch(err) { console.error('exportEntriesToExcel error:',err); Toast.error('내보내기 실패: '+(err.message||String(err))); }
+  finally { if (btn) { btn.disabled=false; btn.innerHTML=origHtml; } }
+}
+
