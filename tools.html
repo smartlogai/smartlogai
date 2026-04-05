@@ -224,7 +224,7 @@
    224	  }catch(e){L2('❌ '+e.message,'er');}
    225	}
    226	
-   227	// ★ 일괄 Push: Genspark 서버 캐시 우회 → GitHub에서 직접 읽어서 Push
+   227	// ★ 일괄 Push: GitHub에서 직접 읽어서 Push (캐시 완전 우회)
    228	async function bPush(){
    229	  const c=c2();
    230	  if(!c.tok){L2('❌ PAT 입력','er');return;}
@@ -237,29 +237,27 @@
    237	    document.getElementById('pf').style.width=Math.round(i/sel.length*100)+'%';
    238	    L2('📥 ['+(i+1)+'/'+sel.length+'] '+f.p,'in');
    239	    try{
-   240	      // ★ 서버 캐시 우회: Genspark 서버 대신 GitHub에서 직접 읽기
-   241	      const rawUrl='https://raw.githubusercontent.com/'+c.repo+'/'+c.br+'/'+f.p+'?_='+Date.now();
-   242	      const rawRes=await fetch(rawUrl,{cache:'no-store'});
-   243	      if(!rawRes.ok)throw new Error('GitHub raw 읽기 실패 HTTP '+rawRes.status);
-   244	      const txt=await rawRes.text();
-   245	      L2('   └ '+(new Blob([txt]).size/1024).toFixed(1)+'KB (GitHub raw)','gr');
-   246	      // GitHub Push
-   247	      const sr=await api('/repos/'+c.repo+'/contents/'+f.p+'?ref='+c.br,{},c.tok);
-   248	      const sha=sr.ok&&sr.d.sha?sr.d.sha:null;
-   249	      const body={message:c.msg,content:btoa(unescape(encodeURIComponent(txt))),branch:c.br};
-   250	      if(sha)body.sha=sha;
-   251	      const pr=await api('/repos/'+c.repo+'/contents/'+f.p,{method:'PUT',body:JSON.stringify(body)},c.tok);
-   252	      if(!pr.ok)throw new Error(pr.d?.message||'HTTP '+pr.st);
-   253	      ST[f.p]='done';L2('✅ '+f.p+' ('+pr.d?.content?.sha?.slice(0,7)+')','ok');
-   254	    }catch(e){ST[f.p]='fail';L2('❌ '+f.p+': '+e.message,'er');}
-   255	    rg();
-   256	    if(i<sel.length-1)await new Promise(r=>setTimeout(r,300));
-   257	  }
-   258	  document.getElementById('pf').style.width='100%';
-   259	  document.getElementById('pb').disabled=false;
-   260	  L2('🎉 완료! Netlify 배포 시작 (~1-3분)','ok');
-   261	}
-   262	</script>
-   263	</body>
-   264	</html>
-   265	
+   240	      const rawUrl='https://raw.githubusercontent.com/'+c.repo+'/'+c.br+'/'+f.p+'?_='+Date.now();
+   241	      const rawRes=await fetch(rawUrl,{cache:'no-store'});
+   242	      if(!rawRes.ok)throw new Error('GitHub raw 읽기 실패 HTTP '+rawRes.status);
+   243	      const txt=await rawRes.text();
+   244	      L2('   └ '+(new Blob([txt]).size/1024).toFixed(1)+'KB (GitHub raw)','gr');
+   245	      const sr=await api('/repos/'+c.repo+'/contents/'+f.p+'?ref='+c.br,{},c.tok);
+   246	      const sha=sr.ok&&sr.d.sha?sr.d.sha:null;
+   247	      const body={message:c.msg,content:btoa(unescape(encodeURIComponent(txt))),branch:c.br};
+   248	      if(sha)body.sha=sha;
+   249	      const pr=await api('/repos/'+c.repo+'/contents/'+f.p,{method:'PUT',body:JSON.stringify(body)},c.tok);
+   250	      if(!pr.ok)throw new Error(pr.d?.message||'HTTP '+pr.st);
+   251	      ST[f.p]='done';L2('✅ '+f.p+' ('+pr.d?.content?.sha?.slice(0,7)+')','ok');
+   252	    }catch(e){ST[f.p]='fail';L2('❌ '+f.p+': '+e.message,'er');}
+   253	    rg();
+   254	    if(i<sel.length-1)await new Promise(r=>setTimeout(r,300));
+   255	  }
+   256	  document.getElementById('pf').style.width='100%';
+   257	  document.getElementById('pb').disabled=false;
+   258	  L2('🎉 완료! Netlify 배포 시작 (~1-3분)','ok');
+   259	}
+   260	</script>
+   261	</body>
+   262	</html>
+   263	
