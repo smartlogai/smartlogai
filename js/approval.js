@@ -321,6 +321,7 @@ function resetApprovalFilter() {
   _approvalPage = 1;
   loadApprovalList();
 }
+
 // ══════════════════════════════════════════════
 // 공통 상수 — 평가 매핑
 // ══════════════════════════════════════════════
@@ -338,12 +339,12 @@ const ARCHIVE_RATINGS = ['normal', 'satisfied', 'very_satisfied'];
  *  지도수행 -1단계: satisfied(3) → normal(2)
  */
 function calcCompetency(qualityRating, performanceType) {
-  const qIdx    = RATING_ORDER.indexOf(qualityRating);
+  const qIdx    = RATING_ORDER.indexOf(qualityRating);          // 0~4, 없으면 -1
   if (qIdx < 0) return { competency_stars: 0, competency_rating: 'very_unsatisfied' };
   const deduct  = PERF_DEDUCT[performanceType] ?? 0;
-  const cIdx    = Math.max(0, qIdx - deduct);
-  const cRating = RATING_ORDER[cIdx];
-  const cStars  = RATING_STARS[cRating] ?? 0;
+  const cIdx    = Math.max(0, qIdx - deduct);                   // 단계 차감
+  const cRating = RATING_ORDER[cIdx];                           // 결과 등급
+  const cStars  = RATING_STARS[cRating] ?? 0;                   // 결과 별점
   return { competency_stars: cStars, competency_rating: cRating };
 }
 
@@ -450,6 +451,7 @@ async function _apvExtractAndMask(attId, idx) {
     await API.patch('attachments', a.id, { extracted_text: maskedText });
     a.extracted_text = maskedText;
 
+    // 버튼 전환
     if (btn) {
       btn.id = '';
       btn.style.cssText = 'white-space:nowrap;margin-top:6px;color:#6d28d9;border-color:#c4b5fd';
@@ -482,12 +484,14 @@ function _buildEntryDetailHtml(entry, atts) {
         const hasUrl     = a.file_url && a.file_url.startsWith('http');
         const safeId     = (a.id || '').replace(/'/g, "\\'");
 
+        // 파일 열기 버튼
         let actionBtn = hasContent
           ? `<button class="btn btn-sm btn-primary" onclick="downloadApprovalFile(${idx})" style="white-space:nowrap;margin-top:6px"><i class="fas fa-eye"></i> 미리보기</button>`
           : hasUrl
           ? `<a href="${a.file_url}" target="_blank" class="btn btn-sm btn-outline" style="white-space:nowrap;margin-top:6px;display:inline-block"><i class="fas fa-external-link-alt"></i> 링크 열기</a>`
           : `<div style="margin-top:6px;font-size:11px;color:#94a3b8"><i class="fas fa-info-circle"></i> 이메일/공유폴더 확인</div>`;
 
+        // 추출 텍스트 버튼
         let extractBtn = '';
         if (a.extracted_text) {
           extractBtn = `<button class="btn btn-sm btn-outline" onclick="_apvShowExtractedText('${safeId}')"
@@ -539,17 +543,20 @@ function _buildEntryDetailHtml(entry, atts) {
     </div>
     <div style="margin-bottom:12px">
       <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">수행 내용</div>
+      <!-- ★ work_description은 Quill HTML → div로 렌더링, 수정 시 Quill 에디터로 전환 -->
       <div id="approval-desc-view" class="approval-desc-view-box arch-desc-view"
         style="width:100%;font-size:13px;line-height:1.75;padding:10px 12px;border-radius:8px;border:1px solid var(--border-light);background:#f8fafc;color:var(--text-primary);box-sizing:border-box;font-family:inherit;min-height:80px;max-height:320px;overflow-y:auto;word-break:break-word;overflow-x:auto">
         ${(entry.work_description||'').trim()
           ? (entry.work_description.startsWith('<') ? entry.work_description : '<p>' + Utils.escHtml(entry.work_description) + '</p>')
           : '<span style="color:var(--text-muted);font-size:12px">(내용 없음)</span>'}
       </div>
+      <!-- Quill 에디터 래퍼 (수정 모드에만 표시) -->
       <div id="approval-edit-quill-wrap" style="display:none;border-radius:8px;overflow:hidden;border:1.5px solid var(--primary)">
         <div id="approval-edit-quill" style="min-height:160px;font-size:13px;background:#fff"></div>
       </div>
     </div>
     ${entry.time_category === 'client' ? (() => {
+      // 자문 분류 정보 표시 (고객업무만)
       let kwQ = [], kwR = [], lawR = [];
       try { kwQ = Array.isArray(entry.kw_query) ? entry.kw_query : (entry.kw_query ? JSON.parse(entry.kw_query) : []); } catch {}
       try { kwR = Array.isArray(entry.kw_reason) ? entry.kw_reason : (entry.kw_reason ? JSON.parse(entry.kw_reason) : []); } catch {}
@@ -564,6 +571,7 @@ function _buildEntryDetailHtml(entry, atts) {
           ${lawR.length ? `<div style="margin-bottom:6px"><span style="font-size:10px;color:#6b7280;font-weight:600;display:block;margin-bottom:3px">관련법령</span>${lawBadge(lawR)}</div>` : ''}
           ${kwR.length ? `<div><span style="font-size:10px;color:#6b7280;font-weight:600;display:block;margin-bottom:3px">판단사유</span>${tagBadge(kwR,'#f0fdf4','#166534')}</div>` : ''}
         </div>`;
+      // id=approval-kw-view: 읽기 모드, id=approval-kw-edit: 수정 모드
       return `<div style="margin-bottom:12px">
         <div id="approval-kw-view" style="${!viewContent ? 'display:none' : ''}">${viewContent}</div>
         <div id="approval-kw-edit"></div>
@@ -577,7 +585,7 @@ function _buildEntryDetailHtml(entry, atts) {
     </div>`;
 }
 
-/** 평가 버튼 5개 HTML */
+/** 평가 버튼 5개 HTML (name 구분자로 여러 세트 지원) */
 function _buildRatingBtns(name) {
   const items = [
     { value:'very_unsatisfied', icon:'fa-times-circle',  color:'#ef4444', label:'매우미흡' },
@@ -598,6 +606,7 @@ function _buildRatingBtns(name) {
       </label>`).join('')}
   </div>`;
 }
+
 // ══════════════════════════════════════════════
 // 승인 모달 열기 — 1차(manager) / 2차(director) 자동 분기
 // ══════════════════════════════════════════════
@@ -610,6 +619,7 @@ async function openApprovalModal(entryId, focusReject = false) {
     if (_ab) { _ab.disabled = false; _ab.innerHTML = '<i class="fas fa-check"></i> 승인'; }
     if (_eb) { _eb.disabled = false; _eb.innerHTML = '<i class="fas fa-edit"></i> 수정'; }
 
+    // 모달 재오픈 시 이전 Quill 인스턴스 초기화
     _approvalQuill = null;
     _approvalEditMode = false;
 
@@ -620,11 +630,13 @@ async function openApprovalModal(entryId, focusReject = false) {
     const attR = await API.list('attachments', { limit: 500 });
     const atts = (attR && attR.data) ? attR.data.filter(a => a.entry_id === entryId) : [];
     _approvalModalAtts = atts;
-    _apvCacheAtts(atts);
+    _apvCacheAtts(atts); // 추출 텍스트 버튼용 캐시 등록
 
     const session = getSession ? getSession() : null;
 
+    // ── 분기: 1차(manager) vs 2차(director/admin 열람) vs 상세보기
     const is1st = Auth.canApprove1st(session) && entry.status === 'submitted';
+    // director: pre_approved 건 OR reviewer2_id로 지정된 submitted 건
     const is2nd = Auth.canApprove2nd(session) && (
       entry.status === 'pre_approved' ||
       (entry.status === 'submitted' && String(entry.reviewer2_id) === String(session.id))
@@ -687,6 +699,7 @@ function _openApprovalModal1st(entry, atts, session) {
       <textarea class="form-control" id="approval-comment" rows="3" placeholder="검토 의견을 입력하세요."></textarea>
     </div>`;
 
+  // 수정/승인/반려 버튼 표시
   document.getElementById('editEntryBtn').style.display  = '';
   document.getElementById('rejectBtn').style.display     = '';
   const approveBtn = document.getElementById('approveBtn');
@@ -697,6 +710,7 @@ function _openApprovalModal1st(entry, atts, session) {
   const rejectBtn = document.getElementById('rejectBtn');
   rejectBtn.onclick = () => processApproval1st('rejected');
 
+  // 수행방식 버튼 인터랙션
   setTimeout(() => {
     document.querySelectorAll('.perf-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -711,7 +725,7 @@ function _openApprovalModal1st(entry, atts, session) {
 
 // ── 2차 승인 모달 (director용) ────────────────────────────────
 function _openApprovalModal2nd(entry, atts, session) {
-  const isManagerDirect = entry.status === 'submitted';
+  const isManagerDirect = entry.status === 'submitted'; // manager 본인 건
   const perfType = entry.performance_type || '';
   const preApproverBanner = entry.pre_approver_name
     ? `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;
@@ -731,6 +745,7 @@ function _openApprovalModal2nd(entry, atts, session) {
     ${preApproverBanner}
 
     ${isManagerDirect ? `
+    <!-- manager 본인 건: 수행방식 직접 선택 -->
     <div style="margin-bottom:14px;padding:14px 16px;background:#fff7ed;border-radius:10px;border:1px solid #fed7aa">
       <div style="font-size:12px;font-weight:600;color:#9a3412;margin-bottom:10px">
         <i class="fas fa-user-check" style="color:#f97316"></i> 수행방식 확인 <span style="color:var(--danger)">*</span>
@@ -814,6 +829,7 @@ function _openApprovalModal2nd(entry, atts, session) {
   const rejectBtn = document.getElementById('rejectBtn');
   rejectBtn.onclick = () => processApproval2nd('rejected');
 
+  // 인터랙션: 품질평가 선택 시 전문성 미리보기 + 저장 체크 자동
   setTimeout(() => {
     const updatePreview = () => {
       const qRating  = document.querySelector('input[name="quality_rating"]:checked')?.value || null;
@@ -834,6 +850,7 @@ function _openApprovalModal2nd(entry, atts, session) {
           <span style="margin:0 8px;color:#94a3b8">→</span>
           <span style="font-weight:700;color:#f59e0b;font-size:15px">${starStr}</span>
           <span style="margin-left:6px;font-size:12px;color:#475569">${RATING_LABEL[competency_rating]||''}</span>`;
+        // 저장 자동 체크
         if (archiveCheck) archiveCheck.checked = ARCHIVE_RATINGS.includes(qRating);
         if (archiveNotice) archiveNotice.style.display = ARCHIVE_RATINGS.includes(qRating) ? '' : 'none';
       }
@@ -889,6 +906,7 @@ function _openApprovalModalReadonly(entry, atts, session) {
   document.getElementById('rejectBtn').style.display     = 'none';
   document.getElementById('approveBtn').style.display    = 'none';
 }
+
 // ══════════════════════════════════════════════
 // 1차 승인 처리 (manager)
 // ══════════════════════════════════════════════
@@ -932,6 +950,7 @@ async function processApproval1st(decision) {
         performance_type:  perfType,
       });
     } else {
+      // 반려: reviewer 정보 기록
       Object.assign(patchData, {
         reviewer_id:   session.id,
         reviewer_name: session.name || '',
@@ -940,32 +959,48 @@ async function processApproval1st(decision) {
     const entry1st = _approvalTarget;
     await API.patch('time_entries', entry1st.id, patchData);
 
+    // ── 알림 생성 ─────────────────────────────────────────
     if (typeof createNotification === 'function') {
       const summary1st = `${entry1st.client_name || entry1st.work_category_name} | ${entry1st.work_subcategory_name || ''}`;
       if (isApprove) {
+        // 담당자에게 1차 승인 알림
         createNotification({
-          toUserId: entry1st.user_id, toUserName: entry1st.user_name,
-          fromUserId: session.id, fromUserName: session.name,
-          type: 'pre_approved', entryId: entry1st.id, entrySummary: summary1st,
-          message: `${session.name}님이 타임시트를 1차 승인했습니다. 본부장 최종 승인 대기 중입니다.`,
-          targetMenu: 'my-entries',
+          toUserId:     entry1st.user_id,
+          toUserName:   entry1st.user_name,
+          fromUserId:   session.id,
+          fromUserName: session.name,
+          type:         'pre_approved',
+          entryId:      entry1st.id,
+          entrySummary: summary1st,
+          message:      `${session.name}님이 타임시트를 1차 승인했습니다. 본부장 최종 승인 대기 중입니다.`,
+          targetMenu:   'my-entries',
         });
+        // 2차 승인자(reviewer2)에게 최종 승인 요청 알림
         if (entry1st.reviewer2_id) {
           createNotification({
-            toUserId: entry1st.reviewer2_id, toUserName: entry1st.reviewer2_name,
-            fromUserId: session.id, fromUserName: session.name,
-            type: 'submitted', entryId: entry1st.id, entrySummary: summary1st,
-            message: `${entry1st.user_name}님의 타임시트가 1차 승인되어 최종 승인을 기다리고 있습니다.`,
-            targetMenu: 'approval',
+            toUserId:     entry1st.reviewer2_id,
+            toUserName:   entry1st.reviewer2_name,
+            fromUserId:   session.id,
+            fromUserName: session.name,
+            type:         'submitted',
+            entryId:      entry1st.id,
+            entrySummary: summary1st,
+            message:      `${entry1st.user_name}님의 타임시트가 1차 승인되어 최종 승인을 기다리고 있습니다.`,
+            targetMenu:   'approval',
           });
         }
       } else {
+        // 담당자에게 반려 알림
         createNotification({
-          toUserId: entry1st.user_id, toUserName: entry1st.user_name,
-          fromUserId: session.id, fromUserName: session.name,
-          type: 'rejected', entryId: entry1st.id, entrySummary: summary1st,
-          message: `${session.name}님이 타임시트를 반려했습니다. 사유를 확인하고 수정 후 재제출해주세요.`,
-          targetMenu: 'my-entries',
+          toUserId:     entry1st.user_id,
+          toUserName:   entry1st.user_name,
+          fromUserId:   session.id,
+          fromUserName: session.name,
+          type:         'rejected',
+          entryId:      entry1st.id,
+          entrySummary: summary1st,
+          message:      `${session.name}님이 타임시트를 반려했습니다. 사유를 확인하고 수정 후 재제출해주세요.`,
+          targetMenu:   'my-entries',
         });
       }
     }
@@ -976,7 +1011,7 @@ async function processApproval1st(decision) {
     Cache.invalidate('time_entries_list');
     Cache.invalidate('time_entries_badge_' + session.id);
     Cache.invalidate('dash_time_entries');
-    window._dashNeedsRefresh = true;
+    window._dashNeedsRefresh = true; // 대시보드 재진입 시 콘텐츠 갱신
     await updateApprovalBadge(session, true);
     loadApprovalList();
     Toast.success(isApprove ? '1차 승인 완료 — 본부장 최종 승인 대기' : '반려되었습니다.');
@@ -1051,6 +1086,7 @@ async function processApproval2nd(decision) {
         competency_stars:  competencyStars,
         performance_type:  perfType,
       });
+      // manager 본인 건인 경우 1차 승인자 정보도 기록
       if (isManagerDirect) {
         Object.assign(patchData, {
           pre_approver_id:   session.id,
@@ -1120,24 +1156,35 @@ async function processApproval2nd(decision) {
       Toast.success(isApprove ? '최종 승인 완료' : '반려되었습니다.');
     }
 
+    // ── 알림 생성 ─────────────────────────────────────────
     if (typeof createNotification === 'function') {
       const entry2nd   = _approvalTarget;
       const summary2nd = `${entry2nd.client_name || entry2nd.work_category_name} | ${entry2nd.work_subcategory_name || ''}`;
       if (isApprove) {
+        // 담당자에게 최종 승인 알림
         createNotification({
-          toUserId: entry2nd.user_id, toUserName: entry2nd.user_name,
-          fromUserId: session.id, fromUserName: session.name,
-          type: 'approved', entryId: entry2nd.id, entrySummary: summary2nd,
-          message: `${session.name}님이 타임시트를 최종 승인했습니다. 🎉`,
-          targetMenu: 'my-entries',
+          toUserId:     entry2nd.user_id,
+          toUserName:   entry2nd.user_name,
+          fromUserId:   session.id,
+          fromUserName: session.name,
+          type:         'approved',
+          entryId:      entry2nd.id,
+          entrySummary: summary2nd,
+          message:      `${session.name}님이 타임시트를 최종 승인했습니다. 🎉`,
+          targetMenu:   'my-entries',
         });
       } else {
+        // 담당자에게 반려 알림
         createNotification({
-          toUserId: entry2nd.user_id, toUserName: entry2nd.user_name,
-          fromUserId: session.id, fromUserName: session.name,
-          type: 'rejected', entryId: entry2nd.id, entrySummary: summary2nd,
-          message: `${session.name}님이 타임시트를 반려했습니다. 사유를 확인하고 수정 후 재제출해주세요.`,
-          targetMenu: 'my-entries',
+          toUserId:     entry2nd.user_id,
+          toUserName:   entry2nd.user_name,
+          fromUserId:   session.id,
+          fromUserName: session.name,
+          type:         'rejected',
+          entryId:      entry2nd.id,
+          entrySummary: summary2nd,
+          message:      `${session.name}님이 타임시트를 반려했습니다. 사유를 확인하고 수정 후 재제출해주세요.`,
+          targetMenu:   'my-entries',
         });
       }
     }
@@ -1149,7 +1196,7 @@ async function processApproval2nd(decision) {
     Cache.invalidate('time_entries_badge_' + session.id);
     Cache.invalidate('dash_time_entries');
     Cache.invalidate('dash_archive_stars');
-    window._dashNeedsRefresh = true;
+    window._dashNeedsRefresh = true; // 대시보드 재진입 시 콘텐츠 갱신
     await updateApprovalBadge(session, true);
     loadApprovalList();
   } catch (err) {
@@ -1159,14 +1206,24 @@ async function processApproval2nd(decision) {
 }
 
 /* ──────────────────────────────────────────
+   (레거시 openApprovalModal / processApproval 블록 제거됨)
+   현재 사용 함수: openApprovalModal (line ~394), processApproval1st, processApproval2nd
+────────────────────────────────────────── */
+
+/* 레거시 openApprovalModal/processApproval 블록 완전 제거됨 */
+
+/* ──────────────────────────────────────────
    인라인 수정 토글 (승인 모달 내)
 ────────────────────────────────────────── */
 let _approvalEditMode = false;
-let _approvalQuill = null;
+let _approvalQuill = null;  // 승인모달 전용 Quill 인스턴스
+
+/* 자문분류 태그 상태 (편집 중) */
 let _editKwQuery  = [];
 let _editKwReason = [];
 let _editLawRefs  = [];
 
+/* 자문분류 편집 UI를 현재 _approvalTarget 값으로 초기화 */
 function _initApprovalKwEdit() {
   const t = _approvalTarget;
   try { _editKwQuery  = Array.isArray(t.kw_query)  ? [...t.kw_query]  : (t.kw_query  ? JSON.parse(t.kw_query)  : []); } catch { _editKwQuery  = []; }
@@ -1175,6 +1232,7 @@ function _initApprovalKwEdit() {
   _editLawRefs = _editLawRefs.map(r => typeof r === 'string' ? { law: r, article: '' } : r);
 }
 
+/* 태그 HTML만 생성 (버튼은 data-* 속성 + 이벤트 위임 방식) */
 function _kwTagHTML(arr, type, bg, clr) {
   return arr.map((t, i) =>
     `<span style="display:inline-flex;align-items:center;gap:4px;background:${bg};color:${clr};border-radius:5px;padding:2px 8px;font-size:12px;margin:2px">
@@ -1192,6 +1250,7 @@ function _kwLawHTML(arr) {
     </span>`).join('');
 }
 
+/* 태그 영역만 부분 업데이트 */
 function _refreshKwTags() {
   const kwSection = document.getElementById('approval-kw-edit');
   const root = kwSection || document;
@@ -1203,10 +1262,12 @@ function _refreshKwTags() {
   if (rt) rt.innerHTML = _kwTagHTML(_editKwReason, 'kw_reason', '#f0fdf4', '#166534');
 }
 
+/* 편집 UI 렌더링 — 항상 완전 재렌더 + 동기 이벤트 등록 */
 function _renderKwEdit() {
   const kwSection = document.getElementById('approval-kw-edit');
   if (!kwSection) return;
 
+  // 항상 완전 재렌더 (이전 상태 완전 초기화)
   kwSection.innerHTML = `
     <div id="apv-kw-edit-panel" style="background:#f0f0ff;border:1.5px solid #a5b4fc;border-radius:10px;padding:12px 14px;margin-top:10px">
       <div style="font-size:11px;font-weight:700;color:#4338ca;margin-bottom:10px;display:flex;align-items:center;gap:5px"><i class="fas fa-tags"></i> 자문 분류 정보 수정</div>
@@ -1244,6 +1305,7 @@ function _renderKwEdit() {
       </div>
     </div>`;
 
+  // ── 동기적으로 즉시 이벤트 등록 (setTimeout 없음) ──
   const qInput = kwSection.querySelector('#apv-kw-query-input');
   const qBtn   = kwSection.querySelector('#apv-kw-query-add-btn');
   const lInput = kwSection.querySelector('#apv-kw-law-input');
@@ -1253,6 +1315,7 @@ function _renderKwEdit() {
   const rBtn   = kwSection.querySelector('#apv-kw-reason-add-btn');
   const panel  = kwSection.querySelector('#apv-kw-edit-panel');
 
+  // document.getElementById 대신 kwSection.querySelector 사용 (DOM 범위 한정)
   if (qInput) qInput.addEventListener('keydown', e => { if (e.key==='Enter'){e.preventDefault();e.stopPropagation();_apvAddKwTag('kw_query');} });
   if (qBtn)   qBtn.addEventListener('click',    e => { e.preventDefault();e.stopPropagation();_apvAddKwTag('kw_query'); });
   if (lInput) lInput.addEventListener('keydown', e => { if (e.key==='Enter'){e.preventDefault();e.stopPropagation();_apvAddKwTag('law');} });
@@ -1261,6 +1324,7 @@ function _renderKwEdit() {
   if (rInput) rInput.addEventListener('keydown', e => { if (e.key==='Enter'){e.preventDefault();e.stopPropagation();_apvAddKwTag('kw_reason');} });
   if (rBtn)   rBtn.addEventListener('click',    e => { e.preventDefault();e.stopPropagation();_apvAddKwTag('kw_reason'); });
 
+  // 삭제 버튼: panel 에 이벤트 위임
   if (panel) {
     panel.addEventListener('click', e => {
       const btn = e.target.closest('[data-kw-remove]');
@@ -1272,6 +1336,7 @@ function _renderKwEdit() {
 }
 
 function _apvAddKwTag(type) {
+  // kwSection 내부에서 querySelector로 탐색 (apv- 접두사로 중복 ID 방지)
   const kwSection = document.getElementById('approval-kw-edit');
   if (type === 'law') {
     const lawInput = (kwSection || document).querySelector('#apv-kw-law-input');
@@ -1301,19 +1366,20 @@ function _apvRemoveKwTag(type, idx) {
   if (type === 'kw_query')       _editKwQuery.splice(idx, 1);
   else if (type === 'kw_reason') _editKwReason.splice(idx, 1);
   else if (type === 'law')       _editLawRefs.splice(idx, 1);
-  _refreshKwTags();
+  _refreshKwTags(); // 태그 영역만 갱신
 }
 
 function toggleApprovalEdit() {
   if (!_approvalTarget) return;
   _approvalEditMode = !_approvalEditMode;
 
-  const editBtn    = document.getElementById('editEntryBtn');
-  const rejectBtn  = document.getElementById('rejectBtn');
+  const editBtn   = document.getElementById('editEntryBtn');
+  const rejectBtn = document.getElementById('rejectBtn');
   const approveBtn = document.getElementById('approveBtn');
   const archiveBtn = document.getElementById('approveAndArchiveBtn');
 
   if (_approvalEditMode) {
+    // ── 수정 모드 진입 ──
     editBtn.innerHTML = '<i class="fas fa-save"></i> 저장';
     editBtn.className = 'btn btn-primary';
     editBtn.onclick = saveApprovalEdit;
@@ -1321,11 +1387,13 @@ function toggleApprovalEdit() {
     if (approveBtn) approveBtn.style.display = 'none';
     if (archiveBtn) archiveBtn.style.display = 'none';
 
+    // ── 수행 내용: view div 숨기고 Quill 에디터 표시 ──
     const descView  = document.getElementById('approval-desc-view');
     const quillWrap = document.getElementById('approval-edit-quill-wrap');
     if (descView)  descView.style.display  = 'none';
     if (quillWrap) quillWrap.style.display = '';
 
+    // Quill 초기화 (없으면 생성, 있으면 내용만 교체)
     const quillEl = document.getElementById('approval-edit-quill');
     if (quillEl) {
       if (!_approvalQuill) {
@@ -1342,10 +1410,12 @@ function toggleApprovalEdit() {
           }
         });
       }
+      // 현재 저장된 HTML 로드
       const curHtml = _approvalTarget.work_description || '';
       _approvalQuill.clipboard.dangerouslyPasteHTML(curHtml);
     }
 
+    // 소분류 입력 활성화
     const subcatBox = document.getElementById('approval-edit-subcat');
     if (subcatBox) {
       subcatBox.removeAttribute('disabled');
@@ -1353,6 +1423,7 @@ function toggleApprovalEdit() {
       subcatBox.style.border = '1.5px solid var(--primary)';
     }
 
+    // ── 자문분류 편집 UI 표시 (고객업무만) ──
     if (_approvalTarget.time_category === 'client') {
       const kwViewEl = document.getElementById('approval-kw-view');
       if (kwViewEl) kwViewEl.style.display = 'none';
@@ -1362,6 +1433,7 @@ function toggleApprovalEdit() {
 
     Toast.info('수정할 내용을 입력 후 저장 버튼을 눌러주세요.');
   } else {
+    // ── 수정 취소 ──
     editBtn.innerHTML = '<i class="fas fa-edit"></i> 수정';
     editBtn.className = 'btn btn-outline';
     editBtn.onclick = toggleApprovalEdit;
@@ -1369,6 +1441,7 @@ function toggleApprovalEdit() {
     if (approveBtn) approveBtn.style.display = '';
     if (archiveBtn) archiveBtn.style.display = '';
 
+    // view div 복원
     const descView2  = document.getElementById('approval-desc-view');
     const quillWrap  = document.getElementById('approval-edit-quill-wrap');
     if (quillWrap) quillWrap.style.display = 'none';
@@ -1380,6 +1453,7 @@ function toggleApprovalEdit() {
       descView2.style.display = '';
     }
 
+    // 소분류 비활성화
     const subcatBox = document.getElementById('approval-edit-subcat');
     if (subcatBox) {
       subcatBox.value = _approvalTarget.work_subcategory_name || '';
@@ -1388,6 +1462,7 @@ function toggleApprovalEdit() {
       subcatBox.style.border = '';
     }
 
+    // 자문분류 view 복원
     if (_approvalTarget.time_category === 'client') {
       const kwEditEl = document.getElementById('approval-kw-edit');
       if (kwEditEl) kwEditEl.innerHTML = '';
@@ -1400,9 +1475,11 @@ function toggleApprovalEdit() {
 async function saveApprovalEdit() {
   if (!_approvalTarget) return;
 
+  // Quill에서 HTML 읽기
   let newDesc = '';
   if (_approvalQuill) {
     newDesc = _approvalQuill.root.innerHTML.trim();
+    // Quill 빈 상태 체크
     if (newDesc === '<p><br></p>' || newDesc === '') newDesc = '';
   } else {
     const descBox = document.getElementById('approval-edit-desc');
@@ -1421,6 +1498,7 @@ async function saveApprovalEdit() {
       work_subcategory_name: newSubcat || _approvalTarget.work_subcategory_name,
     };
 
+    // 자문분류 필드도 저장 (고객업무만)
     if (_approvalTarget.time_category === 'client') {
       patchData.kw_query  = JSON.stringify(_editKwQuery);
       patchData.kw_reason = JSON.stringify(_editKwReason);
@@ -1429,6 +1507,7 @@ async function saveApprovalEdit() {
 
     await API.patch('time_entries', _approvalTarget.id, patchData);
 
+    // 전역 타겟 업데이트
     _approvalTarget.work_description      = newDesc;
     _approvalTarget.work_subcategory_name = newSubcat || _approvalTarget.work_subcategory_name;
     if (_approvalTarget.time_category === 'client') {
@@ -1437,6 +1516,7 @@ async function saveApprovalEdit() {
       _approvalTarget.law_refs  = _editLawRefs;
     }
 
+    // view div 업데이트
     const descView3 = document.getElementById('approval-desc-view');
     const quillWrap = document.getElementById('approval-edit-quill-wrap');
     if (descView3) {
@@ -1445,6 +1525,7 @@ async function saveApprovalEdit() {
     }
     if (quillWrap) quillWrap.style.display = 'none';
 
+    // 자문분류 view 갱신
     if (_approvalTarget.time_category === 'client') {
       const kwEditEl = document.getElementById('approval-kw-edit');
       if (kwEditEl) kwEditEl.innerHTML = '';
@@ -1492,6 +1573,9 @@ async function saveApprovalEdit() {
   }
 }
 
+// quickApprove: 제거됨 — 상세 모달에서 품질 평가 후 승인 처리
+// (제거됨 — 상세보기 버튼만 사용, 품질 평가는 상세 모달에서 처리)
+
 // 첨부파일 일괄 로드 (entry id 배열 → map)
 async function loadAttachmentsMap(entryIds) {
   if (!entryIds.length) return {};
@@ -1512,16 +1596,19 @@ function changePage(p) {
 
 // ─────────────────────────────────────────────
 // ★ 승인 모달 — Base64 파일 다운로드
+// _approvalModalAtts 전역에서 idx로 직접 참조 (DB 재조회 없음)
 // ─────────────────────────────────────────────
 function downloadApprovalFile(idx) {
   const a = _approvalModalAtts[idx];
   if (!a) { Toast.error('첨부파일 정보를 찾을 수 없습니다.'); return; }
 
+  // entry.js의 _openFilePreview 재사용 (전역 함수)
   if (typeof _openFilePreview === 'function') {
     _openFilePreview(a);
     return;
   }
 
+  // fallback: _openFilePreview를 직접 실행
   if (!a.file_content || !a.file_content.startsWith('data:')) {
     if (a.file_url && a.file_url.startsWith('http')) {
       window.open(a.file_url, '_blank');
@@ -1530,6 +1617,7 @@ function downloadApprovalFile(idx) {
     }
     return;
   }
+  // base64 → blob → 새 탭 미리보기
   try {
     const [meta, b64] = a.file_content.split(',');
     const mime = (meta.match(/:(.*?);/) || [])[1] || 'application/octet-stream';
@@ -1552,8 +1640,9 @@ async function openAttachmentViewerById(entryId) {
     const r = await API.list('attachments', { limit: 500 });
     const atts = (r && r.data) ? r.data.filter(a => a.entry_id === entryId) : [];
     if (!atts.length) { Toast.info('첨부 파일이 없습니다.'); return; }
+    // ★ _approvalModalAtts도 갱신 (배지 클릭 후 모달 내 다운로드 버튼 대응)
     _approvalModalAtts = atts;
-    openAttachmentViewer(atts);
+    openAttachmentViewer(atts);  // entry.js의 openAttachmentViewer 재사용 (_viewerAtts 설정됨)
   } catch(err) {
     Toast.error('첨부파일 조회 실패: ' + err.message);
   }
