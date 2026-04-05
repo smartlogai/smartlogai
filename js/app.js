@@ -240,9 +240,6 @@ const API = {
       url += `&order=created_at.desc`;
     }
 
-    // deleted=true 항목 제외 (soft delete 잔존 데이터 + hard delete 전환기 모두 대응)
-    url += `&or=(deleted.is.null,deleted.is.false)`;
-
     // 전체 개수 포함 요청
     const res = await fetch(url, {
       headers: {
@@ -319,12 +316,12 @@ const API = {
     return result;
   },
 
-  // 삭제: Hard Delete 시도 → 실패 시 Soft Delete (deleted=true) 로 폴백
+  // 삭제 (Hard Delete)
   async delete(table, id) {
     const url = `${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`;
-    // 1차: Hard Delete 시도
+    let res;
     try {
-      const res = await fetch(url, {
+      res = await fetch(url, {
         method: 'DELETE',
         headers: {
           'apikey': SUPABASE_KEY,
@@ -332,44 +329,20 @@ const API = {
           'Prefer': 'return=minimal',
         },
       });
-      if (res.status === 204 || res.status === 200 || res.ok) {
-        console.log(`[API.delete] Hard Delete 성공: ${table}/${id}`);
-        return null;
-      }
-      // Hard Delete 실패 시 에러 메시지 읽기
-      const errBody = await res.text().catch(() => '');
-      let errMsg = `HTTP ${res.status}`;
-      try {
-        const parsed = JSON.parse(errBody);
-        errMsg = parsed.message || parsed.hint || parsed.error || errMsg;
-      } catch (_) {}
-      console.warn(`[API.delete] Hard Delete 실패 (${res.status}): ${errMsg} → Soft Delete 시도`);
-    } catch (netErr) {
-      console.warn(`[API.delete] Hard Delete 네트워크 오류 → Soft Delete 시도: ${netErr.message}`);
+    } catch (networkErr) {
+      console.error(`[API.delete] 네트워크 오류 (${table}/${id}):`, networkErr);
+      throw new Error('네트워크 오류: ' + networkErr.message);
     }
-    // 2차 폴백: Soft Delete (deleted=true, updated_at 갱신)
-    const patchRes = await fetch(url, {
-      method: 'PATCH',
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=minimal',
-      },
-      body: JSON.stringify({ deleted: true, updated_at: Date.now() }),
-    });
-    if (patchRes.ok || patchRes.status === 204) {
-      console.log(`[API.delete] Soft Delete 성공: ${table}/${id}`);
-      return null;
-    }
-    const patchBody = await patchRes.text().catch(() => '');
-    let patchErr = `HTTP ${patchRes.status}`;
+    console.log(`[API.delete] ${table}/${id} → HTTP ${res.status}`);
+    if (res.ok || res.status === 204) return null;
+    const errBody = await res.text().catch(() => '');
+    let errMsg = `HTTP ${res.status}`;
     try {
-      const p2 = JSON.parse(patchBody);
-      patchErr = p2.message || p2.hint || p2.error || patchErr;
+      const j = JSON.parse(errBody);
+      errMsg = j.message || j.hint || j.error || errMsg;
     } catch (_) {}
-    console.error(`[API.delete] Soft Delete도 실패 (${patchRes.status}): ${patchErr}`);
-    throw new Error(patchErr);
+    console.error(`[API.delete] 실패 (${table}/${id}):`, errMsg, errBody);
+    throw new Error(errMsg);
   },
 };
 
@@ -687,41 +660,58 @@ const Cache = {
 // ★ 마스터 데이터 TTL 상수 (5분) — 자주 바뀌지 않는 데이터
 const MASTER_TTL = 300000;
 
+// deleted 컬럼이 있는 테이블: teams, departments, headquarters, cs_teams
+// → JS에서 deleted=true 항목 필터링
+const TABLES_WITH_DELETED = new Set(['teams','departments','headquarters','cs_teams']);
+
 const Master = {
   async teams() {
     return Cache.get('teams', async () => {
-      const r = await API.list('teams', { limit: 500 });
-      return (r && r.data) ? r.data : [];
+      try {
+        const r = await API.list('teams', { limit: 500 });
+        const d = (r && r.data) ? r.data : [];
+        return d.filter(x => x.deleted !== true);
+      } catch(e) { console.warn('[Master.teams]', e.message); return []; }
     }, MASTER_TTL);
   },
   async clients() {
     return Cache.get('clients', async () => {
-      const r = await API.list('clients', { limit: 500 });
-      return (r && r.data) ? r.data : [];
+      try {
+        const r = await API.list('clients', { limit: 500 });
+        return (r && r.data) ? r.data : [];
+      } catch(e) { console.warn('[Master.clients]', e.message); return []; }
     }, MASTER_TTL);
   },
   async categories() {
     return Cache.get('categories', async () => {
-      const r = await API.list('work_categories', { limit: 200 });
-      return (r && r.data) ? r.data.sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)) : [];
+      try {
+        const r = await API.list('work_categories', { limit: 200 });
+        return (r && r.data) ? r.data.sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)) : [];
+      } catch(e) { console.warn('[Master.categories]', e.message); return []; }
     }, MASTER_TTL);
   },
   async subcategories() {
     return Cache.get('subcategories', async () => {
-      const r = await API.list('work_subcategories', { limit: 500 });
-      return (r && r.data) ? r.data.sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)) : [];
+      try {
+        const r = await API.list('work_subcategories', { limit: 500 });
+        return (r && r.data) ? r.data.sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)) : [];
+      } catch(e) { console.warn('[Master.subcategories]', e.message); return []; }
     }, MASTER_TTL);
   },
   async cases() {
     return Cache.get('cases', async () => {
-      const r = await API.list('cases', { limit: 500 });
-      return (r && r.data) ? r.data : [];
+      try {
+        const r = await API.list('cases', { limit: 500 });
+        return (r && r.data) ? r.data : [];
+      } catch(e) { console.warn('[Master.cases]', e.message); return []; }
     }, MASTER_TTL);
   },
   async users() {
     return Cache.get('users', async () => {
-      const r = await API.list('users', { limit: 500 });
-      return (r && r.data) ? r.data : [];
+      try {
+        const r = await API.list('users', { limit: 500 });
+        return (r && r.data) ? r.data : [];
+      } catch(e) { console.warn('[Master.users]', e.message); return []; }
     }, MASTER_TTL);
   },
   invalidate(key) { Cache.invalidate(key); },
