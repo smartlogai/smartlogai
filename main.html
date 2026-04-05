@@ -1434,9 +1434,9 @@
             <div class="arch-filter-item">
               <label class="arch-filter-label">업무분류</label>
               <select id="archive-filter-business" class="arch-filter-select"
-                      onchange="_archivePage=1; _archUpdateExampleTags()">
+                     onchange="_archivePage=1; _archUpdateExampleTags(); loadArchiveList()">
                 <option value="">전체</option>
-                   <!-- 소분류 목록은 init_archive()에서 동적으로 채워집니다 -->
+                <!-- 소분류 목록은 init_archive()에서 동적으로 채워집니다 -->
               </select>
             </div>
             <div class="arch-filter-item">
