@@ -54,7 +54,12 @@ async function init_archive() {
   // 태그 상태 초기화
   _archKwTags = []; _archReasonTags = []; _archLawTags = [];
   _archRenderTagUi();
+
+  // 업무분류 드롭다운 DB 동적 로드
+  await _fillArchiveBusinessFilter();
+
   _archUpdateExampleTags();
+
 
   await loadArchiveList();
 
@@ -68,6 +73,30 @@ async function init_archive() {
 // ─────────────────────────────────────────────
 //  태그 UI 유틸리티
 // ─────────────────────────────────────────────
+async function _fillArchiveBusinessFilter() {
+  const sel = document.getElementById('archive-filter-business');
+  if (!sel) return;
+  try {
+    const cats = await Master.categories();
+    const target = cats.find(c => c.category_name === '일반자문업무');
+    if (!target) return;
+    const subs = await Master.subcategories();
+    const filtered = subs
+      .filter(s => s.category_id === target.id)
+      .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    if (!filtered.length) return;
+    const currentVal = sel.value;
+    sel.innerHTML = '<option value="">전체</option>';
+    filtered.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.sub_category_name;
+      opt.textContent = s.sub_category_name;
+      sel.appendChild(opt);
+    });
+    if (currentVal) sel.value = currentVal;
+  } catch (e) { console.error('[archive] 드롭다운 실패:', e.message); }
+}
+
 /** 태그 추가 (type: 'kw' | 'reason') */
 function _archAddTag(type, val) {
   const v = (val || '').trim();
