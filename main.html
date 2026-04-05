@@ -1,30 +1,52 @@
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Smart Log AI</title>
+
+  <!-- ══ 보안 메타 태그 ══ -->
+  <!-- 민감 데이터 페이지: 뒤로가기 복원 방지 (no-store 유지) -->
   <meta http-equiv="Cache-Control" content="no-store" />
+  <!-- Referrer 최소화: 외부 링크 클릭 시 URL 유출 방지 -->
   <meta name="referrer" content="no-referrer" />
+  <!-- XSS/Clickjacking 방지 -->
   <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+  <!-- 검색엔진 수집 차단 -->
   <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
+  <!-- ══ /보안 메타 태그 ══ -->
+
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <!-- Quill.js 2.x CSS: 렌더링에만 필요 → 비동기 로드 차단 없음 -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" />
+  <!-- Quill.js / Turndown: 모달 열기 전 로드 완료 보장 → defer 적용 (파싱 차단 제거) -->
   <script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js" defer></script>
+  <!-- Turndown: HTML → Markdown 변환 -->
   <script src="https://cdn.jsdelivr.net/npm/turndown/dist/turndown.js" defer></script>
+  <!-- turndown-plugin-gfm: 테이블 등 GFM 확장 지원 -->
   <script src="https://cdn.jsdelivr.net/npm/turndown-plugin-gfm/dist/turndown-plugin-gfm.js" defer></script>
   <link rel="stylesheet" href="css/style.css?v=20260331b" />
+  <!-- Chart.js: 대시보드/분석에서 사용 → defer로 DOM 파싱 차단 방지 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+  <!-- ★ 무거운 라이브러리는 필요한 시점에 동적으로 로드 (초기 blocking 제거) -->
+  <!-- xlsx(882KB), mammoth, pdf.js 는 lazyLoadLibs()로 지연 로드 -->
+  <!-- 보안 모듈: 가장 먼저 로드 -->
   <script src="js/security.js"></script>
+  <!-- ★ 라이브러리 지연 로더 -->
   <script>
+  // ─────────────────────────────────────────────
+  // 무거운 라이브러리 지연 로드 유틸리티
+  // 실제 사용 시점(자료실 진입, 파일 업로드 등)에만 로드
+  // ─────────────────────────────────────────────
   const LibLoader = (() => {
-    const _loaded  = {};
+    const _loaded  = {};  // 라이브러리명 → Promise
     const LIB_URLS = {
       xlsx    : 'js/xlsx.full.min.js',
       mammoth : 'https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js',
       pdfjs   : 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js',
     };
+
     function _loadScript(src) {
       return new Promise((resolve, reject) => {
         const s   = document.createElement('script');
@@ -35,12 +57,15 @@
         document.head.appendChild(s);
       });
     }
+
     return {
+      // 라이브러리 1개 로드 (이미 로드됐으면 캐시 반환)
       load(name) {
         if (_loaded[name]) return _loaded[name];
         const url = LIB_URLS[name];
         if (!url) return Promise.reject(new Error('LibLoader: unknown lib ' + name));
         _loaded[name] = _loadScript(url).then(() => {
+          // pdfjs worker 경로 설정
           if (name === 'pdfjs' && typeof pdfjsLib !== 'undefined') {
             pdfjsLib.GlobalWorkerOptions.workerSrc =
               'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
@@ -48,43 +73,66 @@
         });
         return _loaded[name];
       },
-      loadAll(...names) { return Promise.all(names.map(n => this.load(n))); },
-      isLoaded(name) { return !!_loaded[name]; },
+      // 여러 라이브러리 병렬 로드
+      loadAll(...names) {
+        return Promise.all(names.map(n => this.load(n)));
+      },
+      // 이미 로드됐는지 확인
+      isLoaded(name) {
+        return !!_loaded[name];
+      },
     };
   })();
   </script>
 </head>
+<!-- 세션 체크: JS 실행 전 body를 완전히 숨겨 스타일 없는 화면 노출 방지 -->
 <style>body { visibility: hidden; }</style>
 <script>
+  // 세션이 없으면 즉시 로그인 페이지로 이동 (깜빡임 방지)
+  // 세션 키: 'wt_session' (localStorage 또는 sessionStorage)
   (function() {
     try {
       var s = localStorage.getItem('wt_session') || sessionStorage.getItem('wt_session');
-      if (!s) { window.location.replace('index.html'); }
-      else {
+      if (!s) {
+        window.location.replace('index.html');
+      } else {
+        // 세션 있음 → DOM 완료 후 화면 표시
         document.addEventListener('DOMContentLoaded', function() {
           document.body.style.visibility = 'visible';
         });
       }
-    } catch(e) { window.location.replace('index.html'); }
+    } catch(e) {
+      window.location.replace('index.html');
+    }
   })();
 </script>
 <body>
+
 <div class="app-layout">
+  <!-- ══════════════════════════
+       사이드바
+  ══════════════════════════ -->
   <aside class="sidebar" id="appSidebar">
     <div class="sidebar-logo">
       <div style="display:flex;align-items:center;gap:6px;overflow:hidden">
+        <!-- 로고 이미지 -->
         <img src="images/logo.png" alt="HANJOO"
              style="height:28px;width:auto;object-fit:contain;filter:brightness(0) invert(1);flex-shrink:0" />
+        <!-- 시스템명 -->
         <div style="font-size:13.5px;font-weight:700;color:#fff;letter-spacing:0.2px;white-space:nowrap;line-height:1">
           Smart Log AI
         </div>
       </div>
     </div>
+
     <nav class="sidebar-nav">
+      <!-- ── Main (전체 역할 공통) ─────────────────── -->
       <div class="nav-section-title">Main</div>
       <div class="nav-item active" data-page="dashboard" onclick="navigateTo('dashboard')">
         <i class="fas fa-chart-pie nav-icon"></i> Dashboard
       </div>
+
+      <!-- ── Time Sheet (Staff 전용) ───────────────── -->
       <div class="nav-section-title" id="menu-timesheet-section">Time Sheet</div>
       <div class="nav-item" id="menu-entry-new" data-page="entry-new" onclick="navigateTo('entry-new')">
         <i class="fas fa-plus-circle nav-icon"></i> New Entry
@@ -92,9 +140,13 @@
       <div class="nav-item" id="menu-my-entries" data-page="my-entries" onclick="navigateTo('my-entries')">
         <i class="fas fa-list-alt nav-icon"></i> My Time Sheet
       </div>
+
+      <!-- ── 자문 자료실: 모든 역할 항상 표시 ─────────────── -->
       <div class="nav-item" id="menu-archive" data-page="archive" onclick="navigateTo('archive')">
         <i class="fas fa-archive nav-icon"></i> 자문 자료실
       </div>
+
+      <!-- ── Management (Manager / Director / Admin) ── -->
       <div class="nav-section-title" id="menu-management-section" style="display:none">Management</div>
       <div class="nav-item" id="menu-approval" data-page="approval" onclick="navigateTo('approval')" style="display:none">
         <i class="fas fa-check-double nav-icon"></i> Approval
@@ -103,7 +155,11 @@
       <div class="nav-item" id="menu-analysis" data-page="analysis" onclick="navigateTo('analysis')" style="display:none">
         <i class="fas fa-chart-bar nav-icon"></i> Analysis
       </div>
+
+      <!-- ── Settings (Admin 전용 + 기준정보는 manager·director도) ── -->
       <div class="nav-section-title menu-settings-section" style="display:none">Settings</div>
+
+      <!-- 조직구성 그룹 -->
       <div class="nav-group-label menu-master" style="display:none">
         <i class="fas fa-sitemap" style="font-size:10px;opacity:0.6"></i> 조직구성
       </div>
@@ -116,6 +172,8 @@
       <div class="nav-item nav-item-sub menu-master" data-page="master-csteams" onclick="navigateTo('master-csteams')" style="display:none">
         <i class="fas fa-headset nav-icon"></i> 고객지원팀 관리
       </div>
+
+      <!-- 기준정보 그룹: 고객사·업무분류는 manager+director+admin 접근 가능 -->
       <div class="nav-group-label menu-ref-data" style="display:none">
         <i class="fas fa-database" style="font-size:10px;opacity:0.6"></i> 기준정보
       </div>
@@ -125,10 +183,14 @@
       <div class="nav-item nav-item-sub menu-ref-data" data-page="master-categories" onclick="navigateTo('master-categories')" style="display:none">
         <i class="fas fa-tags nav-icon"></i> 업무분류
       </div>
+
+      <!-- 직원관리 -->
       <div class="nav-item menu-master" data-page="users" onclick="navigateTo('users')" style="display:none">
         <i class="fas fa-user-cog nav-icon"></i> User 등록
       </div>
+
     </nav>
+
     <div class="sidebar-user">
       <div class="sidebar-user-info">
         <div class="user-avatar" id="sidebarAvatar">?</div>
@@ -142,13 +204,20 @@
       </div>
     </div>
   </aside>
+
+  <!-- ══════════════════════════
+       메인 콘텐츠
+  ══════════════════════════ -->
   <div class="main-content">
+    <!-- 공통 헤더 -->
     <header class="page-header">
       <button class="sidebar-toggle" onclick="toggleSidebar()">
         <i class="fas fa-bars"></i>
       </button>
       <h1 id="pageTitle">Dashboard</h1>
       <div class="header-actions" id="headerActions"></div>
+
+      <!-- 🔔 알림 버튼 -->
       <div style="position:relative;margin-left:8px;flex-shrink:0">
         <button id="notify-btn" title="알림"
           style="position:relative;background:none;border:none;cursor:pointer;
@@ -166,14 +235,22 @@
         </button>
       </div>
     </header>
+
     <div class="page-body">
+
+      <!-- ──────────────────────────
+           1. 대시보드
+      ────────────────────────── -->
       <section class="page-section active" id="page-dashboard">
+        <!-- 데이터 없을 때 안내 배너 -->
         <div id="dashboard-no-data-banner"
              style="display:none;align-items:center;gap:10px;
                     background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;
                     padding:12px 16px;font-size:13px;color:#1e40af;margin-bottom:14px">
         </div>
-        <div class="kpi-grid" id="kpi-grid"></div>
+        <div class="kpi-grid" id="kpi-grid">
+          <!-- JS로 채워짐 -->
+        </div>
         <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-bottom:12px;" id="chart-row-1">
           <div class="card">
             <div class="card-header" style="padding:12px 16px 10px">
@@ -194,15 +271,23 @@
             </div>
           </div>
         </div>
+        <!-- 고객사별 투입시간 (하단) + Manager/Director: JS에서 동적 교체 -->
         <div id="recent-entries-section"></div>
       </section>
 
+      <!-- ──────────────────────────
+           2. 타임시트 등록
+      ────────────────────────── -->
       <section class="page-section" id="page-entry-new">
+        <!-- 2×2 카드 래퍼 -->
         <div style="max-width:1160px;margin:0 auto;">
+
+          <!-- 페이지 타이틀 -->
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
             <h2 style="font-size:16px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:8px">
               <i class="fas fa-plus-circle" style="color:var(--primary)"></i> 업무 기록 등록
             </h2>
+            <!-- 승인자 안내 배너 (인라인) -->
             <div id="entry-approver-notice" style="display:none;align-items:center;gap:7px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:6px 14px;font-size:12px;color:#1d4ed8">
               <i class="fas fa-user-check" style="font-size:13px;flex-shrink:0"></i>
               <span>승인자: <strong id="entry-approver-name-text">-</strong></span>
@@ -212,221 +297,303 @@
               <span>Director가 지정되지 않았습니다.</span>
             </div>
           </div>
+
           <div id="entryTypeNotice" style="display:none"><span id="entryTypeNoticeText"></span></div>
+
+          <!-- entry-2x2-grid: form 태그 없이 직접 배치.
+               hidden input들은 form="entryForm" 속성으로 submitEntry()에서 직접 읽음 -->
           <div class="entry-2x2-grid" id="entryGrid">
-            <div class="entry-panel entry-panel-meta">
-              <div class="entry-panel-header"><i class="fas fa-clipboard-list"></i> ① 기본 정보</div>
-              <div class="entry-panel-body" style="gap:10px">
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end">
-                  <div>
-                    <label class="ep-label">대분류 <span class="required">*</span></label>
-                    <select class="ep-ctrl" id="entry-category" onchange="onCategoryChange()" required>
-                      <option value="">대분류 선택</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label class="ep-label">소분류 <span class="required">*</span></label>
-                    <select class="ep-ctrl" id="entry-subcategory" onchange="onSubcategoryChange()" required>
-                      <option value="">소분류 선택</option>
-                    </select>
-                  </div>
-                </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end">
-                  <div>
-                    <label class="ep-label">수행 팀명 <span class="required">*</span></label>
-                    <select class="ep-ctrl" id="entry-team" required>
-                      <option value="">팀 선택</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label class="ep-label">Staff</label>
-                    <input type="text" class="ep-ctrl" id="entry-user-name" readonly style="background:#f8fafc" />
-                  </div>
-                </div>
-                <div id="clientSection">
-                  <label class="ep-label">고객사 <span class="required" id="clientRequired">*</span></label>
-                  <div id="entry-client-wrap" class="cs-wrap" style="min-height:32px"></div>
-                  <input type="hidden" id="entry-client" />
-                </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end">
-                  <div>
-                    <label class="ep-label">업무 시작일시 <span class="required">*</span></label>
-                    <input type="datetime-local" class="ep-ctrl" id="entry-start" onchange="calcDuration()" required />
-                  </div>
-                  <div>
-                    <label class="ep-label">업무 종료일시 <span class="required">*</span></label>
-                    <input type="datetime-local" class="ep-ctrl" id="entry-end" onchange="calcDuration()" required />
-                  </div>
-                </div>
-                <div>
-                  <label class="ep-label">소요시간</label>
-                  <div class="duration-display ep-duration" id="duration-display" style="margin-bottom:8px">
-                    <i class="fas fa-clock" style="font-size:10px"></i>
-                    <span id="duration-text">시작/종료 시간을 입력하면 자동 계산됩니다.</span>
-                  </div>
-                  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-                    <span style="font-size:11px;font-weight:600;color:#475569;white-space:nowrap">실제 소요시간</span>
-                    <div style="display:flex;align-items:center;gap:4px">
-                      <input type="number" id="entry-duration-h" min="0" max="23" placeholder="0"
-                        style="width:52px;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-weight:600;text-align:center;outline:none"
-                        onfocus="this.style.borderColor='#6366f1'" onblur="this.style.borderColor='#d1d5db'"
-                        oninput="syncActualDuration()" />
-                      <span style="font-size:12px;color:#475569;font-weight:500">시간</span>
-                    </div>
-                    <div style="display:flex;align-items:center;gap:4px">
-                      <input type="number" id="entry-duration-m" min="0" max="59" placeholder="0"
-                        style="width:52px;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-weight:600;text-align:center;outline:none"
-                        onfocus="this.style.borderColor='#6366f1'" onblur="this.style.borderColor='#d1d5db'"
-                        oninput="syncActualDuration()" />
-                      <span style="font-size:12px;color:#475569;font-weight:500">분</span>
-                    </div>
-                    <span style="font-size:11px;color:#9ca3af">(자동 계산값 수정 가능)</span>
-                  </div>
-                  <input type="hidden" id="entry-duration" />
-                </div>
-                <div id="internalMemoSection" style="display:none">
-                  <label class="ep-label">수행 내용 메모 <span class="optional" style="font-weight:400;color:#9ca3af">(선택)</span></label>
-                  <textarea id="entry-memo" placeholder="수행한 업무 내용을 간략히 메모하세요."
-                    style="width:100%;box-sizing:border-box;height:72px;padding:8px 10px;border:1px solid #d1d5db;border-radius:7px;font-size:12px;font-family:inherit;resize:vertical;line-height:1.6;color:#1e293b;background:#fff;outline:none"
-                    onfocus="this.style.borderColor='#6366f1'" onblur="this.style.borderColor='#d1d5db'"></textarea>
-                </div>
-              </div>
-            </div>
 
-            <div class="entry-panel entry-panel-desc" style="min-height:420px">
-              <div class="entry-panel-header">
-                <i class="fas fa-pen-nib"></i> ② 수행 내용 <span class="required">*</span>
-                <span id="desc-char-count" style="margin-left:auto;font-size:11px;color:#9ca3af;font-weight:400">0자</span>
-              </div>
-              <div class="entry-panel-body" style="padding:0;gap:0;flex:1">
-                <div style="background:#eff6ff;border-bottom:1px solid #bfdbfe;padding:7px 14px;font-size:11px;color:#1d4ed8;display:flex;align-items:center;gap:6px;flex-shrink:0">
-                  <i class="fas fa-paste" style="font-size:12px;flex-shrink:0"></i>
-                  <span>고객 질의내용과 답변내용이 포함된 메일 본문 또는 의견서를 <strong>그대로 붙여넣기(Ctrl+C, Ctrl+V)</strong> 하세요</span>
+              <!-- ┌──────────────────────────────────────┐
+                   │  ① 기본 정보                         │
+                   └──────────────────────────────────────┘ -->
+              <div class="entry-panel entry-panel-meta">
+                <div class="entry-panel-header">
+                  <i class="fas fa-clipboard-list"></i> ① 기본 정보
                 </div>
-                <div id="quill-editor" style="font-family:'Noto Sans KR',sans-serif;flex:1;min-height:200px;display:flex;flex-direction:column;"></div>
-                <div style="background:#fefce8;border-top:1px solid #fde68a;padding:7px 14px;font-size:11px;color:#92400e;display:flex;flex-direction:column;gap:3px;flex-shrink:0">
-                  <div style="display:flex;align-items:center;gap:5px"><i class="fas fa-exclamation-triangle" style="color:#f59e0b;flex-shrink:0"></i><span>저장 전 고객명, 모델명 등 <strong>민감정보를 제거</strong>해 주세요.</span></div>
-                  <div style="display:flex;align-items:center;gap:5px"><i class="fas fa-check-circle" style="color:#10b981;flex-shrink:0"></i><span>엑셀 표 붙여넣기 시 <strong>표 구조가 자동으로 보존</strong>됩니다.</span></div>
-                </div>
-                <input type="hidden" id="entry-description" />
-                <input type="hidden" id="entry-description-md" />
-              </div>
-            </div>
-            <div class="entry-panel entry-panel-kw" id="kwSection" style="display:none">
-              <div class="entry-panel-header">
-                <i class="fas fa-tags"></i> ③ 자문 분류 정보
-                <span style="background:#e0e7ff;color:#4338ca;border-radius:4px;padding:1px 8px;font-size:10px;font-weight:700;margin-left:6px">고객업무</span>
-              </div>
-              <div class="entry-panel-body">
-                <div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px dashed #ddd6fe">
-                  <label class="ep-label" style="margin:0;font-size:12px;font-weight:700">핵심키워드 <span class="required">*</span></label>
-                  <div style="font-size:11px;color:#6b7280;margin-bottom:3px">고객 질의의 핵심을 <strong>'대상+쟁점'</strong> 형태로 입력. Enter로 추가, ✕로 삭제.</div>
-                  <div id="kw-query-example" style="font-size:11px;color:#9ca3af;font-style:italic;margin-bottom:5px"></div>
-                  <div style="display:flex;gap:6px;align-items:center">
-                    <div class="tag-input-wrap" id="kw-query-wrap"
-                      style="flex:1;min-height:36px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;background:#fff;border:1px solid #d1d5db;border-radius:7px;padding:5px 8px;cursor:text"
-                      onclick="this.querySelector('input')&&this.querySelector('input').focus()">
-                      <input type="text" id="kw-query-input" placeholder="키워드 입력 후 Enter"
-                        style="border:none;outline:none;font-size:12px;min-width:120px;flex:1;background:transparent" />
-                    </div>
-                    <button type="button" id="kw-query-add-btn"
-                      style="background:#4338ca;color:#fff;border:none;height:34px;padding:0 12px;border-radius:6px;font-size:12px;cursor:pointer;white-space:nowrap;flex-shrink:0">
-                      <i class="fas fa-plus"></i> 추가
-                    </button>
-                  </div>
-                  <input type="hidden" id="kw-query-hidden" />
-                </div>
-                <div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px dashed #ddd6fe">
-                  <label class="ep-label" style="margin:0;font-size:12px;font-weight:700">관련법령 <span class="optional">(선택)</span></label>
-                  <div style="font-size:11px;color:#6b7280;margin-bottom:6px">법령을 선택하고 조항 입력 후 <strong>[+ 추가]</strong>를 클릭하세요.</div>
-                  <div style="display:flex;gap:5px;align-items:center;margin-bottom:6px;flex-wrap:wrap">
-                    <div style="position:relative;flex:2;min-width:120px">
-                      <input type="text" id="law-search-input" placeholder="법령명 검색 또는 직접 입력"
-                        style="width:100%;height:30px;padding:0 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;box-sizing:border-box" autocomplete="off" />
-                      <div id="law-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;background:#fff;border:1px solid #d1d5db;border-radius:7px;box-shadow:0 4px 12px rgba(0,0,0,.12);max-height:180px;overflow-y:auto;margin-top:2px"></div>
-                    </div>
-                    <input type="text" id="law-article-input" placeholder="예: 제30조 제1항"
-                      style="flex:1.2;min-width:100px;height:30px;padding:0 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px" />
-                    <button type="button" id="law-add-btn"
-                      style="background:#4338ca;color:#fff;border:none;height:30px;padding:0 12px;border-radius:6px;font-size:12px;cursor:pointer;white-space:nowrap;flex-shrink:0">
-                      <i class="fas fa-plus"></i> 추가
-                    </button>
-                  </div>
-                  <div id="law-refs-tags" style="display:flex;flex-wrap:wrap;gap:4px;min-height:8px"></div>
-                  <input type="hidden" id="law-refs-hidden" value="[]" />
-                  <div id="law-refs-example" style="font-size:11px;color:#9ca3af;margin-top:4px;font-style:italic">예: 관세법 제30조 제1항 제1호</div>
-                </div>
-                <div>
-                  <label class="ep-label" style="margin:0;font-size:12px;font-weight:700">판단사유 <span class="optional">(선택)</span></label>
-                  <div style="font-size:11px;color:#6b7280;margin-bottom:3px">판단의 핵심 근거를 짧은 명사구로 입력. Enter로 추가, ✕로 삭제.</div>
-                  <div id="kw-reason-example" style="font-size:11px;color:#9ca3af;font-style:italic;margin-bottom:5px"></div>
-                  <div style="display:flex;gap:6px;align-items:center">
-                    <div class="tag-input-wrap" id="kw-reason-wrap"
-                      style="flex:1;min-height:36px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;background:#fff;border:1px solid #d1d5db;border-radius:7px;padding:5px 8px;cursor:text"
-                      onclick="this.querySelector('input')&&this.querySelector('input').focus()">
-                      <input type="text" id="kw-reason-input" placeholder="판단근거 입력 후 Enter"
-                        style="border:none;outline:none;font-size:12px;min-width:120px;flex:1;background:transparent" />
-                    </div>
-                    <button type="button" id="kw-reason-add-btn"
-                      style="background:#4338ca;color:#fff;border:none;height:34px;padding:0 12px;border-radius:6px;font-size:12px;cursor:pointer;white-space:nowrap;flex-shrink:0">
-                      <i class="fas fa-plus"></i> 추가
-                    </button>
-                  </div>
-                  <input type="hidden" id="kw-reason-hidden" />
-                </div>
-              </div>
-            </div>
+                <div class="entry-panel-body" style="gap:10px">
 
-            <div class="entry-panel entry-panel-file" id="filePanel">
-              <div class="entry-panel-header">
-                <i class="fas fa-paperclip"></i> ④ 자문 결과물
-                <span class="required" id="attachRequired" style="margin-left:4px;font-size:11px">*</span>
-                <span class="optional" id="attachOptional" style="display:none;margin-left:4px;font-size:11px">(선택)</span>
-              </div>
-              <div class="entry-panel-body">
-                <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px 14px;margin-bottom:8px">
-                  <div style="font-size:11px;font-weight:700;color:#15803d;margin-bottom:5px;display:flex;align-items:center;gap:5px">
-                    <i class="fas fa-upload"></i> 파일 직접 첨부
-                    <span style="background:#dcfce7;color:#15803d;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700">승인자 즉시 다운로드 가능</span>
+                  <!-- 대분류 · 소분류 -->
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end">
+                    <div>
+                      <label class="ep-label">대분류 <span class="required">*</span></label>
+                      <select class="ep-ctrl" id="entry-category" onchange="onCategoryChange()" required>
+                        <option value="">대분류 선택</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="ep-label">소분류 <span class="required">*</span></label>
+                      <select class="ep-ctrl" id="entry-subcategory" onchange="onSubcategoryChange()" required>
+                        <option value="">소분류 선택</option>
+                      </select>
+                    </div>
                   </div>
-                  <div style="font-size:11px;color:#6b7280;margin-bottom:8px">Excel · Word · PPT · PDF 지원 &nbsp;|&nbsp; 최대 <strong>10MB</strong>/파일</div>
-                  <div class="file-drop-zone" id="fileDropZone"
-                    onclick="document.getElementById('fileInput').click()"
-                    ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onFileDrop(event)">
-                    <div class="drop-icon"><i class="fas fa-cloud-upload-alt" style="color:#16a34a"></i></div>
-                    <div class="drop-text">클릭하거나 파일을 드래그하세요</div>
-                    <div class="drop-hint">Excel · Word · PPT · PDF · 최대 10MB/파일</div>
-                  </div>
-                  <input type="file" id="fileInput" style="display:none" multiple
-                    accept=".xlsx,.xls,.docx,.doc,.pptx,.ppt,.pdf" onchange="onFileSelect(event)" />
-                </div>
-                <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;margin-bottom:8px">
-                  <div style="font-size:11px;font-weight:600;color:#475569;margin-bottom:7px;display:flex;align-items:center;gap:5px">
-                    <i class="fas fa-link" style="color:#7c3aed"></i> 외부 링크 등록
-                    <span style="background:#ede9fe;color:#6d28d9;border-radius:4px;padding:1px 7px;font-size:10px">대용량 파일 (10MB 초과) 권장</span>
-                  </div>
-                  <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">
-                    <input type="text" id="manual-file-name" placeholder="파일명"
-                      style="flex:1;min-width:100px;height:30px;padding:0 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px" />
-                    <select id="manual-file-type"
-                      style="height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;width:70px">
-                      <option value="word">Word</option><option value="excel">Excel</option>
-                      <option value="pdf">PDF</option><option value="ppt">PPT</option><option value="link">기타링크</option>
-                    </select>
-                    <input type="url" id="manual-file-url" placeholder="https://drive.google.com/..."
-                      style="flex:2;min-width:120px;height:30px;padding:0 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px" />
-                    <button type="button" onclick="addFileByUrl()"
-                      style="background:#7c3aed;color:#fff;border:none;height:30px;padding:0 12px;border-radius:6px;font-size:12px;cursor:pointer;white-space:nowrap;flex-shrink:0">
-                      <i class="fas fa-plus"></i> 추가
-                    </button>
-                  </div>
-                </div>
-                <div class="file-list" id="fileList"></div>
-              </div>
-            </div>
 
-          </div><!-- /entry-2x2-grid -->
+                  <!-- 수행 팀명 · Staff -->
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end">
+                    <div>
+                      <label class="ep-label">수행 팀명 <span class="required">*</span></label>
+                      <select class="ep-ctrl" id="entry-team" required>
+                        <option value="">팀 선택</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="ep-label">Staff</label>
+                      <input type="text" class="ep-ctrl" id="entry-user-name" readonly style="background:#f8fafc" />
+                    </div>
+                  </div>
 
+                  <!-- 고객사 (client type일 때 표시) -->
+                  <div id="clientSection">
+                    <label class="ep-label">고객사 <span class="required" id="clientRequired">*</span></label>
+                    <div id="entry-client-wrap" class="cs-wrap" style="min-height:32px"></div>
+                    <input type="hidden" id="entry-client" />
+                  </div>
+
+                  <!-- 시작 · 종료 -->
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end">
+                    <div>
+                      <label class="ep-label">업무 시작일시 <span class="required">*</span></label>
+                      <input type="datetime-local" class="ep-ctrl" id="entry-start" onchange="calcDuration()" required />
+                    </div>
+                    <div>
+                      <label class="ep-label">업무 종료일시 <span class="required">*</span></label>
+                      <input type="datetime-local" class="ep-ctrl" id="entry-end" onchange="calcDuration()" required />
+                    </div>
+                  </div>
+
+                  <!-- 소요시간 -->
+                  <div>
+                    <label class="ep-label">소요시간</label>
+
+                    <!-- ① 자동 계산 참고값 (시작~종료 기준) -->
+                    <div class="duration-display ep-duration" id="duration-display"
+                      style="margin-bottom:8px">
+                      <i class="fas fa-clock" style="font-size:10px"></i>
+                      <span id="duration-text">시작/종료 시간을 입력하면 자동 계산됩니다.</span>
+                    </div>
+
+                    <!-- ② 실제 소요시간 직접 입력 (시간 + 분) -->
+                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                      <span style="font-size:11px;font-weight:600;color:#475569;white-space:nowrap">실제 소요시간</span>
+                      <div style="display:flex;align-items:center;gap:4px">
+                        <input type="number" id="entry-duration-h" min="0" max="23"
+                          placeholder="0"
+                          style="width:52px;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-weight:600;text-align:center;outline:none"
+                          onfocus="this.style.borderColor='#6366f1'"
+                          onblur="this.style.borderColor='#d1d5db'"
+                          oninput="syncActualDuration()" />
+                        <span style="font-size:12px;color:#475569;font-weight:500">시간</span>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:4px">
+                        <input type="number" id="entry-duration-m" min="0" max="59"
+                          placeholder="0"
+                          style="width:52px;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-weight:600;text-align:center;outline:none"
+                          onfocus="this.style.borderColor='#6366f1'"
+                          onblur="this.style.borderColor='#d1d5db'"
+                          oninput="syncActualDuration()" />
+                        <span style="font-size:12px;color:#475569;font-weight:500">분</span>
+                      </div>
+                      <span style="font-size:11px;color:#9ca3af">(자동 계산값 수정 가능)</span>
+                    </div>
+
+                    <input type="hidden" id="entry-duration" />
+                  </div>
+
+                  <!-- 수행내용 메모 (internal 대분류 전용 · 간단 텍스트) -->
+                  <div id="internalMemoSection" style="display:none">
+                    <label class="ep-label">
+                      수행 내용 메모
+                      <span class="optional" style="font-weight:400;color:#9ca3af">(선택)</span>
+                    </label>
+                    <textarea id="entry-memo"
+                      placeholder="수행한 업무 내용을 간략히 메모하세요."
+                      style="width:100%;box-sizing:border-box;height:72px;padding:8px 10px;border:1px solid #d1d5db;border-radius:7px;font-size:12px;font-family:inherit;resize:vertical;line-height:1.6;color:#1e293b;background:#fff;outline:none"
+                      onfocus="this.style.borderColor='#6366f1'"
+                      onblur="this.style.borderColor='#d1d5db'"></textarea>
+                  </div>
+
+                </div>
+              </div><!-- /패널① -->
+
+              <!-- ┌──────────────────────────────────────┐
+                   │  ② 수행 내용                         │
+                   └──────────────────────────────────────┘ -->
+              <div class="entry-panel entry-panel-desc" style="min-height:420px">
+                <div class="entry-panel-header">
+                  <i class="fas fa-pen-nib"></i> ② 수행 내용 <span class="required">*</span>
+                  <span id="desc-char-count" style="margin-left:auto;font-size:11px;color:#9ca3af;font-weight:400">0자</span>
+                </div>
+                <!-- 패널 바디: flex column, padding 0 -->
+                <div class="entry-panel-body" style="padding:0;gap:0;flex:1">
+
+                  <!-- 상단 안내 -->
+                  <div style="background:#eff6ff;border-bottom:1px solid #bfdbfe;padding:7px 14px;font-size:11px;color:#1d4ed8;display:flex;align-items:center;gap:6px;flex-shrink:0">
+                    <i class="fas fa-paste" style="font-size:12px;flex-shrink:0"></i>
+                    <span>고객 질의내용과 답변내용이 포함된 메일 본문 또는 의견서를 <strong>그대로 붙여넣기(Ctrl+C, Ctrl+V)</strong> 하세요</span>
+                  </div>
+
+                  <!-- Quill 에디터 — flex:1 로 남은 공간 채움 -->
+                  <div id="quill-editor" style="font-family:'Noto Sans KR',sans-serif;flex:1;min-height:200px;display:flex;flex-direction:column;"></div>
+
+                  <!-- 하단 안내 -->
+                  <div style="background:#fefce8;border-top:1px solid #fde68a;padding:7px 14px;font-size:11px;color:#92400e;display:flex;flex-direction:column;gap:3px;flex-shrink:0">
+                    <div style="display:flex;align-items:center;gap:5px"><i class="fas fa-exclamation-triangle" style="color:#f59e0b;flex-shrink:0"></i><span>저장 전 고객명, 모델명 등 <strong>민감정보를 제거</strong>해 주세요.</span></div>
+                    <div style="display:flex;align-items:center;gap:5px"><i class="fas fa-check-circle" style="color:#10b981;flex-shrink:0"></i><span>엑셀 표 붙여넣기 시 <strong>표 구조가 자동으로 보존</strong>됩니다.</span></div>
+                  </div>
+
+                  <input type="hidden" id="entry-description" />
+                  <input type="hidden" id="entry-description-md" />
+                </div>
+              </div><!-- /패널② -->
+
+              <!-- ┌──────────────────────────────────────┐
+                   │  ③ 자문 분류 정보                    │
+                   └──────────────────────────────────────┘ -->
+              <!-- 고객업무(client)일 때만 표시; Enter키가 form submit을 유발하지 않도록
+                   이 패널은 form 태그 없는 그리드 안에 배치됨 -->
+              <div class="entry-panel entry-panel-kw" id="kwSection" style="display:none">
+                <div class="entry-panel-header">
+                  <i class="fas fa-tags"></i> ③ 자문 분류 정보
+                  <span style="background:#e0e7ff;color:#4338ca;border-radius:4px;padding:1px 8px;font-size:10px;font-weight:700;margin-left:6px">고객업무</span>
+                </div>
+                <div class="entry-panel-body">
+
+                  <!-- 핵심키워드 -->
+                  <div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px dashed #ddd6fe">
+                    <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
+                      <span style="font-size:8px;color:#7c3aed">📌</span>
+                      <label class="ep-label" style="margin:0;font-size:12px;font-weight:700">핵심키워드 <span class="required">*</span></label>
+                    </div>
+                    <div style="font-size:11px;color:#6b7280;margin-bottom:3px">고객 질의의 핵심을 <strong>'대상+쟁점'</strong> 형태로 입력. Enter로 추가, ✕로 삭제.</div>
+                    <div id="kw-query-example" style="font-size:11px;color:#9ca3af;font-style:italic;margin-bottom:5px"></div>
+                    <div style="display:flex;gap:6px;align-items:center">
+                      <div class="tag-input-wrap" id="kw-query-wrap"
+                        style="flex:1;min-height:36px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;background:#fff;border:1px solid #d1d5db;border-radius:7px;padding:5px 8px;cursor:text"
+                        onclick="this.querySelector('input')&&this.querySelector('input').focus()">
+                        <input type="text" id="kw-query-input" placeholder="키워드 입력 후 Enter"
+                          style="border:none;outline:none;font-size:12px;min-width:120px;flex:1;background:transparent" />
+                      </div>
+                      <button type="button" id="kw-query-add-btn"
+                        style="background:#4338ca;color:#fff;border:none;height:34px;padding:0 12px;border-radius:6px;font-size:12px;cursor:pointer;white-space:nowrap;flex-shrink:0">
+                        <i class="fas fa-plus"></i> 추가
+                      </button>
+                    </div>
+                    <input type="hidden" id="kw-query-hidden" />
+                  </div>
+
+                  <!-- 관련법령 -->
+                  <div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px dashed #ddd6fe">
+                    <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
+                      <span style="font-size:8px;color:#7c3aed">📌</span>
+                      <label class="ep-label" style="margin:0;font-size:12px;font-weight:700">관련법령 <span class="optional">(선택)</span></label>
+                    </div>
+                    <div style="font-size:11px;color:#6b7280;margin-bottom:6px">법령을 선택하고 조항 입력 후 <strong>[+ 추가]</strong>를 클릭하세요.</div>
+                    <div style="display:flex;gap:5px;align-items:center;margin-bottom:6px;flex-wrap:wrap">
+                      <div style="position:relative;flex:2;min-width:120px">
+                        <input type="text" id="law-search-input" placeholder="법령명 검색 또는 직접 입력"
+                          style="width:100%;height:30px;padding:0 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;box-sizing:border-box"
+                          autocomplete="off" />
+                        <div id="law-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;background:#fff;border:1px solid #d1d5db;border-radius:7px;box-shadow:0 4px 12px rgba(0,0,0,.12);max-height:180px;overflow-y:auto;margin-top:2px"></div>
+                      </div>
+                      <input type="text" id="law-article-input" placeholder="예: 제30조 제1항"
+                        style="flex:1.2;min-width:100px;height:30px;padding:0 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px" />
+                      <button type="button" id="law-add-btn"
+                        style="background:#4338ca;color:#fff;border:none;height:30px;padding:0 12px;border-radius:6px;font-size:12px;cursor:pointer;white-space:nowrap;flex-shrink:0">
+                        <i class="fas fa-plus"></i> 추가
+                      </button>
+                    </div>
+                    <div id="law-refs-tags" style="display:flex;flex-wrap:wrap;gap:4px;min-height:8px"></div>
+                    <input type="hidden" id="law-refs-hidden" value="[]" />
+                    <div id="law-refs-example" style="font-size:11px;color:#9ca3af;margin-top:4px;font-style:italic">예: 관세법 제30조 제1항 제1호</div>
+                  </div>
+
+                  <!-- 판단사유 -->
+                  <div>
+                    <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
+                      <span style="font-size:8px;color:#7c3aed">📌</span>
+                      <label class="ep-label" style="margin:0;font-size:12px;font-weight:700">판단사유 <span class="optional">(선택)</span></label>
+                    </div>
+                    <div style="font-size:11px;color:#6b7280;margin-bottom:3px">판단의 핵심 근거를 짧은 명사구로 입력. Enter로 추가, ✕로 삭제.</div>
+                    <div id="kw-reason-example" style="font-size:11px;color:#9ca3af;font-style:italic;margin-bottom:5px"></div>
+                    <div style="display:flex;gap:6px;align-items:center">
+                      <div class="tag-input-wrap" id="kw-reason-wrap"
+                        style="flex:1;min-height:36px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;background:#fff;border:1px solid #d1d5db;border-radius:7px;padding:5px 8px;cursor:text"
+                        onclick="this.querySelector('input')&&this.querySelector('input').focus()">
+                        <input type="text" id="kw-reason-input" placeholder="판단근거 입력 후 Enter"
+                          style="border:none;outline:none;font-size:12px;min-width:120px;flex:1;background:transparent" />
+                      </div>
+                      <button type="button" id="kw-reason-add-btn"
+                        style="background:#4338ca;color:#fff;border:none;height:34px;padding:0 12px;border-radius:6px;font-size:12px;cursor:pointer;white-space:nowrap;flex-shrink:0">
+                        <i class="fas fa-plus"></i> 추가
+                      </button>
+                    </div>
+                    <input type="hidden" id="kw-reason-hidden" />
+                  </div>
+
+                </div>
+              </div><!-- /패널③ -->
+
+              <!-- ┌──────────────────────────────────────┐
+                   │  ④ 자문 결과물                       │
+                   └──────────────────────────────────────┘ -->
+              <div class="entry-panel entry-panel-file" id="filePanel">
+                <div class="entry-panel-header">
+                  <i class="fas fa-paperclip"></i> ④ 자문 결과물
+                  <span class="required" id="attachRequired" style="margin-left:4px;font-size:11px">*</span>
+                  <span class="optional" id="attachOptional" style="display:none;margin-left:4px;font-size:11px">(선택)</span>
+                </div>
+                <div class="entry-panel-body">
+
+                  <!-- 파일 직접 첨부 -->
+                  <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px 14px;margin-bottom:8px">
+                    <div style="font-size:11px;font-weight:700;color:#15803d;margin-bottom:5px;display:flex;align-items:center;gap:5px">
+                      <i class="fas fa-upload"></i> 파일 직접 첨부
+                      <span style="background:#dcfce7;color:#15803d;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700">승인자 즉시 다운로드 가능</span>
+                    </div>
+                    <div style="font-size:11px;color:#6b7280;margin-bottom:8px">Excel · Word · PPT · PDF 지원 &nbsp;|&nbsp; 최대 <strong>10MB</strong>/파일</div>
+                    <div class="file-drop-zone" id="fileDropZone"
+                      onclick="document.getElementById('fileInput').click()"
+                      ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onFileDrop(event)">
+                      <div class="drop-icon"><i class="fas fa-cloud-upload-alt" style="color:#16a34a"></i></div>
+                      <div class="drop-text">클릭하거나 파일을 드래그하세요</div>
+                      <div class="drop-hint">Excel · Word · PPT · PDF · 최대 10MB/파일</div>
+                    </div>
+                    <input type="file" id="fileInput" style="display:none" multiple
+                      accept=".xlsx,.xls,.docx,.doc,.pptx,.ppt,.pdf" onchange="onFileSelect(event)" />
+                  </div>
+
+                  <!-- 외부 링크 -->
+                  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;margin-bottom:8px">
+                    <div style="font-size:11px;font-weight:600;color:#475569;margin-bottom:7px;display:flex;align-items:center;gap:5px">
+                      <i class="fas fa-link" style="color:#7c3aed"></i> 외부 링크 등록
+                      <span style="background:#ede9fe;color:#6d28d9;border-radius:4px;padding:1px 7px;font-size:10px">대용량 파일 (10MB 초과) 권장</span>
+                    </div>
+                    <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">
+                      <input type="text" id="manual-file-name" placeholder="파일명"
+                        style="flex:1;min-width:100px;height:30px;padding:0 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px" />
+                      <select id="manual-file-type"
+                        style="height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;width:70px">
+                        <option value="word">Word</option><option value="excel">Excel</option>
+                        <option value="pdf">PDF</option><option value="ppt">PPT</option><option value="link">기타링크</option>
+                      </select>
+                      <input type="url" id="manual-file-url" placeholder="https://drive.google.com/..."
+                        style="flex:2;min-width:120px;height:30px;padding:0 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px" />
+                      <button type="button" onclick="addFileByUrl()"
+                        style="background:#7c3aed;color:#fff;border:none;height:30px;padding:0 12px;border-radius:6px;font-size:12px;cursor:pointer;white-space:nowrap;flex-shrink:0">
+                        <i class="fas fa-plus"></i> 추가
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="file-list" id="fileList"></div>
+
+                </div>
+              </div><!-- /패널④ -->
+
+            </div><!-- /entry-2x2-grid -->
+
+          <!-- 제출 버튼 (JS onclick으로만 호출) -->
           <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:14px">
             <button type="button" class="btn btn-ghost" id="draftEntryBtn" onclick="saveEntryDraft()">
               <i class="fas fa-save"></i> 임시저장
@@ -437,8 +604,13 @@
           </div>
         </div>
       </section>
+
+      <!-- ──────────────────────────
+           3. 나의 타임시트
+      ────────────────────────── -->
       <section class="page-section" id="page-my-entries">
         <div class="filter-bar">
+          <!-- 기간 From~To 인라인 묶음 -->
           <div class="filter-group">
             <span class="filter-label">기간</span>
             <div style="display:flex;align-items:center;gap:4px">
@@ -449,15 +621,21 @@
           </div>
           <div class="filter-group">
             <span class="filter-label">고객사</span>
-            <select class="filter-control" id="filter-entry-client" style="width:120px"><option value="">전체</option></select>
+            <select class="filter-control" id="filter-entry-client" style="width:120px">
+              <option value="">전체</option>
+            </select>
           </div>
           <div class="filter-group">
             <span class="filter-label">대분류</span>
-            <select class="filter-control" id="filter-entry-category" style="width:110px" onchange="onEntryFilterCategoryChange()"><option value="">전체</option></select>
+            <select class="filter-control" id="filter-entry-category" style="width:110px" onchange="onEntryFilterCategoryChange()">
+              <option value="">전체</option>
+            </select>
           </div>
           <div class="filter-group">
             <span class="filter-label">소분류</span>
-            <select class="filter-control" id="filter-entry-subcategory" style="width:130px"><option value="">전체</option></select>
+            <select class="filter-control" id="filter-entry-subcategory" style="width:130px">
+              <option value="">전체</option>
+            </select>
           </div>
           <div class="filter-group">
             <span class="filter-label">상태</span>
@@ -475,6 +653,7 @@
             <button class="btn btn-ghost btn-sm" onclick="resetEntryFilter()" title="초기화"><i class="fas fa-redo"></i></button>
           </div>
         </div>
+
         <div class="card">
           <div class="card-header">
             <h2>타임시트 목록</h2>
@@ -489,16 +668,28 @@
             <div class="table-wrapper" style="border:none;border-radius:0;overflow-x:auto">
               <table class="data-table approval-table" id="my-entries-table" style="width:100%;table-layout:fixed">
                 <colgroup>
-                  <col style="width:40px"><col style="width:94px"><col style="width:150px">
-                  <col style="width:110px"><col><col style="width:110px">
-                  <col style="width:110px"><col style="width:68px"><col style="width:68px"><col style="width:108px">
+                  <col style="width:40px">   <!-- No -->
+                  <col style="width:94px">   <!-- 작성일자 -->
+                  <col style="width:150px">  <!-- 고객사 -->
+                  <col style="width:110px">  <!-- 업무팀 -->
+                  <col>                      <!-- 소분류 (flex) -->
+                  <col style="width:110px">  <!-- 시작일시 -->
+                  <col style="width:110px">  <!-- 종료일시 -->
+                  <col style="width:68px">   <!-- 업무시간 -->
+                  <col style="width:68px">   <!-- 상태 -->
+                  <col style="width:108px">  <!-- 관리 -->
                 </colgroup>
                 <thead>
                   <tr>
-                    <th style="text-align:center">No</th><th>작성일자</th><th>고객사</th>
-                    <th>업무팀</th><th>소분류</th>
-                    <th style="text-align:center">시작일시</th><th style="text-align:center">종료일시</th>
-                    <th style="text-align:center">업무시간</th><th style="text-align:center">상태</th>
+                    <th style="text-align:center">No</th>
+                    <th>작성일자</th>
+                    <th>고객사</th>
+                    <th>업무팀</th>
+                    <th>소분류</th>
+                    <th style="text-align:center">시작일시</th>
+                    <th style="text-align:center">종료일시</th>
+                    <th style="text-align:center">업무시간</th>
+                    <th style="text-align:center">상태</th>
                     <th style="text-align:center">관리</th>
                   </tr>
                 </thead>
@@ -512,7 +703,11 @@
         </div>
       </section>
 
+      <!-- ──────────────────────────
+           4. 승인 관리
+      ────────────────────────── -->
       <section class="page-section" id="page-approval">
+        <!-- Director/Admin 읽기전용 안내 배너 -->
         <div id="approval-readonly-banner" style="display:none;align-items:center;gap:10px;background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:13px;color:#92400e">
           <i class="fas fa-eye" style="font-size:16px;color:#b45309"></i>
           <span><strong>열람 전용 모드</strong> — 현재 계정은 타임시트를 조회만 할 수 있습니다. 승인/반려는 Manager만 가능합니다.</span>
@@ -528,7 +723,9 @@
           </div>
           <div class="filter-group" id="filter-approval-team-group" style="display:none">
             <span class="filter-label">팀</span>
-            <select class="filter-control" id="filter-approval-team" style="width:110px"><option value="">전체</option></select>
+            <select class="filter-control" id="filter-approval-team" style="width:110px">
+              <option value="">전체</option>
+            </select>
           </div>
           <div class="filter-group">
             <span class="filter-label">Staff</span>
@@ -536,11 +733,15 @@
           </div>
           <div class="filter-group">
             <span class="filter-label">고객사</span>
-            <select class="filter-control" id="filter-approval-client" style="width:110px"><option value="">전체 고객사</option></select>
+            <select class="filter-control" id="filter-approval-client" style="width:110px">
+              <option value="">전체 고객사</option>
+            </select>
           </div>
           <div class="filter-group">
             <span class="filter-label">업무 소분류</span>
-            <select class="filter-control" id="filter-approval-subcategory" style="width:120px"><option value="">전체 소분류</option></select>
+            <select class="filter-control" id="filter-approval-subcategory" style="width:120px">
+              <option value="">전체 소분류</option>
+            </select>
           </div>
           <div class="filter-group">
             <span class="filter-label">상태</span>
@@ -557,6 +758,7 @@
             <button class="btn btn-ghost btn-sm" onclick="resetApprovalFilter()" title="초기화"><i class="fas fa-redo"></i></button>
           </div>
         </div>
+
         <div class="card">
           <div class="card-header">
             <h2>승인 대기 목록</h2>
@@ -568,17 +770,32 @@
             <div class="table-wrapper" style="border:none;border-radius:0;overflow-x:auto">
               <table class="data-table" id="approval-list-table" style="width:100%;table-layout:fixed">
                 <colgroup>
-                  <col style="width:40px"><col style="width:90px"><col style="width:80px">
-                  <col style="width:80px"><col style="width:90px"><col style="width:130px">
-                  <col><col style="width:110px"><col style="width:110px">
-                  <col style="width:68px"><col style="width:68px"><col style="width:100px">
+                  <col style="width:40px">   <!-- No -->
+                  <col style="width:90px">   <!-- 작성일자 -->
+                  <col style="width:80px">   <!-- Staff -->
+                  <col style="width:80px">   <!-- 승인자 -->
+                  <col style="width:90px">   <!-- 업무팀 -->
+                  <col style="width:130px">  <!-- 고객사 -->
+                  <col>                      <!-- 소분류 (flex) -->
+                  <col style="width:110px">  <!-- 시작일시 -->
+                  <col style="width:110px">  <!-- 종료일시 -->
+                  <col style="width:68px">   <!-- 업무시간 -->
+                  <col style="width:68px">   <!-- 상태 -->
+                  <col style="width:100px">  <!-- 관리 -->
                 </colgroup>
                 <thead>
                   <tr>
-                    <th style="text-align:center">No</th><th>작성일자</th><th>Staff</th>
-                    <th>승인자</th><th>업무팀</th><th>고객사</th><th>소분류</th>
-                    <th style="text-align:center">시작일시</th><th style="text-align:center">종료일시</th>
-                    <th style="text-align:center">업무시간</th><th style="text-align:center">상태</th>
+                    <th style="text-align:center">No</th>
+                    <th>작성일자</th>
+                    <th>Staff</th>
+                    <th>승인자</th>
+                    <th>업무팀</th>
+                    <th>고객사</th>
+                    <th>소분류</th>
+                    <th style="text-align:center">시작일시</th>
+                    <th style="text-align:center">종료일시</th>
+                    <th style="text-align:center">업무시간</th>
+                    <th style="text-align:center">상태</th>
                     <th style="text-align:center">관리</th>
                   </tr>
                 </thead>
@@ -591,24 +808,39 @@
           </div>
         </div>
       </section>
+
+      <!-- ──────────────────────────
+           5. 투입 분석
+      ────────────────────────── -->
       <section class="page-section" id="page-analysis">
+
+        <!-- ── 서브탭 네비게이션 (3탭) ── -->
         <div style="display:flex;gap:0;border-bottom:2px solid var(--border-light);margin-bottom:16px">
           <button id="analysis-tab-work" onclick="switchAnalysisTab('work')"
-            style="padding:9px 20px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;color:var(--primary);border-bottom:2px solid var(--primary);margin-bottom:-2px;transition:all 0.2s">
+            style="padding:9px 20px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;
+                   color:var(--primary);border-bottom:2px solid var(--primary);margin-bottom:-2px;transition:all 0.2s">
             <i class="fas fa-chart-bar" style="margin-right:5px"></i>업무 분석
           </button>
           <button id="analysis-tab-staff" onclick="switchAnalysisTab('staff')"
-            style="padding:9px 20px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;color:var(--text-secondary);border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s">
+            style="padding:9px 20px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;
+                   color:var(--text-secondary);border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s">
             <i class="fas fa-user-chart" style="margin-right:5px"></i>고과 분석
           </button>
           <button id="analysis-tab-labor" onclick="switchAnalysisTab('labor')"
-            style="padding:9px 20px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;color:var(--text-secondary);border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s">
+            style="padding:9px 20px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;
+                   color:var(--text-secondary);border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s">
             <i class="fas fa-coins" style="margin-right:5px"></i>인건비 분석
           </button>
         </div>
+
+        <!-- ══════════════════════════════
+             서브탭1: 업무 분석
+        ══════════════════════════════ -->
         <div id="analysis-panel-work">
+          <!-- 필터 바 — 2줄 그리드 -->
           <div style="background:#fff;border:1px solid var(--border-light);border-radius:10px;padding:12px 16px;margin-bottom:16px;">
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 16px;align-items:end;">
+              <!-- 기간 -->
               <div class="filter-group" style="grid-column:span 2">
                 <span class="filter-label">기간</span>
                 <div style="display:flex;align-items:center;gap:4px">
@@ -617,30 +849,49 @@
                   <input type="date" class="filter-control" id="filter-analysis-date-to" style="width:130px" />
                 </div>
               </div>
+              <!-- 사업부 -->
               <div class="filter-group">
                 <span class="filter-label">사업부</span>
-                <select class="filter-control" id="filter-analysis-department" style="width:100%" onchange="onAnalysisDepartmentChange()"><option value="">전체 사업부</option></select>
+                <select class="filter-control" id="filter-analysis-department" style="width:100%" onchange="onAnalysisDepartmentChange()">
+                  <option value="">전체 사업부</option>
+                </select>
               </div>
+              <!-- 고객지원팀 -->
               <div class="filter-group">
                 <span class="filter-label">고객지원팀</span>
-                <select class="filter-control" id="filter-analysis-csteam" style="width:100%"><option value="">전체 팀</option></select>
+                <select class="filter-control" id="filter-analysis-csteam" style="width:100%">
+                  <option value="">전체 팀</option>
+                </select>
               </div>
+              <!-- 승인자 -->
               <div class="filter-group">
                 <span class="filter-label">승인자</span>
-                <select class="filter-control" id="filter-analysis-approver" style="width:100%"><option value="">전체 승인자</option></select>
+                <select class="filter-control" id="filter-analysis-approver" style="width:100%">
+                  <option value="">전체 승인자</option>
+                </select>
               </div>
+              <!-- 고객사 -->
               <div class="filter-group">
                 <span class="filter-label">고객사</span>
-                <select class="filter-control" id="filter-analysis-client" style="width:100%"><option value="">전체 고객사</option></select>
+                <select class="filter-control" id="filter-analysis-client" style="width:100%">
+                  <option value="">전체 고객사</option>
+                </select>
               </div>
+              <!-- 업무 대분류 -->
               <div class="filter-group">
                 <span class="filter-label">업무 대분류</span>
-                <select class="filter-control" id="filter-analysis-category" style="width:100%" onchange="onAnalysisCategoryChange()"><option value="">전체 대분류</option></select>
+                <select class="filter-control" id="filter-analysis-category" style="width:100%" onchange="onAnalysisCategoryChange()">
+                  <option value="">전체 대분류</option>
+                </select>
               </div>
+              <!-- 업무 소분류 -->
               <div class="filter-group">
                 <span class="filter-label">업무 소분류</span>
-                <select class="filter-control" id="filter-analysis-subcategory" style="width:100%"><option value="">전체 소분류</option></select>
+                <select class="filter-control" id="filter-analysis-subcategory" style="width:100%">
+                  <option value="">전체 소분류</option>
+                </select>
               </div>
+              <!-- 버튼 -->
               <div class="filter-actions" style="display:flex;gap:6px;align-items:flex-end;padding-top:16px">
                 <button class="btn btn-primary btn-sm" onclick="loadAnalysis()"><i class="fas fa-chart-bar"></i> 분석</button>
                 <button class="btn btn-ghost btn-sm" onclick="exportAnalysisExcel()"><i class="fas fa-file-excel"></i> 엑셀</button>
@@ -648,220 +899,40 @@
               </div>
             </div>
           </div>
+
+          <!-- 분석 KPI -->
           <div class="kpi-grid" id="analysis-kpi" style="margin-bottom:20px"></div>
+
           <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-bottom:14px;">
             <div class="card">
               <div class="card-header" style="padding:12px 16px 11px">
                 <h2><i class="fas fa-bars" style="color:var(--primary)"></i>&nbsp; 업무별 투입 비율</h2>
                 <div class="card-actions"><span style="font-size:11px;color:var(--text-muted)">상위 8+기타</span></div>
               </div>
-              <div class="card-body" style="height:220px;position:relative;padding:10px 12px"><canvas id="analysis-chart-category"></canvas></div>
+              <div class="card-body" style="height:220px;position:relative;padding:10px 12px">
+                <canvas id="analysis-chart-category"></canvas>
+              </div>
             </div>
             <div class="card">
               <div class="card-header" style="padding:12px 16px 11px">
                 <h2><i class="fas fa-building" style="color:var(--primary)"></i>&nbsp; 고객사별 투입 시간</h2>
                 <div class="card-actions"><span style="font-size:11px;color:var(--text-muted)">상위 8+기타</span></div>
               </div>
-              <div class="card-body" style="height:220px;position:relative;padding:10px 12px"><canvas id="analysis-chart-client"></canvas></div>
-            </div>
-          </div>
-        </div>
-        <div id="analysis-panel-staff" style="display:none">
-          <div style="background:#fff;border:1px solid var(--border-light);border-radius:10px;padding:12px 16px;margin-bottom:16px;">
-            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 16px;align-items:end;">
-              <div class="filter-group" style="grid-column:span 2">
-                <span class="filter-label">기간</span>
-                <div style="display:flex;align-items:center;gap:4px">
-                  <input type="date" class="filter-control" id="filter-staff-date-from" style="width:130px" />
-                  <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">~</span>
-                  <input type="date" class="filter-control" id="filter-staff-date-to" style="width:130px" />
-                </div>
-              </div>
-              <div class="filter-group">
-                <span class="filter-label">사업부</span>
-                <select class="filter-control" id="filter-staff-department" style="width:100%" onchange="onStaffDepartmentChange()"><option value="">전체 사업부</option></select>
-              </div>
-              <div class="filter-group">
-                <span class="filter-label">고객지원팀</span>
-                <select class="filter-control" id="filter-staff-csteam" style="width:100%"><option value="">전체 팀</option></select>
-              </div>
-              <div class="filter-group">
-                <span class="filter-label">승인자</span>
-                <select class="filter-control" id="filter-staff-approver" style="width:100%"><option value="">전체 승인자</option></select>
-              </div>
-              <div class="filter-actions" style="display:flex;gap:6px;align-items:flex-end;padding-top:16px">
-                <button class="btn btn-primary btn-sm" onclick="loadStaffAnalysis()"><i class="fas fa-user-chart"></i> 분석</button>
-                <button class="btn btn-ghost btn-sm" onclick="resetStaffFilter()" title="초기화"><i class="fas fa-redo"></i></button>
+              <div class="card-body" style="height:220px;position:relative;padding:10px 12px">
+                <canvas id="analysis-chart-client"></canvas>
               </div>
             </div>
           </div>
-          <div class="kpi-grid" id="staff-analysis-kpi" style="margin-bottom:16px"></div>
-          <div class="card">
-            <div class="card-header" style="padding:12px 16px 11px">
-              <h2><i class="fas fa-users" style="color:var(--primary)"></i>&nbsp; 직원별 투입시간 고과</h2>
-              <div class="card-actions"><span id="staff-analysis-period-label" style="font-size:11px;color:var(--text-muted)"></span></div>
-            </div>
-            <div style="display:grid;grid-template-columns:140px 70px 90px 90px 1fr 90px 90px 80px;gap:0;padding:7px 16px;background:#f8fafc;border-bottom:1px solid var(--border-light);font-size:11px;font-weight:600;color:#9aa4b2;">
-              <div>이름</div><div style="text-align:right">투입시간</div><div style="text-align:center">기간대비</div>
-              <div style="text-align:center">최다대비</div><div style="padding-left:8px">최다대비 비율 바</div>
-              <div style="text-align:center">품질 별점</div><div style="text-align:center">전문성</div><div style="text-align:center">수행방식</div>
-            </div>
-            <div class="card-body" style="padding:6px 14px;max-height:520px;overflow-y:auto" id="staff-analysis-body">
-              <div style="text-align:center;padding:40px;color:var(--text-muted);font-size:13px">
-                <i class="fas fa-user-clock" style="font-size:24px;opacity:0.3;display:block;margin-bottom:8px"></i>
-                기간과 조건을 선택 후 분석 버튼을 눌러주세요.
-              </div>
-            </div>
-          </div>
-          <div class="card" style="margin-top:12px">
-            <div class="card-header" style="padding:12px 16px 11px">
-              <h2><i class="fas fa-star" style="color:#f59e0b"></i>&nbsp; 별점 평가 집계</h2>
-              <div class="card-actions"><span style="font-size:11px;color:var(--text-muted)">자료실 저장 기준 · 승인자 평가</span></div>
-            </div>
-            <div class="card-body" style="padding:12px 16px" id="staff-star-summary">
-              <div style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px">분석 실행 후 표시됩니다.</div>
-            </div>
-          </div>
-        </div>
-        <div id="analysis-panel-labor" style="display:none">
-          <div class="filter-bar" style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap">
-            <div class="filter-group">
-              <span class="filter-label">회계연도</span>
-              <select class="filter-control" id="filter-labor-year" style="width:90px" onchange="loadLaborAnalysis()"></select>
-            </div>
-            <div class="filter-group">
-              <span class="filter-label">구분</span>
-              <select class="filter-control" id="filter-labor-view" style="width:110px" onchange="loadLaborAnalysis()">
-                <option value="client">고객사별 배부</option>
-                <option value="team">팀별 배부</option>
-              </select>
-            </div>
-            <div class="filter-actions" style="align-self:flex-end">
-              <button class="btn btn-primary btn-sm" onclick="loadLaborAnalysis()"><i class="fas fa-calculator"></i> 계산</button>
-              <button class="btn btn-ghost btn-sm" onclick="exportLaborExcel()"><i class="fas fa-file-excel"></i> 엑셀</button>
-              <button id="btn-labor-cost-setting" class="btn btn-ghost btn-sm" onclick="openLaborCostModal()" style="display:none"><i class="fas fa-cog"></i> 인건비 설정</button>
-            </div>
-          </div>
-          <div id="labor-cost-status" style="margin-bottom:12px"></div>
-          <div class="kpi-grid" id="labor-kpi" style="margin-bottom:16px"></div>
-          <div class="card">
-            <div class="card-header" style="padding:12px 16px 11px">
-              <h2 id="labor-table-title"><i class="fas fa-table" style="color:var(--primary)"></i>&nbsp; 고객사별 인건비 배부</h2>
-              <div class="card-actions"><span style="font-size:11px;color:var(--text-muted)">고객사 지정 업무시간 기준</span></div>
-            </div>
-            <div class="card-body" style="padding:0;overflow-x:auto">
-              <div id="labor-table-wrap">
-                <div style="display:flex;align-items:center;justify-content:center;padding:48px;color:var(--text-muted);font-size:13px">
-                  <i class="fas fa-info-circle" style="margin-right:6px"></i>연도와 구분을 선택 후 계산 버튼을 눌러주세요.
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="card" style="margin-top:12px">
-            <div class="card-header" style="padding:12px 16px 11px">
-              <h2><i class="fas fa-user-tag" style="color:var(--primary)"></i>&nbsp; 직원별 인건비 배부 현황</h2>
-            </div>
-            <div class="card-body" style="padding:12px 16px;overflow-x:auto">
-              <div id="labor-person-wrap">
-                <div style="display:flex;align-items:center;justify-content:center;padding:32px;color:var(--text-muted);font-size:13px">데이터를 먼저 계산하세요.</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-      <div class="modal-overlay" id="laborCostModal">
-        <div class="modal" style="width:680px;max-width:95vw">
-          <div class="modal-header">
-            <h3 class="modal-title"><i class="fas fa-coins" style="color:var(--primary)"></i>&nbsp; 인건비 설정</h3>
-            <button class="btn-close" onclick="closeModal('laborCostModal')">×</button>
-          </div>
-          <div class="modal-body" style="padding:16px 20px">
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
-              <label style="font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap">회계연도</label>
-              <select class="filter-control" id="labor-modal-year" style="width:100px" onchange="loadLaborCostList()"></select>
-              <div style="display:flex;gap:6px;margin-left:auto">
-                <button class="btn btn-ghost btn-sm" onclick="downloadLaborCostTemplate()"><i class="fas fa-download"></i> 양식 다운로드</button>
-                <label class="btn btn-outline btn-sm" style="cursor:pointer;margin:0">
-                  <i class="fas fa-file-excel"></i> 엑셀 업로드
-                  <input type="file" id="labor-cost-upload-file" accept=".xlsx,.xls" style="display:none" onchange="uploadLaborCostExcel(this)" />
-                </label>
-              </div>
-            </div>
-            <div id="labor-upload-result" style="display:none;margin-bottom:10px"></div>
-            <div style="border:1px solid var(--border-light);border-radius:var(--radius-sm);overflow:hidden;max-height:340px;overflow-y:auto">
-              <table style="width:100%;border-collapse:collapse">
-                <thead style="position:sticky;top:0;z-index:1">
-                  <tr style="background:var(--bg-secondary)">
-                    <th style="padding:9px 12px;font-size:11.5px;font-weight:600;color:var(--text-secondary);text-align:left;border-bottom:1px solid var(--border-light)">직원</th>
-                    <th style="padding:9px 12px;font-size:11.5px;font-weight:600;color:var(--text-secondary);text-align:left;border-bottom:1px solid var(--border-light)">역할</th>
-                    <th style="padding:9px 12px;font-size:11.5px;font-weight:600;color:var(--text-secondary);text-align:right;border-bottom:1px solid var(--border-light)">연간 인건비 (원)</th>
-                    <th style="padding:9px 12px;font-size:11.5px;font-weight:600;color:var(--text-secondary);text-align:left;border-bottom:1px solid var(--border-light)">비고</th>
-                  </tr>
-                </thead>
-                <tbody id="labor-cost-tbody"></tbody>
-              </table>
-            </div>
-            <div style="margin-top:10px;padding:8px 12px;background:#f8faff;border:1px solid var(--border-light);border-radius:6px;font-size:11.5px;color:var(--text-muted);line-height:1.7">
-              <i class="fas fa-info-circle" style="color:var(--primary);margin-right:4px"></i>
-              엑셀 컬럼: <b>A열</b> 이름 · <b>B열</b> 연간 인건비(원, 숫자만) · <b>C열</b> 비고(선택)
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button class="btn btn-ghost" onclick="closeModal('laborCostModal')">닫기</button>
-            <button class="btn btn-primary" onclick="saveLaborCosts()"><i class="fas fa-save"></i> 저장</button>
-          </div>
-        </div>
-      </div>
+        </div><!-- /analysis-panel-work -->
 
-      <section class="page-section" id="page-master-org">
-        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;gap:10px;font-size:13px;color:#1e40af">
-          <i class="fas fa-info-circle" style="font-size:15px;flex-shrink:0"></i>
-          <span>사업부 아래에 본부를 등록하세요. 본부장(Manager)을 지정하면 해당 본부 소속 팀원의 타임시트 승인자로 자동 연결됩니다.</span>
-        </div>
-        <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start">
-          <div class="card" style="margin:0">
-            <div class="card-header">
-              <h2><i class="fas fa-sitemap" style="color:var(--primary)"></i>&nbsp; 사업부 목록</h2>
-              <div class="card-actions">
-                <button class="btn btn-sm btn-primary" onclick="openDeptModal()"><i class="fas fa-plus"></i> 사업부 추가</button>
-              </div>
-            </div>
-            <div class="card-body" style="padding:0">
-              <div class="table-wrapper" style="border:none;border-radius:0">
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th style="width:36px">No</th>
-                      <th>사업부명</th>
-                      <th style="width:90px">사업부장</th>
-                      <th style="width:90px;text-align:center">관리</th>
-                    </tr>
-                  </thead>
-                  <tbody id="departments-body">
-                    <tr><td colspan="4" class="table-empty"><i class="fas fa-sitemap"></i><p>등록된 사업부가 없습니다.</p></td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-          <div class="card" style="margin:0">
-            <div class="card-header">
-              <h2><i class="fas fa-building" style="color:var(--success,#16a34a)"></i>&nbsp; 본부 목록</h2>
-              <div class="card-actions" id="hq-add-btn-wrap" style="display:none">
-                <button class="btn btn-sm btn-primary" onclick="openHqModal()"><i class="fas fa-plus"></i> 본부 추가</button>
-              </div>
-            </div>
-            <div class="card-body" style="padding:0">
-              <div id="hq-no-dept-msg" style="text-align:center;padding:40px 20px;color:var(--text-muted)">
-                <i class="fas fa-arrow-left" style="font-size:28px;margin-bottom:10px;display:block;opacity:0.3"></i>
-                <p style="font-size:13px">왼쪽에서 사업부를 선택하면<br>소속 본부가 표시됩니다.</p>
-              </div>
         <!-- ══════════════════════════════
              서브탭2: 고과 분석
         ══════════════════════════════ -->
         <div id="analysis-panel-staff" style="display:none">
+          <!-- 필터 바 -->
           <div style="background:#fff;border:1px solid var(--border-light);border-radius:10px;padding:12px 16px;margin-bottom:16px;">
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 16px;align-items:end;">
+              <!-- 기간 -->
               <div class="filter-group" style="grid-column:span 2">
                 <span class="filter-label">기간</span>
                 <div style="display:flex;align-items:center;gap:4px">
@@ -870,31 +941,39 @@
                   <input type="date" class="filter-control" id="filter-staff-date-to" style="width:130px" />
                 </div>
               </div>
+              <!-- 사업부 -->
               <div class="filter-group">
                 <span class="filter-label">사업부</span>
                 <select class="filter-control" id="filter-staff-department" style="width:100%" onchange="onStaffDepartmentChange()">
                   <option value="">전체 사업부</option>
                 </select>
               </div>
+              <!-- 고객지원팀 -->
               <div class="filter-group">
                 <span class="filter-label">고객지원팀</span>
                 <select class="filter-control" id="filter-staff-csteam" style="width:100%">
                   <option value="">전체 팀</option>
                 </select>
               </div>
+              <!-- 승인자 -->
               <div class="filter-group">
                 <span class="filter-label">승인자</span>
                 <select class="filter-control" id="filter-staff-approver" style="width:100%">
                   <option value="">전체 승인자</option>
                 </select>
               </div>
+              <!-- 버튼 -->
               <div class="filter-actions" style="display:flex;gap:6px;align-items:flex-end;padding-top:16px">
                 <button class="btn btn-primary btn-sm" onclick="loadStaffAnalysis()"><i class="fas fa-user-chart"></i> 분석</button>
                 <button class="btn btn-ghost btn-sm" onclick="resetStaffFilter()" title="초기화"><i class="fas fa-redo"></i></button>
               </div>
             </div>
           </div>
+
+          <!-- 고과 KPI -->
           <div class="kpi-grid" id="staff-analysis-kpi" style="margin-bottom:16px"></div>
+
+          <!-- 직원별 분석 테이블 -->
           <div class="card">
             <div class="card-header" style="padding:12px 16px 11px">
               <h2><i class="fas fa-users" style="color:var(--primary)"></i>&nbsp; 직원별 투입시간 고과</h2>
@@ -902,6 +981,7 @@
                 <span id="staff-analysis-period-label" style="font-size:11px;color:var(--text-muted)"></span>
               </div>
             </div>
+            <!-- 테이블 헤더 -->
             <div style="display:grid;grid-template-columns:140px 70px 90px 90px 1fr 90px 90px 80px;
                         gap:0;padding:7px 16px;background:#f8fafc;border-bottom:1px solid var(--border-light);
                         font-size:11px;font-weight:600;color:#9aa4b2;">
@@ -921,6 +1001,8 @@
               </div>
             </div>
           </div>
+
+          <!-- 별점 집계 카드 -->
           <div class="card" style="margin-top:12px">
             <div class="card-header" style="padding:12px 16px 11px">
               <h2><i class="fas fa-star" style="color:#f59e0b"></i>&nbsp; 별점 평가 집계</h2>
@@ -940,6 +1022,8 @@
              서브탭3: 인건비 분석
         ══════════════════════════════ -->
         <div id="analysis-panel-labor" style="display:none">
+
+          <!-- 필터 바 -->
           <div class="filter-bar" style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap">
             <div class="filter-group">
               <span class="filter-label">회계연도</span>
@@ -960,13 +1044,21 @@
               <button class="btn btn-ghost btn-sm" onclick="exportLaborExcel()">
                 <i class="fas fa-file-excel"></i> 엑셀
               </button>
-              <button id="btn-labor-cost-setting" class="btn btn-ghost btn-sm" onclick="openLaborCostModal()" style="display:none">
+              <!-- Admin 전용: 인건비 입력 버튼 -->
+              <button id="btn-labor-cost-setting" class="btn btn-ghost btn-sm" onclick="openLaborCostModal()"
+                      style="display:none">
                 <i class="fas fa-cog"></i> 인건비 설정
               </button>
             </div>
           </div>
+
+          <!-- 인건비 입력 현황 안내 -->
           <div id="labor-cost-status" style="margin-bottom:12px"></div>
+
+          <!-- KPI -->
           <div class="kpi-grid" id="labor-kpi" style="margin-bottom:16px"></div>
+
+          <!-- 배부 테이블 -->
           <div class="card">
             <div class="card-header" style="padding:12px 16px 11px">
               <h2 id="labor-table-title"><i class="fas fa-table" style="color:var(--primary)"></i>&nbsp; 고객사별 인건비 배부</h2>
@@ -982,6 +1074,8 @@
               </div>
             </div>
           </div>
+
+          <!-- 개인별 상세 차트 -->
           <div class="card" style="margin-top:12px">
             <div class="card-header" style="padding:12px 16px 11px">
               <h2><i class="fas fa-user-tag" style="color:var(--primary)"></i>&nbsp; 직원별 인건비 배부 현황</h2>
@@ -994,6 +1088,7 @@
               </div>
             </div>
           </div>
+
         </div><!-- /analysis-panel-labor -->
 
       </section>
@@ -1006,6 +1101,8 @@
             <button class="btn-close" onclick="closeModal('laborCostModal')">×</button>
           </div>
           <div class="modal-body" style="padding:16px 20px">
+
+            <!-- 연도 선택 + 엑셀 버튼 -->
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
               <label style="font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap">회계연도</label>
               <select class="filter-control" id="labor-modal-year" style="width:100px" onchange="loadLaborCostList()"></select>
@@ -1015,11 +1112,16 @@
                 </button>
                 <label class="btn btn-outline btn-sm" style="cursor:pointer;margin:0" title="엑셀 업로드">
                   <i class="fas fa-file-excel"></i> 엑셀 업로드
-                  <input type="file" id="labor-cost-upload-file" accept=".xlsx,.xls" style="display:none" onchange="uploadLaborCostExcel(this)" />
+                  <input type="file" id="labor-cost-upload-file" accept=".xlsx,.xls"
+                         style="display:none" onchange="uploadLaborCostExcel(this)" />
                 </label>
               </div>
             </div>
+
+            <!-- 업로드 결과 알림 -->
             <div id="labor-upload-result" style="display:none;margin-bottom:10px"></div>
+
+            <!-- 직원 목록 + 입력 테이블 -->
             <div style="border:1px solid var(--border-light);border-radius:var(--radius-sm);overflow:hidden;max-height:340px;overflow-y:auto">
               <table style="width:100%;border-collapse:collapse">
                 <thead style="position:sticky;top:0;z-index:1">
@@ -1033,11 +1135,14 @@
                 <tbody id="labor-cost-tbody"></tbody>
               </table>
             </div>
+
+            <!-- 엑셀 양식 안내 -->
             <div style="margin-top:10px;padding:8px 12px;background:#f8faff;border:1px solid var(--border-light);border-radius:6px;font-size:11.5px;color:var(--text-muted);line-height:1.7">
               <i class="fas fa-info-circle" style="color:var(--primary);margin-right:4px"></i>
               엑셀 컬럼: <b>A열</b> 이름 · <b>B열</b> 연간 인건비(원, 숫자만) · <b>C열</b> 비고(선택)
               &nbsp;·&nbsp; 이름이 시스템에 등록된 직원과 일치해야 반영됩니다.
             </div>
+
           </div>
           <div class="modal-footer">
             <button class="btn btn-ghost" onclick="closeModal('laborCostModal')">닫기</button>
@@ -1047,13 +1152,21 @@
           </div>
         </div>
       </div>
-      <!-- 조직구성 1. 사업부·본부 통합 관리 -->
+
+      <!-- ──────────────────────────
+           조직구성 1. 사업부·본부 통합 관리
+      ────────────────────────── -->
       <section class="page-section" id="page-master-org">
+        <!-- 상단 안내 -->
         <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;gap:10px;font-size:13px;color:#1e40af">
           <i class="fas fa-info-circle" style="font-size:15px;flex-shrink:0"></i>
           <span>사업부 아래에 본부를 등록하세요. 본부장(Manager)을 지정하면 해당 본부 소속 팀원의 타임시트 승인자로 자동 연결됩니다.</span>
         </div>
+
+        <!-- 2컬럼 레이아웃: 사업부 목록(좌) + 선택된 사업부의 본부 목록(우) -->
         <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start">
+
+          <!-- 사업부 목록 -->
           <div class="card" style="margin:0">
             <div class="card-header">
               <h2><i class="fas fa-sitemap" style="color:var(--primary)"></i>&nbsp; 사업부 목록</h2>
@@ -1079,6 +1192,8 @@
               </div>
             </div>
           </div>
+
+          <!-- 본부 목록 (사업부 선택 시 표시) -->
           <div class="card" style="margin:0">
             <div class="card-header">
               <h2><i class="fas fa-building" style="color:var(--success,#16a34a)"></i>&nbsp; 본부 목록</h2>
@@ -1087,10 +1202,12 @@
               </div>
             </div>
             <div class="card-body" style="padding:0">
+              <!-- 사업부 미선택 안내 -->
               <div id="hq-no-dept-msg" style="text-align:center;padding:40px 20px;color:var(--text-muted)">
                 <i class="fas fa-arrow-left" style="font-size:28px;margin-bottom:10px;display:block;opacity:0.3"></i>
                 <p style="font-size:13px">왼쪽에서 사업부를 선택하면<br>소속 본부가 표시됩니다.</p>
               </div>
+              <!-- 본부 테이블 -->
               <div id="hq-table-wrap" style="display:none">
                 <div style="padding:8px 14px;background:#f7f9fc;border-bottom:1px solid var(--border-light);font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:6px">
                   <i class="fas fa-sitemap" style="color:var(--primary)"></i>
@@ -1117,7 +1234,9 @@
         </div>
       </section>
 
-      <!-- 조직구성 2. 업무팀 관리 -->
+      <!-- ──────────────────────────
+           조직구성 2. 업무팀 관리
+      ────────────────────────── -->
       <section class="page-section" id="page-master-teams">
         <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;gap:10px;font-size:13px;color:#1e40af">
           <i class="fas fa-info-circle" style="font-size:15px;flex-shrink:0"></i>
@@ -1154,7 +1273,9 @@
         </div>
       </section>
 
-      <!-- 조직구성 3. 고객지원팀 관리 -->
+      <!-- ──────────────────────────
+           조직구성 3. 고객지원팀 관리
+      ────────────────────────── -->
       <section class="page-section" id="page-master-csteams">
         <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;gap:10px;font-size:13px;color:#15803d">
           <i class="fas fa-info-circle" style="font-size:15px;flex-shrink:0"></i>
@@ -1190,7 +1311,9 @@
         </div>
       </section>
 
-      <!-- 고객사 관리 -->
+      <!-- ──────────────────────────
+           고객사 관리
+      ────────────────────────── -->
       <section class="page-section" id="page-master-clients">
         <div class="card">
           <div class="card-header">
@@ -1216,7 +1339,9 @@
         </div>
       </section>
 
-      <!-- 업무 카테고리 관리 -->
+      <!-- ──────────────────────────
+           8. 업무 카테고리 관리
+      ────────────────────────── -->
       <section class="page-section" id="page-master-categories">
         <div class="card">
           <div class="card-header">
@@ -1238,7 +1363,9 @@
         </div>
       </section>
 
-      <!-- 직원 관리 -->
+      <!-- ──────────────────────────
+           9. 직원 관리 (Admin 전용)
+      ────────────────────────── -->
       <section class="page-section" id="page-users">
         <div class="card">
           <div class="card-header">
@@ -1254,15 +1381,15 @@
             <div class="table-wrapper" style="border:none;border-radius:0">
               <table class="data-table" id="users-table" style="table-layout:fixed;width:100%">
                 <colgroup>
-                  <col style="width:44px">
-                  <col style="width:110px">
-                  <col>
-                  <col style="width:80px">
-                  <col style="width:80px">
-                  <col style="width:140px">
-                  <col style="width:120px">
-                  <col style="width:120px">
-                  <col style="width:72px">
+                  <col style="width:44px">   <!-- No -->
+                  <col style="width:110px">  <!-- 이름 -->
+                  <col>                      <!-- 이메일 (flex:1) -->
+                  <col style="width:80px">   <!-- 역할 -->
+                  <col style="width:80px">   <!-- 사업부 -->
+                  <col style="width:140px">  <!-- 본부 -->
+                  <col style="width:120px">  <!-- 1차 승인자 -->
+                  <col style="width:120px">  <!-- 2차 승인자 -->
+                  <col style="width:72px">   <!-- 관리 -->
                 </colgroup>
                 <thead>
                   <tr>
@@ -1291,13 +1418,23 @@
           </div>
         </div>
       </section>
-      <!-- 자문 자료실 -->
+
+      <!-- ──────────────────────────
+           10. 자문 자료실
+      ────────────────────────── -->
       <section class="page-section" id="page-archive">
+
+        <!-- ══════════════════════════════════════
+             자료실 검색 패널 (v20260401i)
+        ══════════════════════════════════════ -->
         <div class="arch-search-panel">
+
+          <!-- ① 행1: 업무분류 | 평가등급 | 기간 -->
           <div class="arch-filter-row">
             <div class="arch-filter-item">
               <label class="arch-filter-label">업무분류</label>
-              <select id="archive-filter-business" class="arch-filter-select" onchange="_archivePage=1; _archUpdateExampleTags()">
+              <select id="archive-filter-business" class="arch-filter-select"
+                      onchange="_archivePage=1; _archUpdateExampleTags()">
                 <option value="">전체</option>
                 <option value="품목분류">품목분류</option>
                 <option value="과세가격">과세가격</option>
@@ -1326,6 +1463,8 @@
               </div>
             </div>
           </div>
+
+          <!-- ② 행2: 통합 검색바 -->
           <div style="font-size:11px;color:#9ca3af;margin-bottom:5px">
             💡 수행내용·핵심키워드·법령·판단사유 전체에서 자유롭게 검색합니다
           </div>
@@ -1340,10 +1479,14 @@
               <i class="fas fa-plus"></i> 직접 등록
             </button>
           </div>
+
+          <!-- ③ 행3: 핵심키워드 태그 입력 (전체 너비) -->
           <div class="arch-tag-section">
             <div class="arch-tag-section-header">
               <div class="arch-field-label-group">
-                <span class="arch-filter-label"><i class="fas fa-tags" style="color:#6366f1"></i> 핵심키워드</span>
+                <span class="arch-filter-label">
+                  <i class="fas fa-tags" style="color:#6366f1"></i> 핵심키워드
+                </span>
                 <span class="arch-field-desc">등록 시 입력한 키워드로 정확히 검색 · 복수 입력 시 AND 조건</span>
               </div>
             </div>
@@ -1358,6 +1501,11 @@
               <div class="arch-example-tags" id="arch-kw-examples"></div>
             </div>
           </div>
+
+          <!-- ④ 행4: 판단사유 | 관련법령 -->
+          <!-- 라벨행과 입력행을 각각 별도 flex행으로 분리 → 높이 불일치 근본 해결 -->
+
+          <!-- 라벨행 -->
           <div style="display:flex;gap:20px;margin-bottom:4px;">
             <div style="flex:1;min-width:220px;">
               <span class="arch-filter-label"><i class="fas fa-balance-scale" style="color:#059669"></i> 판단사유</span>
@@ -1368,18 +1516,25 @@
               <div class="arch-field-desc" style="margin-top:1px;">법령명과 조항으로 정확히 검색</div>
             </div>
           </div>
+
+          <!-- 입력행 -->
           <div style="display:flex;gap:20px;align-items:flex-start;">
+            <!-- 판단사유 입력창 -->
             <div style="flex:1;min-width:220px;">
-              <div class="arch-tag-input-box" id="arch-reason-wrap" style="min-height:38px;height:38px;box-sizing:border-box;" onclick="document.getElementById('arch-reason-input').focus()">
+              <div class="arch-tag-input-box" id="arch-reason-wrap"
+                   style="min-height:38px;height:38px;box-sizing:border-box;"
+                   onclick="document.getElementById('arch-reason-input').focus()">
                 <div id="arch-reason-tags" class="arch-tag-chips"></div>
                 <input type="text" id="arch-reason-input" class="arch-tag-input"
                        placeholder="예) 거래조건성불충족 · Enter 또는 쉼표로 태그 추가"
                        onkeydown="if(event.key==='Enter'||event.key===','){event.preventDefault();_archAddTag('reason',this.value);this.value=''}" />
               </div>
             </div>
+            <!-- 관련법령 입력행 -->
             <div style="flex:1;min-width:260px;">
               <div style="display:flex;align-items:center;gap:6px;height:38px;box-sizing:border-box;">
-                <select id="arch-law-name" class="arch-filter-select arch-law-select" style="height:38px;box-sizing:border-box;flex:0 0 auto;min-width:110px;max-width:150px;">
+                <select id="arch-law-name" class="arch-filter-select arch-law-select"
+                        style="height:38px;box-sizing:border-box;flex:0 0 auto;min-width:110px;max-width:150px;">
                   <option value="">법령 선택</option>
                   <option value="관세법">관세법</option>
                   <option value="관세법 시행령">관세법 시행령</option>
@@ -1394,30 +1549,59 @@
                        style="height:38px;box-sizing:border-box;flex:1;min-width:0;"
                        placeholder="예: 제30조 제1항"
                        onkeydown="if(event.key==='Enter'){event.preventDefault();_archAddLaw()}" />
-                <button class="arch-tag-add-btn" onclick="_archAddLaw()" style="width:38px;height:38px;flex-shrink:0;">
-                  <i class="fas fa-plus"></i>
-                </button>
+                <div class="arch-tooltip-wrap">
+                  <button class="arch-tag-add-btn" onclick="_archAddLaw()"
+                          style="width:38px;height:38px;flex-shrink:0;">
+                    <i class="fas fa-plus"></i>
+                  </button>
+                  <span class="arch-tooltip-text">법령 조건 추가<br>(복수 법령 AND 검색)</span>
+                </div>
               </div>
               <div id="arch-law-tags" class="arch-law-tag-list"></div>
             </div>
           </div>
+
+          <!-- ⑤ 검색/초기화 버튼 -->
           <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
-            <button onclick="resetArchiveFilter()" style="padding:8px 24px;border-radius:6px;border:1px solid #d1d5db;background:#fff;color:#6b7280;font-size:13px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:6px" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='#fff'">
+            <button onclick="resetArchiveFilter()"
+              style="padding:8px 24px;border-radius:6px;border:1px solid #d1d5db;
+                     background:#fff;color:#6b7280;font-size:13px;font-weight:500;
+                     cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+                     transition:background 0.15s"
+              onmouseover="this.style.background='#f9fafb'"
+              onmouseout="this.style.background='#fff'">
               <i class="fas fa-redo" style="font-size:11px"></i> 초기화
             </button>
-            <button onclick="_archivePage=1; archSearch()" style="padding:8px 24px;border-radius:6px;border:none;background:#3b82f6;color:#fff;font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px" onmouseover="this.style.background='#2563eb'" onmouseout="this.style.background='#3b82f6'">
+            <button onclick="_archivePage=1; archSearch()"
+              style="padding:8px 24px;border-radius:6px;border:none;
+                     background:#3b82f6;color:#fff;font-size:13px;font-weight:600;
+                     cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+                     transition:background 0.15s"
+              onmouseover="this.style.background='#2563eb'"
+              onmouseout="this.style.background='#3b82f6'">
               <i class="fas fa-search" style="font-size:11px"></i> 검색
             </button>
           </div>
+        </div><!-- /arch-search-panel -->
+
+        <!-- 활성 필터 표시 바 -->
+        <div id="archive-active-filter-bar"
+             style="display:none;flex-wrap:wrap;gap:6px;align-items:center;
+                    padding:8px 16px;background:#eff6ff;border-radius:8px;
+                    border:1px solid var(--primary-border);margin-bottom:12px;font-size:12px">
         </div>
-        <div id="archive-active-filter-bar" style="display:none;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 16px;background:#eff6ff;border-radius:8px;border:1px solid var(--primary-border);margin-bottom:12px;font-size:12px"></div>
+
+        <!-- KPI 요약 -->
         <div class="kpi-grid" id="archive-kpi-grid" style="margin-bottom:16px"></div>
+
+        <!-- 자료 목록 -->
         <div class="card">
           <div class="card-header">
             <h2><i class="fas fa-archive" style="color:var(--primary)"></i>&nbsp;자문 자료 목록</h2>
             <div class="card-actions" style="display:flex;align-items:center;gap:10px">
               <span id="archive-count-badge" style="font-size:13px;color:var(--text-muted)">0건</span>
-              <select id="archive-sort-select" class="arch-filter-select" style="width:120px;font-size:12px" onchange="_archivePage=1; archSearch()">
+              <select id="archive-sort-select" class="arch-filter-select" style="width:120px;font-size:12px"
+                      onchange="_archivePage=1; archSearch()">
                 <option value="newest">최신순</option>
                 <option value="oldest">오래된순</option>
                 <option value="stars">평가등급순</option>
@@ -1425,6 +1609,7 @@
             </div>
           </div>
           <div class="card-body" style="padding:0">
+            <!-- 카드형 목록 컨테이너 -->
             <div id="archive-list-body" class="arch-card-list">
               <div class="arch-empty-state">
                 <i class="fas fa-archive"></i>
@@ -1436,17 +1621,26 @@
             <div id="archive-pagination" style="display:flex;justify-content:center"></div>
           </div>
         </div>
+
+        <!-- 숨겨진 호환 필드 (기존 로직 호환) -->
         <select id="archive-filter-client" style="display:none"><option value="">전체</option></select>
         <select id="archive-filter-category" style="display:none"><option value="">전체</option></select>
         <select id="archive-filter-source" style="display:none"><option value="">전체</option></select>
         <select id="archive-filter-template" style="display:none"><option value="">전체</option></select>
+
       </section>
+
+
 
     </div><!-- /page-body -->
   </div><!-- /main-content -->
 </div><!-- /app-layout -->
 
-<!-- 모달들 -->
+<!-- ══════════════════════════════════════════════
+     모달들
+══════════════════════════════════════════════ -->
+
+<!-- 업무 기록 상세/수정 모달 -->
 <div class="modal-overlay" id="entryDetailModal">
   <div class="modal modal-lg">
     <div class="modal-header">
@@ -1458,6 +1652,7 @@
   </div>
 </div>
 
+<!-- 승인/반려 모달 -->
 <div class="modal-overlay" id="approvalModal">
   <div class="modal modal-md">
     <div class="modal-header">
@@ -1467,13 +1662,20 @@
     <div class="modal-body" id="approvalModalBody" onkeydown="event.stopPropagation()"></div>
     <div class="modal-footer">
       <button type="button" class="btn btn-ghost" onclick="closeModal('approvalModal')">취소</button>
-      <button type="button" class="btn btn-outline" id="editEntryBtn" onclick="toggleApprovalEdit()" style="display:none"><i class="fas fa-edit"></i> 수정</button>
-      <button type="button" class="btn btn-danger" id="rejectBtn" onclick="processApproval('rejected')" style="display:none"><i class="fas fa-times"></i> 반려</button>
-      <button type="button" class="btn btn-success" id="approveBtn" onclick="processApproval('approved')" style="display:none"><i class="fas fa-check"></i> 승인</button>
+      <button type="button" class="btn btn-outline" id="editEntryBtn" onclick="toggleApprovalEdit()" style="display:none">
+        <i class="fas fa-edit"></i> 수정
+      </button>
+      <button type="button" class="btn btn-danger" id="rejectBtn" onclick="processApproval('rejected')" style="display:none">
+        <i class="fas fa-times"></i> 반려
+      </button>
+      <button type="button" class="btn btn-success" id="approveBtn" onclick="processApproval('approved')" style="display:none">
+        <i class="fas fa-check"></i> 승인
+      </button>
     </div>
   </div>
 </div>
 
+<!-- 업무팀 추가/수정 모달 -->
 <div class="modal-overlay" id="teamModal">
   <div class="modal" style="width:460px;max-width:95vw">
     <div class="modal-header">
@@ -1489,11 +1691,15 @@
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
         <div class="form-group">
           <label class="form-label">소속 사업부</label>
-          <select class="form-control" id="team-dept-input" onchange="onTeamDeptChange()"><option value="">사업부 선택</option></select>
+          <select class="form-control" id="team-dept-input" onchange="onTeamDeptChange()">
+            <option value="">사업부 선택</option>
+          </select>
         </div>
         <div class="form-group">
           <label class="form-label">소속 본부</label>
-          <select class="form-control" id="team-hq-input"><option value="">본부 선택 (사업부 먼저 선택)</option></select>
+          <select class="form-control" id="team-hq-input">
+            <option value="">본부 선택 (사업부 먼저 선택)</option>
+          </select>
         </div>
       </div>
     </div>
@@ -1504,6 +1710,8 @@
   </div>
 </div>
 
+<!-- 팀 엑셀 업로드 모달 -->
+<!-- ══ 사업부 추가/수정 모달 ══ -->
 <div class="modal-overlay" id="deptModal">
   <div class="modal" style="width:440px;max-width:95vw">
     <div class="modal-header">
@@ -1518,7 +1726,9 @@
       </div>
       <div class="form-group">
         <label class="form-label">사업부장 (Director)</label>
-        <select class="form-control" id="dept-director-input"><option value="">사업부장 선택 (미지정)</option></select>
+        <select class="form-control" id="dept-director-input">
+          <option value="">사업부장 선택 (미지정)</option>
+        </select>
         <div style="font-size:11px;color:var(--text-muted);margin-top:4px"><i class="fas fa-info-circle"></i> Director 역할의 직원만 표시됩니다.</div>
       </div>
       <div class="form-group">
@@ -1533,6 +1743,7 @@
   </div>
 </div>
 
+<!-- ══ 본부 추가/수정 모달 ══ -->
 <div class="modal-overlay" id="hqModal">
   <div class="modal" style="width:460px;max-width:95vw">
     <div class="modal-header">
@@ -1552,8 +1763,10 @@
       </div>
       <div class="form-group">
         <label class="form-label">본부장 (Manager)</label>
-        <select class="form-control" id="hq-manager-input"><option value="">본부장 선택 (미지정)</option></select>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:4px"><i class="fas fa-info-circle"></i> Manager 역할의 직원만 표시됩니다.</div>
+        <select class="form-control" id="hq-manager-input">
+          <option value="">본부장 선택 (미지정)</option>
+        </select>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px"><i class="fas fa-info-circle"></i> Manager 역할의 직원만 표시됩니다. 본부장은 소속 팀원의 타임시트 승인자로 자동 연결됩니다.</div>
       </div>
     </div>
     <div class="modal-footer">
@@ -1563,6 +1776,7 @@
   </div>
 </div>
 
+<!-- ══ 고객지원팀 추가/수정 모달 ══ -->
 <div class="modal-overlay" id="csTeamModal">
   <div class="modal" style="width:500px;max-width:95vw">
     <div class="modal-header">
@@ -1578,17 +1792,23 @@
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
         <div class="form-group">
           <label class="form-label">소속 사업부 <span class="required">*</span></label>
-          <select class="form-control" id="csteam-dept-input" onchange="onCsTeamDeptChange()"><option value="">사업부 선택</option></select>
+          <select class="form-control" id="csteam-dept-input" onchange="onCsTeamDeptChange()">
+            <option value="">사업부 선택</option>
+          </select>
         </div>
         <div class="form-group">
           <label class="form-label">소속 본부</label>
-          <select class="form-control" id="csteam-hq-input" onchange="onCsTeamHqChange()"><option value="">본부 선택 (사업부 먼저 선택)</option></select>
+          <select class="form-control" id="csteam-hq-input" onchange="onCsTeamHqChange()">
+            <option value="">본부 선택 (사업부 먼저 선택)</option>
+          </select>
         </div>
       </div>
       <div class="form-group">
         <label class="form-label">본부장 / 승인자 (자동 연결)</label>
-        <select class="form-control" id="csteam-manager-input" disabled><option value="">본부 선택 시 자동 연결</option></select>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:4px"><i class="fas fa-link"></i> 본부를 선택하면 해당 본부장이 자동으로 연결됩니다.</div>
+        <select class="form-control" id="csteam-manager-input" disabled>
+          <option value="">본부 선택 시 자동 연결</option>
+        </select>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px"><i class="fas fa-link"></i> 본부를 선택하면 해당 본부장이 자동으로 연결됩니다. 수동으로 변경할 수도 있습니다.</div>
       </div>
       <div class="form-group">
         <label class="form-label">설명</label>
@@ -1609,7 +1829,7 @@
       <button class="btn-close" onclick="closeModal('teamUploadModal')">×</button>
     </div>
     <div class="modal-body">
-      <div class="alert alert-info"><i class="fas fa-info-circle"></i> <span>A열: 팀명 형식의 엑셀 파일을 업로드하세요.</span></div>
+      <div class="alert alert-info"><i class="fas fa-info-circle"></i> <span>A열: 팀명 형식의 엑셀 파일을 업로드하세요. 중복 데이터는 자동으로 건너뜁니다.</span></div>
       <div class="form-group">
         <label class="form-label">엑셀 파일 선택 (.xlsx / .xls)</label>
         <input type="file" class="form-control" id="team-upload-file" accept=".xlsx,.xls" />
@@ -1623,6 +1843,7 @@
   </div>
 </div>
 
+<!-- 고객사 추가/수정 모달 -->
 <div class="modal-overlay" id="clientModal">
   <div class="modal modal-sm">
     <div class="modal-header">
@@ -1633,8 +1854,17 @@
       <input type="hidden" id="client-edit-id" />
       <div class="form-group">
         <label class="form-label">고객사명 <span class="required">*</span></label>
-        <input type="text" class="form-control" id="client-name-input" placeholder="고객사명을 입력하세요" oninput="_onClientNameInput()" autocomplete="off" />
-        <div id="client-name-hint" style="display:none;margin-top:8px;padding:10px 12px;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;font-size:12.5px;color:#92400e;line-height:1.6"></div>
+        <input type="text" class="form-control" id="client-name-input"
+               placeholder="고객사명을 입력하세요"
+               oninput="_onClientNameInput()"
+               autocomplete="off" />
+        <!-- 실시간 유사 고객사 힌트 (Phase 2) -->
+        <div id="client-name-hint"
+             style="display:none;margin-top:8px;padding:10px 12px;
+                    background:#fffbeb;border:1px solid #fcd34d;
+                    border-radius:8px;font-size:12.5px;color:#92400e;
+                    line-height:1.6">
+        </div>
       </div>
     </div>
     <div class="modal-footer">
@@ -1644,6 +1874,7 @@
   </div>
 </div>
 
+<!-- 고객사 엑셀 업로드 모달 -->
 <div class="modal-overlay" id="clientUploadModal">
   <div class="modal modal-sm">
     <div class="modal-header">
@@ -1651,7 +1882,15 @@
       <button class="btn-close" onclick="closeModal('clientUploadModal')">×</button>
     </div>
     <div class="modal-body">
-      <div class="alert alert-info"><i class="fas fa-info-circle"></i> <span>A열: 고객사명 형식의 엑셀 파일을 업로드하세요.</span></div>
+      <div class="alert alert-info">
+        <i class="fas fa-info-circle"></i>
+        <span>A열: 고객사명 형식의 엑셀 파일을 업로드하세요.<br>
+        <span style="font-size:11.5px;color:#374151">
+          · <strong>중복 자동 제거</strong>: ㈜/(주)/주식회사·공백 차이를 무시하고 동일 고객사 스킵<br>
+          · 예) <em>㈜코스맥스</em> = <em>(주)코스맥스</em> = <em>코스맥스주식회사</em> → 하나만 등록
+        </span>
+        </span>
+      </div>
       <div class="form-group">
         <label class="form-label">엑셀 파일 선택 (.xlsx / .xls)</label>
         <input type="file" class="form-control" id="client-upload-file" accept=".xlsx,.xls" />
@@ -1665,6 +1904,7 @@
   </div>
 </div>
 
+<!-- 업무 카테고리 추가/수정 모달 -->
 <div class="modal-overlay" id="categoryModal">
   <div class="modal modal-sm">
     <div class="modal-header">
@@ -1696,6 +1936,7 @@
   </div>
 </div>
 
+<!-- 소분류 추가/수정 모달 -->
 <div class="modal-overlay" id="subcategoryModal">
   <div class="modal modal-sm">
     <div class="modal-header">
@@ -1721,6 +1962,7 @@
   </div>
 </div>
 
+<!-- 카테고리 엑셀 업로드 모달 -->
 <div class="modal-overlay" id="categoryUploadModal">
   <div class="modal modal-md">
     <div class="modal-header">
@@ -1728,7 +1970,10 @@
       <button class="btn-close" onclick="closeModal('categoryUploadModal')">×</button>
     </div>
     <div class="modal-body">
-      <div class="alert alert-info"><i class="fas fa-info-circle"></i> <span>A열: 대분류명 / B열: 소분류명 / C열: 유형(client 또는 internal)</span></div>
+      <div class="alert alert-info">
+        <i class="fas fa-info-circle"></i>
+        <span>A열: 대분류명 / B열: 소분류명 / C열: 유형(client 또는 internal) 형식으로 업로드하세요.</span>
+      </div>
       <div class="form-group">
         <label class="form-label">엑셀 파일 선택 (.xlsx / .xls)</label>
         <input type="file" class="form-control" id="category-upload-file" accept=".xlsx,.xls" />
@@ -1741,6 +1986,13 @@
     </div>
   </div>
 </div>
+
+<!-- 직원 추가/수정 모달 -->
+
+
+<!-- ══════════════════════════════════════════════
+     자문 자료실 모달들
+══════════════════════════════════════════════ -->
 
 <!-- 자문 자료 상세 모달 -->
 <div class="modal-overlay" id="archiveDetailModal">
@@ -1756,7 +2008,7 @@
   </div>
 </div>
 
-<!-- 자문 자료 직접 등록 모달 -->
+<!-- 자문 자료 직접 등록 모달 (초기 데이터 입력 전용) -->
 <div class="modal-overlay" id="archiveNewModal">
   <div class="modal modal-lg">
     <div class="modal-header">
@@ -1764,6 +2016,8 @@
       <button class="btn-close" onclick="closeModal('archiveNewModal')">×</button>
     </div>
     <div class="modal-body" style="max-height:80vh;overflow-y:auto;padding:20px 24px">
+
+      <!-- 숨김 호환 필드 -->
       <input type="hidden" id="archive-edit-id" />
       <input type="hidden" id="archive-subject-input" />
       <input type="hidden" id="archive-sender-name-input" />
@@ -1772,68 +2026,130 @@
       <input type="hidden" id="archive-sent-at-input" />
       <input type="hidden" id="archive-tags-input" />
       <input type="hidden" id="archive-summary-input" />
+      <!-- 숨김 대분류 select (소분류 연동용) -->
       <select id="archive-category-select" style="display:none" onchange="onArchiveCategoryChange()"></select>
+
+      <!-- ① 업무분류 + 평가등급 -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
         <div class="form-group" style="margin:0">
           <label class="form-label">업무분류 <span class="required">*</span></label>
-          <select class="form-control" id="archive-subcategory-select" style="height:42px"><option value="">업무분류 선택</option></select>
+          <select class="form-control" id="archive-subcategory-select" style="height:42px">
+            <option value="">업무분류 선택</option>
+          </select>
         </div>
         <div class="form-group" style="margin:0">
           <label class="form-label">평가등급 <span class="required">*</span></label>
           <div id="archive-stars-group" style="display:flex;gap:8px;margin-top:4px">
-            <button type="button" class="arch-star-btn" data-stars="3" onclick="_archSelectStars(3)" style="flex:1;padding:9px 6px;border:1.5px solid #d1d5db;border-radius:7px;background:#fff;cursor:pointer;font-size:12px;font-weight:600;color:#6b7280">★★★ A</button>
-            <button type="button" class="arch-star-btn" data-stars="2" onclick="_archSelectStars(2)" style="flex:1;padding:9px 6px;border:1.5px solid #d1d5db;border-radius:7px;background:#fff;cursor:pointer;font-size:12px;font-weight:600;color:#6b7280">★★☆ B</button>
-            <button type="button" class="arch-star-btn" data-stars="1" onclick="_archSelectStars(1)" style="flex:1;padding:9px 6px;border:1.5px solid #d1d5db;border-radius:7px;background:#fff;cursor:pointer;font-size:12px;font-weight:600;color:#6b7280">★☆☆ C</button>
+            <button type="button" class="arch-star-btn" data-stars="3"
+              onclick="_archSelectStars(3)"
+              style="flex:1;padding:9px 6px;border:1.5px solid #d1d5db;border-radius:7px;background:#fff;cursor:pointer;font-size:12px;font-weight:600;color:#6b7280;transition:all 0.15s">
+              ★★★ A
+            </button>
+            <button type="button" class="arch-star-btn" data-stars="2"
+              onclick="_archSelectStars(2)"
+              style="flex:1;padding:9px 6px;border:1.5px solid #d1d5db;border-radius:7px;background:#fff;cursor:pointer;font-size:12px;font-weight:600;color:#6b7280;transition:all 0.15s">
+              ★★☆ B
+            </button>
+            <button type="button" class="arch-star-btn" data-stars="1"
+              onclick="_archSelectStars(1)"
+              style="flex:1;padding:9px 6px;border:1.5px solid #d1d5db;border-radius:7px;background:#fff;cursor:pointer;font-size:12px;font-weight:600;color:#6b7280;transition:all 0.15s">
+              ★☆☆ C
+            </button>
           </div>
           <input type="hidden" id="archive-stars-value" value="" />
         </div>
       </div>
+
+      <!-- ② 핵심키워드 -->
       <div class="form-group" style="margin-bottom:16px">
-        <label class="form-label">핵심키워드 <span class="required">*</span> <small style="font-weight:400;color:#9ca3af;margin-left:6px">Enter 또는 쉼표로 추가</small></label>
+        <label class="form-label">
+          핵심키워드 <span class="required">*</span>
+          <small style="font-weight:400;color:#9ca3af;margin-left:6px">Enter 또는 쉼표로 추가 · 2~5개 권장</small>
+        </label>
         <div id="arch-new-kw-tags" style="display:flex;flex-wrap:wrap;gap:6px;min-height:32px;margin-bottom:6px"></div>
-        <input type="text" id="arch-new-kw-input" class="form-control" style="height:38px" placeholder="예) 권리사용료 가산여부" onkeydown="_archNewTagKeydown(event,'kw')" />
+        <input type="text" id="arch-new-kw-input" class="form-control" style="height:38px"
+               placeholder="예) 권리사용료 가산여부 · Enter로 추가"
+               onkeydown="_archNewTagKeydown(event,'kw')" />
         <input type="hidden" id="arch-new-kw-hidden" value="[]" />
       </div>
+
+      <!-- ③ 판단사유 -->
       <div class="form-group" style="margin-bottom:16px">
-        <label class="form-label">판단사유 <small style="font-weight:400;color:#9ca3af;margin-left:6px">Enter 또는 쉼표로 추가 (선택)</small></label>
+        <label class="form-label">
+          판단사유
+          <small style="font-weight:400;color:#9ca3af;margin-left:6px">Enter 또는 쉼표로 추가 (선택)</small>
+        </label>
         <div id="arch-new-reason-tags" style="display:flex;flex-wrap:wrap;gap:6px;min-height:32px;margin-bottom:6px"></div>
-        <input type="text" id="arch-new-reason-input" class="form-control" style="height:38px" placeholder="예) 거래조건성불충족" onkeydown="_archNewTagKeydown(event,'reason')" />
+        <input type="text" id="arch-new-reason-input" class="form-control" style="height:38px"
+               placeholder="예) 거래조건성불충족 · Enter로 추가"
+               onkeydown="_archNewTagKeydown(event,'reason')" />
         <input type="hidden" id="arch-new-reason-hidden" value="[]" />
       </div>
+
+      <!-- ④ 관련법령 -->
       <div class="form-group" style="margin-bottom:16px">
-        <label class="form-label">관련법령 <small style="font-weight:400;color:#9ca3af;margin-left:6px">법령명과 조항 (선택)</small></label>
+        <label class="form-label">
+          관련법령
+          <small style="font-weight:400;color:#9ca3af;margin-left:6px">법령명과 조항을 직접 입력 (선택)</small>
+        </label>
         <div id="arch-new-law-tags" style="display:flex;flex-wrap:wrap;gap:6px;min-height:32px;margin-bottom:6px"></div>
         <div style="display:flex;gap:8px">
-          <input type="text" id="arch-new-law-name-input" class="form-control" style="height:38px;flex:2" placeholder="예) 관세법" />
-          <input type="text" id="arch-new-law-article-input" class="form-control" style="height:38px;flex:3" placeholder="예) 제30조 제1항" onkeydown="if(event.key==='Enter'){event.preventDefault();_archNewAddLaw()}" />
-          <button type="button" class="btn btn-secondary" style="height:38px;white-space:nowrap;padding:0 14px" onclick="_archNewAddLaw()">+ 추가</button>
+          <input type="text" id="arch-new-law-name-input" class="form-control" style="height:38px;flex:2"
+                 placeholder="예) 관세법" />
+          <input type="text" id="arch-new-law-article-input" class="form-control" style="height:38px;flex:3"
+                 placeholder="예) 제30조 제1항"
+                 onkeydown="if(event.key==='Enter'){event.preventDefault();_archNewAddLaw()}" />
+          <button type="button" class="btn btn-secondary" style="height:38px;white-space:nowrap;padding:0 14px"
+                  onclick="_archNewAddLaw()">+ 추가</button>
         </div>
         <input type="hidden" id="arch-new-law-hidden" value="[]" />
       </div>
+
+      <!-- ⑤ 자문 내용 (Hybrid 에디터: 표 없으면 Quill, 표 있으면 contenteditable) -->
       <div class="form-group" style="margin-bottom:8px">
         <label class="form-label">자문 내용 <span class="required">*</span></label>
         <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px 6px 0 0;padding:7px 12px;font-size:11px;color:#1d4ed8;display:flex;align-items:center;gap:6px">
           <i class="fas fa-paste" style="flex-shrink:0"></i>
-          <span>메일 본문을 <strong>그대로 붙여넣기(Ctrl+V)</strong> 하세요</span>
+          <span>메일 본문을 <strong>그대로 붙여넣기(Ctrl+V)</strong> 하세요 · 엑셀/Word 표도 그대로 붙여넣기 가능합니다</span>
         </div>
-        <div id="archive-quill-editor" style="font-family:'Noto Sans KR',sans-serif;min-height:250px;border-radius:0 0 6px 6px"></div>
-        <div id="archive-rich-editor" contenteditable="true" style="display:none;font-family:'Noto Sans KR',sans-serif;min-height:250px;border:1px solid #d1d5db;border-top:none;border-radius:0 0 6px 6px;padding:10px 12px;font-size:13px;line-height:1.7;color:#1e293b;background:#fff;overflow-x:auto;outline:none;word-break:break-word;"></div>
-        <div id="archive-editor-mode-badge" style="display:none;margin-top:4px;font-size:11px;color:#7c3aed;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:4px 10px;align-items:center;gap:5px">
+        <!-- Quill 에디터 (표 없는 일반 텍스트용) -->
+        <div id="archive-quill-editor"
+             style="font-family:'Noto Sans KR',sans-serif;min-height:250px;border-radius:0 0 6px 6px"></div>
+        <!-- 표 전용 contenteditable 에디터 (Quill이 table을 sanitize하므로 표 붙여넣기 시 자동 전환) -->
+        <div id="archive-rich-editor"
+             contenteditable="true"
+             style="display:none;font-family:'Noto Sans KR',sans-serif;min-height:250px;
+                    border:1px solid #d1d5db;border-top:none;border-radius:0 0 6px 6px;
+                    padding:10px 12px;font-size:13px;line-height:1.7;color:#1e293b;
+                    background:#fff;overflow-x:auto;outline:none;word-break:break-word;"
+             placeholder="메일 본문을 그대로 붙여넣기 하세요 (엑셀 표 포함 가능)">
+        </div>
+        <!-- 에디터 전환 안내 배지 (표 감지 시 표시) -->
+        <div id="archive-editor-mode-badge" style="display:none;margin-top:4px;font-size:11px;
+             color:#7c3aed;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;
+             padding:4px 10px;display:none;align-items:center;gap:5px">
           <i class="fas fa-table"></i>
-          <span>표 포함 모드</span>
-          <button onclick="_archSwitchToQuill()" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:11px;color:#6b7280;text-decoration:underline">표 제거 후 일반 모드로</button>
+          <span>표 포함 모드 · 표 구조가 그대로 보존됩니다</span>
+          <button onclick="_archSwitchToQuill()" style="margin-left:auto;background:none;border:none;
+                  cursor:pointer;font-size:11px;color:#6b7280;text-decoration:underline">표 제거 후 일반 모드로</button>
         </div>
         <input type="hidden" id="archive-quill-hidden" />
       </div>
+
+      <!-- 템플릿 체크박스 제거 (별점 평가로 대체됨) -->
       <input type="hidden" id="archive-is-template" value="false" />
+
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('archiveNewModal')">취소</button>
-      <button id="archiveNewSaveBtn" class="btn btn-primary" onclick="saveArchiveRecord()"><i class="fas fa-save"></i> 저장</button>
+      <button id="archiveNewSaveBtn" class="btn btn-primary" onclick="saveArchiveRecord()">
+        <i class="fas fa-save"></i> 저장
+      </button>
     </div>
   </div>
 </div>
 
+<!-- 승인 + 자료 저장 모달 -->
 <div class="modal-overlay" id="archiveSaveModal">
   <div class="modal modal-md">
     <div class="modal-header">
@@ -1841,7 +2157,10 @@
       <button class="btn-close" onclick="closeModal('archiveSaveModal')">×</button>
     </div>
     <div class="modal-body">
-      <div class="alert alert-info" style="margin-bottom:16px"><i class="fas fa-info-circle"></i> <span>이 업무 기록을 자문 자료실에 저장합니다.</span></div>
+      <div class="alert alert-info" style="margin-bottom:16px">
+        <i class="fas fa-info-circle"></i>
+        <span>이 업무 기록을 자문 자료실에 저장합니다. 필요한 메타데이터를 확인·보완한 후 저장하세요.</span>
+      </div>
       <input type="hidden" id="archiveSave-entry-id" />
       <div class="form-group">
         <label class="form-label">제목 <span class="required">*</span></label>
@@ -1849,20 +2168,33 @@
       </div>
       <div class="form-group">
         <label class="form-label">요약 <span class="required">*</span></label>
-        <textarea class="form-control" id="archiveSave-summary" rows="3" maxlength="200" placeholder="핵심 내용 요약 (200자 이내)..."></textarea>
+        <textarea class="form-control" id="archiveSave-summary" rows="3" maxlength="200"
+                  placeholder="핵심 내용 요약 (200자 이내)..."></textarea>
       </div>
       <div class="form-group">
         <label class="form-label">태그 <small>(쉼표 구분)</small></label>
-        <input type="text" class="form-control" id="archiveSave-tags" placeholder="예: 세무자문, 이전가격" />
+        <input type="text" class="form-control" id="archiveSave-tags" placeholder="예: 세무자문, 이전가격, 검토의견서" />
+      </div>
+
+      <div class="form-group" style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="archiveSave-is-template" style="width:16px;height:16px" />
+        <label for="archiveSave-is-template" style="margin:0;cursor:pointer">
+          <i class="fas fa-star" style="color:#f59e0b"></i> 템플릿으로 추천 등록
+        </label>
       </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('archiveSaveModal')">취소</button>
-      <button id="archiveSaveProceedBtn" class="btn btn-warning" onclick="processApprovalWithArchive()"><i class="fas fa-check"></i>&nbsp;<i class="fas fa-archive"></i> 승인 + 자료 저장</button>
+      <button id="archiveSaveProceedBtn" class="btn btn-warning" onclick="processApprovalWithArchive()">
+        <i class="fas fa-check"></i>&nbsp;<i class="fas fa-archive"></i> 승인 + 자료 저장
+      </button>
     </div>
   </div>
 </div>
 
+<!-- ══════════════════════════════════════════════
+     직원 추가/수정 모달
+══════════════════════════════════════════════ -->
 <!-- 비밀번호 일괄 초기화 모달 -->
 <div class="modal-overlay" id="bulkPwModal">
   <div class="modal" style="width:480px;max-width:95vw">
@@ -1871,16 +2203,24 @@
       <button class="modal-close" onclick="closeModal('bulkPwModal')"><i class="fas fa-times"></i></button>
     </div>
     <div class="modal-body">
+      <!-- 안내 -->
       <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#92400e;line-height:1.6">
         <i class="fas fa-exclamation-triangle" style="color:#f59e0b;margin-right:6px"></i>
-        <b>비밀번호가 없는 계정</b>을 찾아 초기 비밀번호로 일괄 설정합니다.
+        <b>비밀번호가 없는 계정</b>을 찾아 초기 비밀번호로 일괄 설정합니다.<br>
+        해당 직원은 로그인 후 비밀번호를 변경해야 합니다.
       </div>
+      <!-- 비밀번호 미설정 계정 목록 -->
       <div style="margin-bottom:14px">
-        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:8px"><i class="fas fa-search" style="margin-right:6px;color:#6b7280"></i>비밀번호 미설정 계정</div>
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:8px">
+          <i class="fas fa-search" style="margin-right:6px;color:#6b7280"></i>비밀번호 미설정 계정
+        </div>
         <div id="noPwUserList" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px">
-          <div style="text-align:center;color:var(--text-muted);font-size:13px;padding:12px"><i class="fas fa-spinner fa-spin"></i> 조회 중...</div>
+          <div style="text-align:center;color:var(--text-muted);font-size:13px;padding:12px">
+            <i class="fas fa-spinner fa-spin"></i> 조회 중...
+          </div>
         </div>
       </div>
+      <!-- 초기 비밀번호 입력 -->
       <div class="form-group">
         <label class="form-label">초기 비밀번호 <span style="color:var(--danger)">*</span></label>
         <input type="password" id="bulkPwInput" class="form-control" placeholder="8자 이상 입력" value="hanjoo1234">
@@ -1893,12 +2233,13 @@
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('bulkPwModal')">취소</button>
-      <button class="btn btn-primary" id="bulkPwBtn" onclick="applyBulkPw()" style="background:#f59e0b;border-color:#f59e0b"><i class="fas fa-key"></i> 일괄 초기화 적용</button>
+      <button class="btn btn-primary" id="bulkPwBtn" onclick="applyBulkPw()" style="background:#f59e0b;border-color:#f59e0b">
+        <i class="fas fa-key"></i> 일괄 초기화 적용
+      </button>
     </div>
   </div>
 </div>
 
-<!-- 직원 추가/수정 모달 -->
 <div class="modal-overlay" id="userModal">
   <div class="modal" style="width:480px;max-width:95vw">
     <div class="modal-header">
@@ -1907,11 +2248,14 @@
     </div>
     <div class="modal-body">
       <input type="hidden" id="user-edit-id" />
+
       <div id="userModalError" style="display:none;align-items:center;gap:8px;background:#fff5f5;border:1px solid #feb2b2;border-radius:8px;padding:10px 13px;margin-bottom:14px;font-size:13px;color:#c53030">
-        <i class="fas fa-exclamation-circle"></i><span id="userModalErrorText"></span>
+        <i class="fas fa-exclamation-circle"></i>
+        <span id="userModalErrorText"></span>
       </div>
+
       <form onsubmit="return false;" autocomplete="off">
-      <input type="text" style="display:none" autocomplete="username" />
+      <input type="text" style="display:none" autocomplete="username" /><!-- 브라우저 경고 방지 -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
         <div class="form-group" style="grid-column:1/-1">
           <label class="form-label">이름 <span class="required">*</span></label>
@@ -1921,18 +2265,22 @@
           <label class="form-label">이메일 <span class="required">*</span></label>
           <input type="email" class="form-control" id="user-email-input" placeholder="hong@company.com" autocomplete="off" />
         </div>
+
+        <!-- 비밀번호: 신규는 필수, 수정은 선택 -->
         <div class="form-group" style="grid-column:1/-1" id="pwRequired">
           <label class="form-label">비밀번호 <span class="required">*</span> <small style="font-weight:400;color:var(--text-muted)">(8자 이상)</small></label>
           <input type="password" class="form-control" id="user-pw-input" placeholder="8자 이상" minlength="8" autocomplete="new-password" />
         </div>
         <div class="form-group" style="grid-column:1/-1;display:none" id="pwOptional">
           <label class="form-label">비밀번호 변경 <small style="font-weight:400;color:var(--text-muted)">(변경 시에만 입력)</small></label>
-          <input type="password" class="form-control" id="user-pw-input-dup" placeholder="새 비밀번호" minlength="8" autocomplete="new-password" oninput="document.getElementById('user-pw-input').value=this.value; document.getElementById('user-pw-confirm-input').value=''" />
+          <input type="password" class="form-control" id="user-pw-input-dup" placeholder="새 비밀번호 (변경 시에만 입력)" minlength="8" autocomplete="new-password"
+            oninput="document.getElementById('user-pw-input').value=this.value; document.getElementById('user-pw-confirm-input').value=''" />
         </div>
         <div class="form-group" style="grid-column:1/-1">
           <label class="form-label">비밀번호 확인</label>
           <input type="password" class="form-control" id="user-pw-confirm-input" placeholder="비밀번호 재입력" autocomplete="new-password" />
         </div>
+
         <div class="form-group">
           <label class="form-label">역할 <span class="required">*</span></label>
           <select class="form-control" id="user-role-input" onchange="_onUserRoleChange(this.value)">
@@ -1949,34 +2297,75 @@
             <option value="false">퇴직/비활성</option>
           </select>
         </div>
-        <div style="grid-column:1/-1;border-top:1px solid var(--border-light);margin:4px 0 2px;padding-top:10px;font-size:11px;font-weight:700;color:#9aa4b2;letter-spacing:0.5px;text-transform:uppercase">소속 정보</div>
+
+        <!-- 소속 정보 구분선 -->
+        <div style="grid-column:1/-1;border-top:1px solid var(--border-light);margin:4px 0 2px;
+                    padding-top:10px;font-size:11px;font-weight:700;color:#9aa4b2;
+                    letter-spacing:0.5px;text-transform:uppercase">
+          소속 정보
+        </div>
+
+        <!-- 사업부 -->
         <div class="form-group" id="dept-select-wrap">
           <label class="form-label">사업부</label>
-          <select class="form-control" id="user-dept-input" onchange="onUserDeptChange()"><option value="">사업부 선택</option></select>
+          <select class="form-control" id="user-dept-input" onchange="onUserDeptChange()">
+            <option value="">사업부 선택</option>
+          </select>
         </div>
+
+        <!-- 본부 (사업부 선택 시 활성화) -->
         <div class="form-group" id="hq-input-wrap">
           <label class="form-label">본부</label>
-          <select class="form-control" id="user-hq-input" onchange="onUserHqChange()" disabled><option value="">사업부 선택 후 본부 선택 가능</option></select>
+          <select class="form-control" id="user-hq-input" onchange="onUserHqChange()" disabled>
+            <option value="">사업부 선택 후 본부 선택 가능</option>
+          </select>
         </div>
+
+        <!-- 고객지원팀 -->
         <div class="form-group" style="grid-column:1/-1" id="csteam-select-wrap">
           <label class="form-label">고객지원팀</label>
-          <select class="form-control" id="user-csteam-input"><option value="">고객지원팀 선택</option></select>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:3px"><i class="fas fa-info-circle"></i> 사업부/본부 선택 시 해당 팀만 표시됩니다.</div>
+          <select class="form-control" id="user-csteam-input">
+            <option value="">고객지원팀 선택</option>
+          </select>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:3px">
+            <i class="fas fa-info-circle"></i> 사업부/본부 선택 시 해당 팀만 표시됩니다.
+          </div>
         </div>
+
+        <!-- 업무팀 제거: 타임시트 작성 시 직접 선택하므로 직원 프로필에 불필요 -->
+
+        <!-- 승인자: staff일 때만 표시 -->
         <div class="form-group" style="grid-column:1/-1" id="approver-select-wrap">
-          <label class="form-label">1차 승인자 <small style="font-weight:400;color:var(--text-muted)">(고객지원팀장 · Manager)</small></label>
-          <select class="form-control" id="user-approver-input"><option value="">1차 승인자 선택 (미지정)</option></select>
+          <label class="form-label">
+            1차 승인자 <small style="font-weight:400;color:var(--text-muted)">(고객지원팀장 · Manager)</small>
+          </label>
+          <select class="form-control" id="user-approver-input">
+            <option value="">1차 승인자 선택 (미지정)</option>
+          </select>
         </div>
+
+        <!-- 2차 승인자: staff/manager 모두 표시 -->
         <div class="form-group" style="grid-column:1/-1" id="reviewer2-select-wrap">
-          <label class="form-label">2차 승인자 <small style="font-weight:400;color:var(--text-muted)">(본부장 · Director)</small></label>
-          <select class="form-control" id="user-reviewer2-input"><option value="">2차 승인자 선택 (미지정)</option></select>
+          <label class="form-label">
+            2차 승인자 <small style="font-weight:400;color:var(--text-muted)">(본부장 · Director)</small>
+          </label>
+          <select class="form-control" id="user-reviewer2-input">
+            <option value="">2차 승인자 선택 (미지정)</option>
+          </select>
         </div>
+
+        <!-- 타임시트 기록 대상 여부: staff/manager 모두 표시 -->
         <div class="form-group" style="grid-column:1/-1" id="timesheet-target-wrap">
           <label class="form-label" style="margin-bottom:6px">타임시트 설정</label>
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--bg-secondary,#f8fafc);border:1px solid var(--border-light,#e2e8f0);border-radius:8px;padding:10px 14px;font-size:13px;font-weight:500;color:var(--text-primary,#1e293b)">
-            <input type="checkbox" id="user-timesheet-target-input" style="width:16px;height:16px;accent-color:var(--primary,#3b82f6);cursor:pointer" checked />
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;
+                        background:var(--bg-secondary,#f8fafc);border:1px solid var(--border-light,#e2e8f0);
+                        border-radius:8px;padding:10px 14px;font-size:13px;font-weight:500;color:var(--text-primary,#1e293b)">
+            <input type="checkbox" id="user-timesheet-target-input"
+                   style="width:16px;height:16px;accent-color:var(--primary,#3b82f6);cursor:pointer" checked />
             타임시트 기록 대상자
-            <small style="margin-left:4px;font-weight:400;color:var(--text-muted,#64748b)">— 체크 시 대시보드 및 고과분석에 포함됩니다</small>
+            <small style="margin-left:4px;font-weight:400;color:var(--text-muted,#64748b)">
+              — 체크 시 대시보드 및 고과분석에 포함됩니다
+            </small>
           </label>
         </div>
       </div>
@@ -1989,7 +2378,9 @@
   </div>
 </div>
 
-<!-- 직원 엑셀 업로드 모달 -->
+<!-- ══════════════════════════════════════════════
+     직원 엑셀 업로드 모달
+══════════════════════════════════════════════ -->
 <div class="modal-overlay" id="userUploadModal">
   <div class="modal" style="width:480px;max-width:95vw">
     <div class="modal-header">
@@ -1999,7 +2390,10 @@
     <div class="modal-body">
       <div class="alert alert-info" style="font-size:12.5px;margin-bottom:14px">
         <i class="fas fa-info-circle"></i>
-        <div style="margin-left:6px;line-height:1.65">엑셀 파일로 직원을 일괄 등록합니다.<br>이미 등록된 이메일은 <strong>권한·승인자만 업데이트</strong>됩니다.</div>
+        <div style="margin-left:6px;line-height:1.65">
+          엑셀 파일로 직원을 일괄 등록합니다.<br>
+          이미 등록된 이메일은 <strong>권한·승인자만 업데이트</strong>됩니다.
+        </div>
       </div>
       <div class="form-group">
         <label class="form-label">엑셀 파일 선택 <span class="required">*</span></label>
@@ -2017,30 +2411,46 @@
 <!-- 토스트 컨테이너 -->
 <div class="toast-container" id="toastContainer"></div>
 
-<!-- 비밀번호 만료 강제 변경 모달 -->
+<!-- ══════════════════════════════════════════════
+     비밀번호 만료 강제 변경 모달 (main.html 진입 시 체크)
+══════════════════════════════════════════════ -->
 <div class="modal-overlay" id="mainPwChangeModal" style="z-index:9999;background:rgba(0,0,0,0.75)">
   <div class="modal modal-sm" style="border-radius:18px;padding:32px 28px 26px">
+
+    <!-- 헤더 -->
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
-      <div style="width:44px;height:44px;background:linear-gradient(135deg,#e53e3e,#c53030);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;color:#fff;flex-shrink:0"><i class="fas fa-key"></i></div>
+      <div style="width:44px;height:44px;background:linear-gradient(135deg,#e53e3e,#c53030);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;color:#fff;flex-shrink:0">
+        <i class="fas fa-key"></i>
+      </div>
       <div>
         <div style="font-size:16px;font-weight:700;color:#1a2b45">비밀번호 변경 필요</div>
         <div style="font-size:12px;color:#8a95a3;margin-top:2px">보안 정책: 3개월(90일)마다 변경</div>
       </div>
     </div>
+
+    <!-- 경고 배너 -->
     <div style="background:#fff8f0;border:1px solid #fdd0a0;border-radius:8px;padding:12px 14px;margin:14px 0 20px;font-size:12.5px;color:#7b341e;line-height:1.65">
       <i class="fas fa-exclamation-triangle" style="color:#dd6b20;margin-right:6px"></i>
-      마지막 비밀번호 변경 후 <strong id="mainPwDaysElapsed" style="color:#c53030">90일</strong> 이상 경과했습니다.<br/>새 비밀번호를 설정해야 서비스를 이용할 수 있습니다.
+      마지막 비밀번호 변경 후 <strong id="mainPwDaysElapsed" style="color:#c53030">90일</strong> 이상 경과했습니다.<br/>
+      새 비밀번호를 설정해야 서비스를 이용할 수 있습니다.
     </div>
+
+    <!-- 에러 -->
     <div id="mainPwChangeError" style="display:none;align-items:center;gap:8px;background:#fff5f5;border:1px solid #feb2b2;border-radius:8px;padding:10px 13px;margin-bottom:14px;font-size:12.5px;color:#c53030">
-      <i class="fas fa-exclamation-circle"></i><span id="mainPwChangeErrorText"></span>
+      <i class="fas fa-exclamation-circle"></i>
+      <span id="mainPwChangeErrorText"></span>
     </div>
+
+    <!-- 폼 -->
     <form id="mainPwChangeForm" onsubmit="handleMainPwChange(event)">
       <div class="form-group">
         <label class="form-label" style="font-size:13px">현재 비밀번호</label>
-        <input type="password" class="form-control" id="mainPwOld" placeholder="현재 비밀번호" autocomplete="current-password" required />
+        <div class="input-group" style="position:relative">
+          <input type="password" class="form-control" id="mainPwOld" placeholder="현재 비밀번호" autocomplete="current-password" required />
+        </div>
       </div>
       <div class="form-group">
-        <label class="form-label" style="font-size:13px">새 비밀번호 <span style="font-size:11px;color:#8a95a3;font-weight:400">(8자 이상)</span></label>
+        <label class="form-label" style="font-size:13px">새 비밀번호 <span style="font-size:11px;color:#8a95a3;font-weight:400">(8자 이상, 이전과 달라야 함)</span></label>
         <input type="password" class="form-control" id="mainPwNew" placeholder="새 비밀번호 (8자 이상)" minlength="8" autocomplete="new-password" required oninput="updateMainPwStrength(this.value)" />
         <div style="margin-top:6px;height:5px;border-radius:3px;background:#eef1f5;overflow:hidden">
           <div id="mainPwStrengthBar" style="height:100%;border-radius:3px;transition:width .3s,background .3s;width:0%"></div>
@@ -2052,14 +2462,21 @@
         <input type="password" class="form-control" id="mainPwNewConfirm" placeholder="새 비밀번호 확인" autocomplete="new-password" required />
       </div>
       <div style="display:flex;gap:10px;margin-top:6px">
-        <button type="button" class="btn btn-ghost" onclick="doLogout()" style="flex:1"><i class="fas fa-sign-out-alt"></i> 로그아웃</button>
-        <button type="submit" class="btn btn-primary" id="mainPwChangeBtn" style="flex:2"><i class="fas fa-check"></i> 비밀번호 변경</button>
+        <button type="button" class="btn btn-ghost" onclick="doLogout()" style="flex:1">
+          <i class="fas fa-sign-out-alt"></i> 로그아웃
+        </button>
+        <button type="submit" class="btn btn-primary" id="mainPwChangeBtn" style="flex:2">
+          <i class="fas fa-check"></i> 비밀번호 변경
+        </button>
       </div>
     </form>
+
   </div>
 </div>
 
-<!-- 민감정보 감지 경고 모달 -->
+<!-- ══════════════════════════════════════════
+     민감정보 감지 경고 모달
+     ══════════════════════════════════════════ -->
 <div class="modal-overlay" id="sensitiveWarnModal">
   <div class="modal modal-sm">
     <div class="modal-header" style="border-bottom:2px solid #fde68a;background:linear-gradient(135deg,#fffbeb,#fef3c7)">
@@ -2067,17 +2484,29 @@
       <h3 style="color:#92400e">민감정보 감지</h3>
     </div>
     <div class="modal-body">
-      <p style="font-size:13px;color:#475569;margin-bottom:14px;line-height:1.7">아래 항목이 감지되었습니다.<br><strong style="color:#92400e">제거 후 저장을 권장합니다.</strong></p>
-      <ul id="sensitiveWarnList" style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px"></ul>
+      <p style="font-size:13px;color:#475569;margin-bottom:14px;line-height:1.7">
+        아래 항목이 감지되었습니다.<br>
+        <strong style="color:#92400e">제거 후 저장을 권장합니다.</strong>
+      </p>
+      <!-- 감지 항목 목록 (JS에서 동적 생성) -->
+      <ul id="sensitiveWarnList"
+        style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px">
+      </ul>
     </div>
     <div class="modal-footer" style="gap:10px">
-      <button class="btn btn-primary" id="sensitiveWarnEditBtn" style="display:flex;align-items:center;gap:6px"><i class="fas fa-pen"></i> 수정하기</button>
-      <button class="btn btn-ghost" id="sensitiveWarnProceedBtn" style="display:flex;align-items:center;gap:6px;color:#92400e;border-color:#fde68a"><i class="fas fa-save"></i> 저장 진행</button>
+      <button class="btn btn-primary" id="sensitiveWarnEditBtn"
+        style="display:flex;align-items:center;gap:6px">
+        <i class="fas fa-pen"></i> 수정하기
+      </button>
+      <button class="btn btn-ghost" id="sensitiveWarnProceedBtn"
+        style="display:flex;align-items:center;gap:6px;color:#92400e;border-color:#fde68a">
+        <i class="fas fa-save"></i> 저장 진행
+      </button>
     </div>
   </div>
 </div>
 
-<!-- JS 파일 로드 -->
+<!-- JS 파일들 — v20260402: 속도개선(master/users lazy load, quill defer, API 중복제거) -->
 <script src="js/app.js?v=20260331l"></script>
 <script src="js/notify.js?v=20260402a"></script>
 <script src="js/dashboard.js?v=20260331l"></script>
@@ -2085,6 +2514,7 @@
 <script src="js/approval.js?v=20260402b"></script>
 <script src="js/analysis.js?v=20260331l"></script>
 <script src="js/archive.js?v=20260401g"></script>
+<!-- master.js / users.js: Settings 메뉴 진입 시 동적 로드 (초기 81KB 절감) -->
 <script src="js/main.js?v=20260402a"></script>
 
 </body>
