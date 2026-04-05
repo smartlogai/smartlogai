@@ -17,7 +17,10 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100%; }
+
+    html, body {
+      height: 100%;
+    }
     body {
       font-family: 'Noto Sans KR', sans-serif;
       background: linear-gradient(135deg, #1e3a5f 0%, #2d5986 50%, #1a4a7a 100%);
@@ -30,6 +33,8 @@
       overflow-y: auto;
       padding: 32px 0;
     }
+
+    /* 배경 장식 */
     body::before {
       content: '';
       position: absolute;
@@ -46,6 +51,7 @@
       border-radius: 50%;
       bottom: -100px; right: -100px;
     }
+
     .login-container {
       width: 100%;
       max-width: 440px;
@@ -54,6 +60,8 @@
       z-index: 1;
       margin: auto 0;
     }
+
+    /* 로고 영역 */
     .logo-area {
       display: flex;
       flex-direction: column;
@@ -72,7 +80,10 @@
       margin-bottom: 16px;
       box-shadow: 0 8px 24px rgba(0,0,0,0.25);
     }
-    .logo-icon i { font-size: 30px; color: #fff; }
+    .logo-icon i {
+      font-size: 30px;
+      color: #fff;
+    }
     .logo-text-wrap {
       display: flex;
       flex-direction: column;
@@ -87,21 +98,49 @@
       line-height: 1.1;
       text-align: center;
     }
+
+    /* 로그인 카드 */
     .login-card {
       background: #fff;
       border-radius: 20px;
       padding: 40px 36px;
       box-shadow: 0 20px 60px rgba(0,0,0,0.25);
     }
-    .card-title { font-size: 20px; font-weight: 700; color: #1a2b45; margin-bottom: 6px; }
-    .card-desc { font-size: 13px; color: #8a95a3; margin-bottom: 28px; }
-    .form-group { margin-bottom: 18px; }
-    .form-label { display: block; font-size: 13px; font-weight: 600; color: #3d4f63; margin-bottom: 8px; }
-    .input-wrapper { position: relative; }
+
+    .card-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: #1a2b45;
+      margin-bottom: 6px;
+    }
+    .card-desc {
+      font-size: 13px;
+      color: #8a95a3;
+      margin-bottom: 28px;
+    }
+
+    /* 폼 */
+    .form-group {
+      margin-bottom: 18px;
+    }
+    .form-label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #3d4f63;
+      margin-bottom: 8px;
+    }
+    .input-wrapper {
+      position: relative;
+    }
     .input-wrapper .input-icon {
-      position: absolute; left: 14px; top: 50%;
+      position: absolute;
+      left: 14px;
+      top: 50%;
       transform: translateY(-50%);
-      color: #9aa4b2; font-size: 14px; pointer-events: none;
+      color: #9aa4b2;
+      font-size: 14px;
+      pointer-events: none;
     }
     .form-input {
       width: 100%;
@@ -115,150 +154,338 @@
       transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
       outline: none;
     }
-    .form-input:focus { border-color: #2d6bb5; background: #fff; box-shadow: 0 0 0 3px rgba(45,107,181,0.12); }
-    .form-input.error { border-color: #e53e3e; background: #fff5f5; }
+    .form-input:focus {
+      border-color: #2d6bb5;
+      background: #fff;
+      box-shadow: 0 0 0 3px rgba(45,107,181,0.12);
+    }
+    .form-input.error {
+      border-color: #e53e3e;
+      background: #fff5f5;
+    }
     .toggle-pw {
-      position: absolute; right: 12px; top: 50%;
+      position: absolute;
+      right: 12px;
+      top: 50%;
       transform: translateY(-50%);
-      background: none; border: none; cursor: pointer;
-      color: #9aa4b2; font-size: 14px; padding: 4px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #9aa4b2;
+      font-size: 14px;
+      padding: 4px;
       transition: color 0.2s;
     }
     .toggle-pw:hover { color: #2d6bb5; }
-    .form-options { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
-    .remember-me { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: #5a6878; user-select: none; }
-    .remember-me input[type="checkbox"] { width: 16px; height: 16px; accent-color: #2d6bb5; cursor: pointer; }
+
+    /* 옵션 행 */
+    .form-options {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+    }
+    .remember-me {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      color: #5a6878;
+      user-select: none;
+    }
+    .remember-me input[type="checkbox"] {
+      width: 16px; height: 16px;
+      accent-color: #2d6bb5;
+      cursor: pointer;
+    }
+
+    /* 로그인 버튼 */
     .btn-login {
-      width: 100%; padding: 14px;
+      width: 100%;
+      padding: 14px;
       background: linear-gradient(135deg, #2d6bb5, #1e4f8a);
-      color: #fff; border: none; border-radius: 10px;
-      font-size: 15px; font-weight: 600;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
       font-family: 'Noto Sans KR', sans-serif;
       cursor: pointer;
       transition: opacity 0.2s, transform 0.1s, box-shadow 0.2s;
       box-shadow: 0 4px 14px rgba(45,107,181,0.35);
-      display: flex; align-items: center; justify-content: center;
-      gap: 8px; letter-spacing: 0.2px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      letter-spacing: 0.2px;
     }
-    .btn-login:hover { opacity: 0.92; box-shadow: 0 6px 20px rgba(45,107,181,0.45); }
+    .btn-login:hover {
+      opacity: 0.92;
+      box-shadow: 0 6px 20px rgba(45,107,181,0.45);
+    }
     .btn-login:active { transform: translateY(1px); }
-    .btn-login:disabled { opacity: 0.65; cursor: not-allowed; transform: none; }
+    .btn-login:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+      transform: none;
+    }
     .btn-login .spinner {
-      display: none; width: 16px; height: 16px;
+      display: none;
+      width: 16px; height: 16px;
       border: 2px solid rgba(255,255,255,0.4);
-      border-top-color: #fff; border-radius: 50%;
+      border-top-color: #fff;
+      border-radius: 50%;
       animation: spin 0.7s linear infinite;
     }
     .btn-login.loading .spinner { display: block; }
     .btn-login.loading .btn-text { display: none; }
+
+    /* 에러 메시지 */
     .error-msg {
-      display: none; align-items: center; gap: 8px;
-      background: #fff5f5; border: 1px solid #feb2b2;
-      border-radius: 8px; padding: 11px 14px;
-      margin-bottom: 16px; font-size: 13px; color: #c53030;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      background: #fff5f5;
+      border: 1px solid #feb2b2;
+      border-radius: 8px;
+      padding: 11px 14px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      color: #c53030;
     }
     .error-msg.show { display: flex; }
     .error-msg i { font-size: 14px; flex-shrink: 0; }
-    .divider { display: flex; align-items: center; gap: 12px; margin: 24px 0; color: #c4cdd6; font-size: 12px; }
-    .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #edf1f5; }
-    .admin-contact { text-align: center; font-size: 12.5px; color: #8a95a3; margin-top: 20px; line-height: 1.6; }
-    .admin-contact a { color: #2d6bb5; text-decoration: none; font-weight: 500; }
+
+    /* 구분선 */
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 24px 0;
+      color: #c4cdd6;
+      font-size: 12px;
+    }
+    .divider::before, .divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #edf1f5;
+    }
+
+    /* 관리자 문의 안내 */
+    .admin-contact {
+      text-align: center;
+      font-size: 12.5px;
+      color: #8a95a3;
+      margin-top: 20px;
+      line-height: 1.6;
+    }
+    .admin-contact a {
+      color: #2d6bb5;
+      text-decoration: none;
+      font-weight: 500;
+    }
     .admin-contact a:hover { text-decoration: underline; }
+
+    /* 첫 로그인 초기화 안내 박스 */
     .info-box {
-      background: #eff6ff; border: 1px solid #bfdbfe;
-      border-radius: 8px; padding: 11px 14px; margin-bottom: 20px;
-      font-size: 12.5px; color: #1d4ed8;
-      display: flex; align-items: flex-start; gap: 8px; line-height: 1.55;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 8px;
+      padding: 11px 14px;
+      margin-bottom: 20px;
+      font-size: 12.5px;
+      color: #1d4ed8;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      line-height: 1.55;
     }
     .info-box i { margin-top: 1px; flex-shrink: 0; }
-    .footer-note { text-align: center; margin-top: 24px; font-size: 11.5px; color: rgba(255,255,255,0.45); }
+
+    /* 하단 저작권 */
+    .footer-note {
+      text-align: center;
+      margin-top: 24px;
+      font-size: 11.5px;
+      color: rgba(255,255,255,0.45);
+    }
+
+    /* 초기 설정 모달 */
     .modal-overlay {
-      display: none; position: fixed; inset: 0;
-      background: rgba(0,0,0,0.5); z-index: 1000;
-      align-items: center; justify-content: center; padding: 20px;
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
     }
     .modal-overlay.show { display: flex; }
     .modal {
-      background: #fff; border-radius: 16px; padding: 32px;
-      max-width: 400px; width: 100%;
+      background: #fff;
+      border-radius: 16px;
+      padding: 32px;
+      max-width: 400px;
+      width: 100%;
       box-shadow: 0 20px 60px rgba(0,0,0,0.3);
     }
-    .modal-title { font-size: 18px; font-weight: 700; color: #1a2b45; margin-bottom: 8px; }
-    .modal-desc { font-size: 13px; color: #6b7a8d; margin-bottom: 24px; line-height: 1.6; }
+    .modal-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: #1a2b45;
+      margin-bottom: 8px;
+    }
+    .modal-desc {
+      font-size: 13px;
+      color: #6b7a8d;
+      margin-bottom: 24px;
+      line-height: 1.6;
+    }
     .modal .form-group { margin-bottom: 16px; }
     .btn-modal-submit {
-      width: 100%; padding: 12px;
+      width: 100%;
+      padding: 12px;
       background: linear-gradient(135deg, #2d6bb5, #1e4f8a);
-      color: #fff; border: none; border-radius: 8px;
-      font-size: 14px; font-weight: 600;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
       font-family: 'Noto Sans KR', sans-serif;
-      cursor: pointer; margin-top: 8px; transition: opacity 0.2s;
+      cursor: pointer;
+      margin-top: 8px;
+      transition: opacity 0.2s;
     }
     .btn-modal-submit:hover { opacity: 0.9; }
-    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* 반응형 */
     @media (max-width: 480px) {
       .login-card { padding: 28px 22px; }
       .logo-area { gap: 10px; }
       .logo-area img { height: 46px; }
       .logo-title { font-size: 22px; }
     }
+
+    /* ─── 비밀번호 변경 모달 ─── */
     .pw-change-overlay {
-      display: none; position: fixed; inset: 0;
-      background: rgba(0,0,0,0.65); z-index: 2000;
-      align-items: center; justify-content: center; padding: 20px;
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.65);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
     }
     .pw-change-overlay.show { display: flex; }
     .pw-change-modal {
-      background: #fff; border-radius: 18px;
-      padding: 36px 32px 30px; max-width: 420px; width: 100%;
+      background: #fff;
+      border-radius: 18px;
+      padding: 36px 32px 30px;
+      max-width: 420px;
+      width: 100%;
       box-shadow: 0 24px 70px rgba(0,0,0,0.35);
     }
-    .pw-change-header { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+    .pw-change-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 6px;
+    }
     .pw-change-icon {
       width: 44px; height: 44px;
       background: linear-gradient(135deg, #e53e3e, #c53030);
-      border-radius: 12px; display: flex;
-      align-items: center; justify-content: center;
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
       font-size: 20px; color: #fff; flex-shrink: 0;
     }
-    .pw-change-title { font-size: 17px; font-weight: 700; color: #1a2b45; }
+    .pw-change-title {
+      font-size: 17px;
+      font-weight: 700;
+      color: #1a2b45;
+    }
     .pw-change-desc {
-      font-size: 12.5px; color: #6b7a8d;
-      margin-bottom: 22px; margin-top: 10px; line-height: 1.65;
-      padding: 12px 14px; background: #fff8f0;
-      border: 1px solid #fdd0a0; border-radius: 8px;
+      font-size: 12.5px;
+      color: #6b7a8d;
+      margin-bottom: 22px;
+      margin-top: 10px;
+      line-height: 1.65;
+      padding: 12px 14px;
+      background: #fff8f0;
+      border: 1px solid #fdd0a0;
+      border-radius: 8px;
     }
     .pw-change-desc strong { color: #c05621; }
-    .pw-strength { margin-top: 6px; height: 5px; border-radius: 3px; background: #eef1f5; overflow: hidden; }
-    .pw-strength-bar { height: 100%; border-radius: 3px; transition: width 0.3s, background 0.3s; width: 0%; }
-    .pw-strength-text { font-size: 11px; margin-top: 4px; color: #8a95a3; }
+    .pw-strength {
+      margin-top: 6px;
+      height: 5px;
+      border-radius: 3px;
+      background: #eef1f5;
+      overflow: hidden;
+    }
+    .pw-strength-bar {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.3s, background 0.3s;
+      width: 0%;
+    }
+    .pw-strength-text {
+      font-size: 11px;
+      margin-top: 4px;
+      color: #8a95a3;
+    }
     .pw-change-error {
-      display: none; align-items: center; gap: 8px;
-      background: #fff5f5; border: 1px solid #feb2b2;
-      border-radius: 8px; padding: 10px 13px;
-      margin-bottom: 14px; font-size: 12.5px; color: #c53030;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      background: #fff5f5;
+      border: 1px solid #feb2b2;
+      border-radius: 8px;
+      padding: 10px 13px;
+      margin-bottom: 14px;
+      font-size: 12.5px;
+      color: #c53030;
     }
     .pw-change-error.show { display: flex; }
     .btn-pw-change {
-      width: 100%; padding: 13px;
+      width: 100%;
+      padding: 13px;
       background: linear-gradient(135deg, #2d6bb5, #1e4f8a);
-      color: #fff; border: none; border-radius: 10px;
-      font-size: 14px; font-weight: 600;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
       font-family: 'Noto Sans KR', sans-serif;
-      cursor: pointer; transition: opacity 0.2s; margin-top: 6px;
+      cursor: pointer;
+      transition: opacity 0.2s;
+      margin-top: 6px;
     }
     .btn-pw-change:hover { opacity: 0.9; }
     .btn-pw-change:disabled { opacity: 0.6; cursor: not-allowed; }
     .pw-days-badge {
-      display: inline-block; background: #fed7d7; color: #c53030;
-      font-size: 11px; font-weight: 700; padding: 2px 8px;
-      border-radius: 20px; margin-left: 6px;
+      display: inline-block;
+      background: #fed7d7;
+      color: #c53030;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 20px;
+      margin-left: 6px;
     }
   </style>
 </head>
 <body>
 
   <div class="login-container">
+    <!-- 로고 -->
     <div class="logo-area">
       <img src="images/logo.png" alt="HANJOO"
            style="height:58px;width:auto;object-fit:contain;filter:brightness(0) invert(1)" />
@@ -267,23 +494,31 @@
       </div>
     </div>
 
+    <!-- 로그인 카드 -->
     <div class="login-card">
       <div class="card-title">로그인</div>
       <div class="card-desc">등록된 이메일과 비밀번호를 입력하세요.</div>
 
+      <!-- 에러 메시지 -->
       <div class="error-msg" id="errorMsg">
         <i class="fas fa-exclamation-circle"></i>
         <span id="errorText">이메일 또는 비밀번호가 올바르지 않습니다.</span>
       </div>
 
+      <!-- 로그인 폼 -->
       <form id="loginForm" onsubmit="handleLogin(event)">
         <div class="form-group">
           <label class="form-label" for="email">이메일</label>
           <div class="input-wrapper">
             <i class="fas fa-envelope input-icon"></i>
-            <input type="email" id="email" class="form-input"
+            <input
+              type="email"
+              id="email"
+              class="form-input"
               placeholder="이메일 주소를 입력하세요"
-              autocomplete="email" required />
+              autocomplete="email"
+              required
+            />
           </div>
         </div>
 
@@ -291,9 +526,14 @@
           <label class="form-label" for="password">비밀번호</label>
           <div class="input-wrapper">
             <i class="fas fa-lock input-icon"></i>
-            <input type="password" id="password" class="form-input"
+            <input
+              type="password"
+              id="password"
+              class="form-input"
               placeholder="비밀번호를 입력하세요"
-              autocomplete="current-password" required />
+              autocomplete="current-password"
+              required
+            />
             <button type="button" class="toggle-pw" onclick="togglePassword()" id="togglePwBtn">
               <i class="fas fa-eye" id="togglePwIcon"></i>
             </button>
@@ -319,6 +559,7 @@
         계정이 없거나 비밀번호를 잊으셨나요?<br />
         Administrator에게 문의하세요.
       </div>
+      <!-- 임시 복구 버튼 제거 완료 -->
     </div>
 
     <div class="footer-note">
@@ -357,18 +598,14 @@
           <label class="form-label">비밀번호 * <span style="font-size:11px;color:#8a95a3;font-weight:400;">(8자 이상)</span></label>
           <div class="input-wrapper">
             <i class="fas fa-lock input-icon"></i>
-            <input type="password" id="setupPw" class="form-input"
-              placeholder="비밀번호 (8자 이상)" minlength="8"
-              autocomplete="new-password" required />
+            <input type="password" id="setupPw" class="form-input" placeholder="비밀번호 (8자 이상)" minlength="8" autocomplete="new-password" required />
           </div>
         </div>
         <div class="form-group">
           <label class="form-label">비밀번호 확인 *</label>
           <div class="input-wrapper">
             <i class="fas fa-lock input-icon"></i>
-            <input type="password" id="setupPwConfirm" class="form-input"
-              placeholder="비밀번호를 다시 입력하세요"
-              autocomplete="new-password" required />
+            <input type="password" id="setupPwConfirm" class="form-input" placeholder="비밀번호를 다시 입력하세요" autocomplete="new-password" required />
           </div>
         </div>
         <div class="error-msg" id="setupError" style="margin-bottom:12px;">
@@ -382,7 +619,7 @@
     </div>
   </div>
 
-  <!-- 비밀번호 변경 강제 모달 -->
+  <!-- ─── 비밀번호 변경 강제 모달 ─── -->
   <div class="pw-change-overlay" id="pwChangeModal">
     <div class="pw-change-modal">
       <div class="pw-change-header">
@@ -397,6 +634,7 @@
         새 비밀번호를 설정한 후 서비스를 이용할 수 있습니다.
       </div>
 
+      <!-- 에러 메시지 -->
       <div class="pw-change-error" id="pwChangeError">
         <i class="fas fa-exclamation-circle"></i>
         <span id="pwChangeErrorText"></span>
@@ -407,18 +645,14 @@
           <label class="form-label">현재 비밀번호 *</label>
           <div class="input-wrapper">
             <i class="fas fa-lock input-icon"></i>
-            <input type="password" id="pwOld" class="form-input"
-              placeholder="현재 비밀번호" autocomplete="current-password" required />
+            <input type="password" id="pwOld" class="form-input" placeholder="현재 비밀번호" autocomplete="current-password" required />
           </div>
         </div>
         <div class="form-group">
           <label class="form-label">새 비밀번호 * <span style="font-size:11px;color:#8a95a3;font-weight:400;">(8자 이상, 이전 비밀번호와 달라야 함)</span></label>
           <div class="input-wrapper">
             <i class="fas fa-lock input-icon"></i>
-            <input type="password" id="pwNew" class="form-input"
-              placeholder="새 비밀번호 (8자 이상)" minlength="8"
-              autocomplete="new-password" required
-              oninput="checkPwStrength(this.value)" />
+            <input type="password" id="pwNew" class="form-input" placeholder="새 비밀번호 (8자 이상)" minlength="8" autocomplete="new-password" required oninput="checkPwStrength(this.value)" />
           </div>
           <div class="pw-strength"><div class="pw-strength-bar" id="pwStrengthBar"></div></div>
           <div class="pw-strength-text" id="pwStrengthText"></div>
@@ -427,8 +661,7 @@
           <label class="form-label">새 비밀번호 확인 *</label>
           <div class="input-wrapper">
             <i class="fas fa-lock input-icon"></i>
-            <input type="password" id="pwNewConfirm" class="form-input"
-              placeholder="새 비밀번호 확인" autocomplete="new-password" required />
+            <input type="password" id="pwNewConfirm" class="form-input" placeholder="새 비밀번호 확인" autocomplete="new-password" required />
           </div>
         </div>
         <button type="submit" class="btn-pw-change" id="pwChangeBtn">
@@ -439,6 +672,9 @@
   </div>
 
   <script>
+    // ─────────────────────────────────────────
+    // 유틸: 비밀번호 해시 (간단 SHA-256 래퍼)
+    // ─────────────────────────────────────────
     async function hashPassword(pw) {
       const encoder = new TextEncoder();
       const data = encoder.encode(pw);
@@ -447,18 +683,28 @@
       return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
+    // ─────────────────────────────────────────
+    // Supabase 설정
+    // ─────────────────────────────────────────
     const SUPABASE_URL = 'https://dvjagzcqdgolspyngtxj.supabase.co';
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR2amFnemNxZGdvbHNweW5ndHhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNjU5MjYsImV4cCI6MjA5MDg0MTkyNn0.J3G3zHvIlCgpYaST9PCAJtd9n8OoXMZZmP5i920cfUg';
 
+    // ─────────────────────────────────────────
+    // Supabase API 헬퍼 (로그인 페이지 전용)
+    // ─────────────────────────────────────────
     async function apiFetch(path, opts = {}) {
+      // tables/users?limit=... 형식을 Supabase REST API로 변환
       let url = path;
       let resultWrapper = null;
 
       if (path.startsWith('tables/')) {
+        // tables/users?limit=500 → Supabase REST
         const withoutPrefix = path.replace('tables/', '');
         const [tablePart, queryPart] = withoutPrefix.split('?');
 
+        // PATCH (비밀번호 변경) 처리
         if (opts.method === 'PATCH') {
+          // tables/users/ID → /rest/v1/users?id=eq.ID
           const parts = tablePart.split('/');
           const tbl   = parts[0];
           const id    = parts[1];
@@ -478,6 +724,7 @@
           return Array.isArray(data) ? data[0] : data;
         }
 
+        // GET (사용자 목록 조회) 처리
         const params = new URLSearchParams(queryPart || '');
         const limit  = params.get('limit') || 500;
         url = `${SUPABASE_URL}/rest/v1/${tablePart}?limit=${limit}&order=created_at.desc&deleted.is.null`;
@@ -498,6 +745,7 @@
       if (res.status === 204) return null;
       const data = await res.json().catch(() => null);
 
+      // Genspark 형식({data:[], total:N})으로 변환
       if (resultWrapper) {
         const total = parseInt(res.headers.get('content-range')?.split('/')[1] || (Array.isArray(data) ? data.length : 0));
         return { data: Array.isArray(data) ? data : [], total: total || (Array.isArray(data) ? data.length : 0) };
@@ -505,26 +753,38 @@
       return data;
     }
 
+    // ─────────────────────────────────────────
+    // 비밀번호 만료 처리용 임시 저장소
+    // ─────────────────────────────────────────
     let _pendingUser       = null;
     let _pendingRememberMe = false;
 
+    // ─────────────────────────────────────────
+    // 로그인 완료 (세션 저장 + 이동)
+    // ─────────────────────────────────────────
     function _completeLogin(user, rememberMe) {
+      // ★ 권한 체크에 필요한 소속 정보 및 승인자 정보 포함
       const sessionData = {
         id:           user.id,
         name:         user.name,
         email:        user.email,
         role:         user.role,
+        // 소속 정보 (Director/Manager 범위 필터용)
         dept_id:      user.dept_id      || '',
         dept_name:    user.dept_name    || '',
         hq_id:        user.hq_id        || '',
         hq_name:      user.hq_name      || '',
         cs_team_id:   user.cs_team_id   || '',
         cs_team_name: user.cs_team_name || '',
+        // 승인자 정보 (staff 타임시트 작성 권한 체크용)
         approver_id:   user.approver_id   || '',
         approver_name: user.approver_name || '',
+        // 2차 승인자 정보 (staff·manager 공통)
         reviewer2_id:   user.reviewer2_id   || '',
         reviewer2_name: user.reviewer2_name || '',
+        // 타임시트 대상자 여부 (staff·manager 공통)
         is_timesheet_target: user.is_timesheet_target !== false,
+        // 팀명 (레거시 호환)
         team_name:    user.team_name || '',
         loggedInAt:   Date.now(),
         loggedInUA:   navigator.userAgent.slice(0, 120),
@@ -538,6 +798,9 @@
       window.location.href = 'main.html';
     }
 
+    // ─────────────────────────────────────────
+    // 비밀번호 강도 표시
+    // ─────────────────────────────────────────
     function checkPwStrength(pw) {
       const bar  = document.getElementById('pwStrengthBar');
       const text = document.getElementById('pwStrengthText');
@@ -557,46 +820,71 @@
         { pct: '100%', color: '#2f855a', label: '매우 강함' },
       ];
       const lv = levels[Math.min(score, 5)];
-      bar.style.width      = lv.pct;
+      bar.style.width    = lv.pct;
       bar.style.background = lv.color;
-      text.textContent     = lv.label;
-      text.style.color     = lv.color;
+      text.textContent   = lv.label;
+      text.style.color   = lv.color;
     }
 
+    // ─────────────────────────────────────────
+    // 비밀번호 변경 처리
+    // ─────────────────────────────────────────
     async function handlePwChange(e) {
       e.preventDefault();
+
       const errEl   = document.getElementById('pwChangeError');
       const errText = document.getElementById('pwChangeErrorText');
-      const showPwErr = (msg) => { errText.textContent = msg; errEl.classList.add('show'); };
+      const showPwErr = (msg) => {
+        errText.textContent = msg;
+        errEl.classList.add('show');
+      };
       errEl.classList.remove('show');
 
       if (!_pendingUser) { showPwErr('세션 오류. 페이지를 새로고침 해주세요.'); return; }
 
-      const oldPw        = document.getElementById('pwOld').value;
-      const newPw        = document.getElementById('pwNew').value;
+      const oldPw       = document.getElementById('pwOld').value;
+      const newPw       = document.getElementById('pwNew').value;
       const newPwConfirm = document.getElementById('pwNewConfirm').value;
 
-      if (!oldPw || !newPw || !newPwConfirm) { showPwErr('모든 항목을 입력해주세요.'); return; }
-      if (newPw.length < 8) { showPwErr('새 비밀번호는 8자 이상이어야 합니다.'); return; }
-      if (newPw !== newPwConfirm) { showPwErr('새 비밀번호가 일치하지 않습니다.'); return; }
+      if (!oldPw || !newPw || !newPwConfirm) {
+        showPwErr('모든 항목을 입력해주세요.'); return;
+      }
+      if (newPw.length < 8) {
+        showPwErr('새 비밀번호는 8자 이상이어야 합니다.'); return;
+      }
+      if (newPw !== newPwConfirm) {
+        showPwErr('새 비밀번호가 일치하지 않습니다.'); return;
+      }
 
+      // 현재 비밀번호 검증
       const oldHash = await hashPassword(oldPw);
-      if (_pendingUser.password !== oldHash) { showPwErr('현재 비밀번호가 올바르지 않습니다.'); return; }
+      if (_pendingUser.password !== oldHash) {
+        showPwErr('현재 비밀번호가 올바르지 않습니다.'); return;
+      }
 
+      // 이전 비밀번호와 동일한지 체크
       const newHash = await hashPassword(newPw);
-      if (newHash === _pendingUser.password) { showPwErr('이전 비밀번호와 동일한 비밀번호는 사용할 수 없습니다.'); return; }
+      if (newHash === _pendingUser.password) {
+        showPwErr('이전 비밀번호와 동일한 비밀번호는 사용할 수 없습니다.'); return;
+      }
 
       const btn = document.getElementById('pwChangeBtn');
       btn.disabled = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 변경 중...';
 
       try {
-        const res = await apiFetch(`tables/users/${_pendingUser.id}`, {
+        // DB 업데이트: 새 비밀번호 + pw_changed_at 갱신
+        const res = await apiFetch(`tables/users/${_pendingUser.id}`, { // → Supabase로 자동 변환됨
           method: 'PATCH',
-          body: JSON.stringify({ password: newHash, pw_changed_at: Date.now() }),
+          body: JSON.stringify({
+            password:      newHash,
+            pw_changed_at: Date.now(),
+          }),
         });
+
         if (res && res.id) {
           document.getElementById('pwChangeModal').classList.remove('show');
+          // 업데이트된 사용자 데이터로 로그인 완료
           const updatedUser = { ..._pendingUser, password: newHash, pw_changed_at: Date.now() };
           _completeLogin(updatedUser, _pendingRememberMe);
         } else {
@@ -611,17 +899,29 @@
       }
     }
 
+    // ─────────────────────────────────────────
+    // 초기화: 사용자 없으면 초기 설정 모달 표시
+    // ─────────────────────────────────────────
     async function checkFirstRun() {
       try {
-        const data = await apiFetch('tables/users?limit=1');
+        const data = await apiFetch('tables/users?limit=1'); // → Supabase로 자동 변환됨
+        // 이미 계정이 있으면 초기 설정 모달 절대 표시 안함
         if (!data || !data.total || data.total === 0) {
           document.getElementById('setupModal').classList.add('show');
         }
+        // 계정이 있으면 아무것도 하지 않음 (setupModal 표시 안함)
       } catch (e) {
+        // API 오류 시에도 setupModal 표시 안함 (보안)
+        // 로그인 화면만 표시
         console.warn('[checkFirstRun] API 오류 (setupModal 표시 안함):', e.message);
       }
     }
 
+    // _forceShowSetup 함수 제거 — 보안상 외부 노출 불가
+
+    // ─────────────────────────────────────────
+    // 비밀번호 표시/숨김 토글
+    // ─────────────────────────────────────────
     function togglePassword() {
       const input = document.getElementById('password');
       const icon = document.getElementById('togglePwIcon');
@@ -634,6 +934,9 @@
       }
     }
 
+    // ─────────────────────────────────────────
+    // 에러 표시
+    // ─────────────────────────────────────────
     function showError(msg) {
       const box = document.getElementById('errorMsg');
       document.getElementById('errorText').textContent = msg;
@@ -647,28 +950,38 @@
       document.getElementById('password').classList.remove('error');
     }
 
+    // ─────────────────────────────────────────
+    // 로그인 처리
+    // ─────────────────────────────────────────
     async function handleLogin(e) {
       e.preventDefault();
       hideError();
 
-      const email      = document.getElementById('email').value.trim().toLowerCase();
-      const password   = document.getElementById('password').value;
+      const email = document.getElementById('email').value.trim().toLowerCase();
+      const password = document.getElementById('password').value;
       const rememberMe = document.getElementById('rememberMe').checked;
 
-      if (!email || !password) { showError('이메일과 비밀번호를 모두 입력해주세요.'); return; }
+      if (!email || !password) {
+        showError('이메일과 비밀번호를 모두 입력해주세요.');
+        return;
+      }
 
       const btn = document.getElementById('loginBtn');
       btn.classList.add('loading');
       btn.disabled = true;
 
       try {
-        const data = await apiFetch('tables/users?limit=500');
+        // 전체 사용자 목록을 불러와 클라이언트에서 이메일 매칭
+        const data = await apiFetch(`tables/users?limit=500`); // → Supabase로 자동 변환됨
+
+        // [보안] 콘솔 로그 제거됨 (민감 정보 노출 방지)
 
         if (!data || !data.data || data.data.length === 0) {
           showError('등록된 계정이 없습니다. 관리자에게 문의하세요.');
           return;
         }
 
+        // 이메일 정확히 매칭 (소문자 통일)
         const users = data.data.filter(u => u.email && u.email.trim().toLowerCase() === email);
 
         if (users.length === 0) {
@@ -677,39 +990,50 @@
         }
 
         const user = users[0];
+        // 비활성 계정 체크
         if (user.is_active === false) {
           showError('비활성화된 계정입니다. 관리자에게 문의하세요.');
           return;
         }
+
+        // 비밀번호 미설정 계정 체크 (password 필드 없거나 빈 값)
         if (!user.password) {
           showError('비밀번호가 설정되지 않은 계정입니다. 관리자에게 문의하세요.');
           return;
         }
 
+        // 비밀번호 검증
         const pwHash = await hashPassword(password);
         if (user.password !== pwHash) {
           showError('비밀번호가 올바르지 않습니다.');
           return;
         }
 
+        // ── 3개월(90일) 비밀번호 만료 체크 ──────────────────
         const PW_EXPIRY_DAYS = 90;
         const PW_EXPIRY_MS   = PW_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
         const now            = Date.now();
-        const lastChanged    = user.pw_changed_at
+
+        // pw_changed_at 없으면 계정 생성 시점을 기준으로 판단
+        const lastChanged = user.pw_changed_at
           ? Number(user.pw_changed_at)
           : (user.created_at ? Number(user.created_at) : 0);
+
         const elapsed     = now - lastChanged;
         const elapsedDays = Math.floor(elapsed / (24 * 60 * 60 * 1000));
 
         if (lastChanged > 0 && elapsed > PW_EXPIRY_MS) {
-          _pendingUser       = user;
+          // 만료 — 비밀번호 변경 모달 표시
+          _pendingUser      = user;
           _pendingRememberMe = rememberMe;
-          const displayDays  = lastChanged === 0 ? '90+' : elapsedDays;
+
+          const displayDays = lastChanged === 0 ? '90+' : elapsedDays;
           document.getElementById('pwDaysElapsed').textContent = displayDays + '일';
           document.getElementById('pwChangeModal').classList.add('show');
           return;
         }
 
+        // ── 로그인 성공 → 세션 저장 (보안 정보 포함) ─────────
         _completeLogin(user, rememberMe);
 
       } catch (err) {
@@ -721,21 +1045,35 @@
       }
     }
 
+    // ─────────────────────────────────────────
+    // 초기 관리자 계정 생성
+    // ─────────────────────────────────────────
     async function handleSetup(e) {
       e.preventDefault();
-      const name      = document.getElementById('setupName').value.trim();
-      const email     = document.getElementById('setupEmail').value.trim().toLowerCase();
-      const pw        = document.getElementById('setupPw').value;
+
+      const name = document.getElementById('setupName').value.trim();
+      const email = document.getElementById('setupEmail').value.trim().toLowerCase();
+      const pw = document.getElementById('setupPw').value;
       const pwConfirm = document.getElementById('setupPwConfirm').value;
 
-      const errEl   = document.getElementById('setupError');
+      const errEl = document.getElementById('setupError');
       const errText = document.getElementById('setupErrorText');
-      const showSetupError = (msg) => { errText.textContent = msg; errEl.classList.add('show'); };
+
+      const showSetupError = (msg) => {
+        errText.textContent = msg;
+        errEl.classList.add('show');
+      };
       errEl.classList.remove('show');
 
-      if (!name || !email || !pw) { showSetupError('모든 항목을 입력해주세요.'); return; }
-      if (pw.length < 8) { showSetupError('비밀번호는 8자 이상이어야 합니다.'); return; }
-      if (pw !== pwConfirm) { showSetupError('비밀번호가 일치하지 않습니다.'); return; }
+      if (!name || !email || !pw) {
+        showSetupError('모든 항목을 입력해주세요.'); return;
+      }
+      if (pw.length < 8) {
+        showSetupError('비밀번호는 8자 이상이어야 합니다.'); return;
+      }
+      if (pw !== pwConfirm) {
+        showSetupError('비밀번호가 일치하지 않습니다.'); return;
+      }
 
       const btn = document.getElementById('setupBtn');
       btn.disabled = true;
@@ -743,7 +1081,9 @@
 
       try {
         const pwHash = await hashPassword(pw);
-        const now    = Date.now();
+
+        // Supabase REST API로 직접 생성
+        const now = Date.now();
         const res = await fetch(`${SUPABASE_URL}/rest/v1/users`, {
           method: 'POST',
           headers: {
@@ -753,7 +1093,8 @@
             'Prefer': 'return=representation',
           },
           body: JSON.stringify({
-            name, email,
+            name,
+            email,
             password:      pwHash,
             role:          'admin',
             team_name:     '관리팀',
@@ -765,7 +1106,7 @@
         });
 
         const created = await res.json().catch(() => null);
-        const user    = Array.isArray(created) ? created[0] : created;
+        const user = Array.isArray(created) ? created[0] : created;
 
         if (res.ok && user && user.id) {
           document.getElementById('setupModal').classList.remove('show');
@@ -783,16 +1124,21 @@
       }
     }
 
+    // ─────────────────────────────────────────
+    // 이미 로그인된 경우 main으로 리다이렉트
+    // ─────────────────────────────────────────
     function checkExistingSession() {
       const session = localStorage.getItem('wt_session') || sessionStorage.getItem('wt_session');
       if (session) {
         try {
-          const s   = JSON.parse(session);
+          const s = JSON.parse(session);
+          // 세션 유효성 + TTL(8시간) 동시 검사
           const TTL = 8 * 60 * 60 * 1000;
           if (s && s.id && s.loggedInAt && (Date.now() - s.loggedInAt < TTL)) {
             window.location.href = 'main.html';
             return true;
           } else {
+            // 만료된 세션은 즉시 삭제
             localStorage.removeItem('wt_session');
             sessionStorage.removeItem('wt_session');
           }
@@ -801,9 +1147,15 @@
       return false;
     }
 
+    // ─────────────────────────────────────────
+    // 입력 시 에러 초기화
+    // ─────────────────────────────────────────
     document.getElementById('email').addEventListener('input', hideError);
     document.getElementById('password').addEventListener('input', hideError);
 
+    // ─────────────────────────────────────────
+    // 페이지 로드 시 초기화
+    // ─────────────────────────────────────────
     window.addEventListener('DOMContentLoaded', () => {
       if (!checkExistingSession()) {
         checkFirstRun();
