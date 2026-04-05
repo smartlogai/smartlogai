@@ -17,7 +17,8 @@ let _hqCache   = null;
 async function _getDepts(force = false) {
   if (!_deptCache || force) {
     const r = await API.list('departments', { limit: 200 });
-    _deptCache = (r && r.data) ? r.data : [];
+    const all = (r && r.data) ? r.data : [];
+    _deptCache = all.filter(x => x.deleted !== true);
   }
   return _deptCache;
 }
@@ -25,7 +26,8 @@ async function _getDepts(force = false) {
 async function _getHqs(force = false) {
   if (!_hqCache || force) {
     const r = await API.list('headquarters', { limit: 200 });
-    _hqCache = (r && r.data) ? r.data : [];
+    const all = (r && r.data) ? r.data : [];
+    _hqCache = all.filter(x => x.deleted !== true);
   }
   return _hqCache;
 }
@@ -234,33 +236,38 @@ function resetHqPanel() {
 
 /* ── 사업부 모달 ── */
 async function openDeptModal(id = '') {
-  document.getElementById('dept-edit-id').value        = id;
-  document.getElementById('dept-name-input').value     = '';
-  document.getElementById('dept-desc-input').value     = '';
-  document.getElementById('deptModalTitle').textContent = id ? '사업부 수정' : '사업부 추가';
+  try {
+    document.getElementById('dept-edit-id').value        = id;
+    document.getElementById('dept-name-input').value     = '';
+    document.getElementById('dept-desc-input').value     = '';
+    document.getElementById('deptModalTitle').textContent = id ? '사업부 수정' : '사업부 추가';
 
-  // 사업부장 드롭다운 (Director/Admin) ★ Master 캐시 사용
-  const dirEl = document.getElementById('dept-director-input');
-  dirEl.innerHTML = '<option value="">사업부장 선택 (미지정)</option>';
-  const allDirUsers = await Master.users();
-  allDirUsers
-    .filter(u => (u.role === 'director' || u.role === 'admin') && u.is_active !== false)
-    .forEach(u => {
-      const o = new Option(u.name, u.id);
-      o.dataset.name = u.name;
-      dirEl.appendChild(o);
-    });
+    // 사업부장 드롭다운 (Director/Admin) ★ Master 캐시 사용
+    const dirEl = document.getElementById('dept-director-input');
+    dirEl.innerHTML = '<option value="">사업부장 선택 (미지정)</option>';
+    const allDirUsers = await Master.users();
+    allDirUsers
+      .filter(u => (u.role === 'director' || u.role === 'admin') && u.is_active !== false)
+      .forEach(u => {
+        const o = new Option(u.name, u.id);
+        o.dataset.name = u.name;
+        dirEl.appendChild(o);
+      });
 
-  if (id) {
-    const dept = await API.get('departments', id);
-    if (dept) {
-      document.getElementById('dept-name-input').value = dept.department_name || '';
-      document.getElementById('dept-desc-input').value = dept.description    || '';
-      if (dept.director_id) dirEl.value = dept.director_id;
+    if (id) {
+      const dept = await API.get('departments', id);
+      if (dept) {
+        document.getElementById('dept-name-input').value = dept.department_name || '';
+        document.getElementById('dept-desc-input').value = dept.description    || '';
+        if (dept.director_id) dirEl.value = dept.director_id;
+      }
     }
+    openModal('deptModal');
+    setTimeout(() => document.getElementById('dept-name-input').focus(), 120);
+  } catch(err) {
+    console.error('[openDeptModal] 오류:', err);
+    Toast.error('모달 열기 실패: ' + (err.message || '알 수 없는 오류'));
   }
-  openModal('deptModal');
-  setTimeout(() => document.getElementById('dept-name-input').focus(), 120);
 }
 
 async function saveDept() {
@@ -320,34 +327,38 @@ async function openHqModal(id = '') {
     Toast.warning('먼저 왼쪽에서 사업부를 선택하세요.');
     return;
   }
+  try {
+    document.getElementById('hq-edit-id').value        = id;
+    document.getElementById('hq-name-input').value     = '';
+    document.getElementById('hq-dept-id').value        = _selectedDeptId;
+    document.getElementById('hqModalTitle').textContent = id ? '본부 수정' : '본부 추가';
 
-  document.getElementById('hq-edit-id').value        = id;
-  document.getElementById('hq-name-input').value     = '';
-  document.getElementById('hq-dept-id').value        = _selectedDeptId;
-  document.getElementById('hqModalTitle').textContent = id ? '본부 수정' : '본부 추가';
+    const deptNmEl = document.getElementById('hq-modal-dept-name');
+    if (deptNmEl) deptNmEl.textContent = _selectedDeptName || '-';
 
-  const deptNmEl = document.getElementById('hq-modal-dept-name');
-  if (deptNmEl) deptNmEl.textContent = _selectedDeptName || '-';
+    // 본부장 드롭다운 (Manager/Director/Admin)
+    await _fillHqManagerSelect('');
 
-  // 본부장 드롭다운 (Manager/Director/Admin)
-  await _fillHqManagerSelect('');
-
-  if (id) {
-    const hq = await API.get('headquarters', id);
-    if (hq) {
-      document.getElementById('hq-name-input').value = hq.hq_name || '';
-      document.getElementById('hq-dept-id').value    = hq.dept_id || _selectedDeptId;
-      // 사업부명 표시
-      if (deptNmEl) deptNmEl.textContent = hq.dept_name || _selectedDeptName || '-';
-      // 선택 상태 보정
-      _selectedDeptId   = hq.dept_id   || _selectedDeptId;
-      _selectedDeptName = hq.dept_name  || _selectedDeptName;
-      await _fillHqManagerSelect(hq.manager_id || '');
+    if (id) {
+      const hq = await API.get('headquarters', id);
+      if (hq) {
+        document.getElementById('hq-name-input').value = hq.hq_name || '';
+        document.getElementById('hq-dept-id').value    = hq.dept_id || _selectedDeptId;
+        // 사업부명 표시
+        if (deptNmEl) deptNmEl.textContent = hq.dept_name || _selectedDeptName || '-';
+        // 선택 상태 보정
+        _selectedDeptId   = hq.dept_id   || _selectedDeptId;
+        _selectedDeptName = hq.dept_name  || _selectedDeptName;
+        await _fillHqManagerSelect(hq.manager_id || '');
+      }
     }
-  }
 
-  openModal('hqModal');
-  setTimeout(() => document.getElementById('hq-name-input').focus(), 120);
+    openModal('hqModal');
+    setTimeout(() => document.getElementById('hq-name-input').focus(), 120);
+  } catch(err) {
+    console.error('[openHqModal] 오류:', err);
+    Toast.error('모달 열기 실패: ' + (err.message || '알 수 없는 오류'));
+  }
 }
 
 async function _fillHqManagerSelect(selectedId = '') {
@@ -603,7 +614,7 @@ async function init_master_csteams() {
 
 async function loadCsTeams() {
   const r     = await API.list('cs_teams', { limit: 200 });
-  const teams = (r && r.data) ? r.data : [];
+  const teams = (r && r.data) ? r.data.filter(x => x.deleted !== true) : [];
   const tbody = document.getElementById('csteams-body');
   if (!teams.length) {
     tbody.innerHTML = `<tr><td colspan="7" class="table-empty">
@@ -635,49 +646,54 @@ async function loadCsTeams() {
 }
 
 async function openCsTeamModal(id = '') {
-  document.getElementById('csteam-edit-id').value        = id;
-  document.getElementById('csteam-name-input').value     = '';
-  document.getElementById('csteam-desc-input').value     = '';
-  document.getElementById('csTeamModalTitle').textContent = id ? '고객지원팀 수정' : '고객지원팀 추가';
+  try {
+    document.getElementById('csteam-edit-id').value        = id;
+    document.getElementById('csteam-name-input').value     = '';
+    document.getElementById('csteam-desc-input').value     = '';
+    document.getElementById('csTeamModalTitle').textContent = id ? '고객지원팀 수정' : '고객지원팀 추가';
 
-  // 사업부 드롭다운
-  const deptEl = document.getElementById('csteam-dept-input');
-  deptEl.innerHTML = '<option value="">사업부 선택</option>';
-  const depts = await _getDepts();
-  depts.forEach(d => {
-    const o = new Option(d.department_name, d.id);
-    o.dataset.name = d.department_name;
-    deptEl.appendChild(o);
-  });
+    // 사업부 드롭다운
+    const deptEl = document.getElementById('csteam-dept-input');
+    deptEl.innerHTML = '<option value="">사업부 선택</option>';
+    const depts = await _getDepts();
+    depts.forEach(d => {
+      const o = new Option(d.department_name, d.id);
+      o.dataset.name = d.department_name;
+      deptEl.appendChild(o);
+    });
 
-  // 본부 초기화
-  const hqEl = document.getElementById('csteam-hq-input');
-  hqEl.innerHTML = '<option value="">본부 선택 (사업부 먼저 선택)</option>';
-  hqEl.disabled  = true;
+    // 본부 초기화
+    const hqEl = document.getElementById('csteam-hq-input');
+    hqEl.innerHTML = '<option value="">본부 선택 (사업부 먼저 선택)</option>';
+    hqEl.disabled  = true;
 
-  // 매니저 초기화
-  const mgrEl = document.getElementById('csteam-manager-input');
-  mgrEl.innerHTML = '<option value="">본부 선택 시 자동 연결</option>';
-  mgrEl.disabled  = true;
+    // 매니저 초기화
+    const mgrEl = document.getElementById('csteam-manager-input');
+    mgrEl.innerHTML = '<option value="">본부 선택 시 자동 연결</option>';
+    mgrEl.disabled  = true;
 
-  if (id) {
-    const team = await API.get('cs_teams', id);
-    if (team) {
-      document.getElementById('csteam-name-input').value = team.cs_team_name || '';
-      document.getElementById('csteam-desc-input').value = team.description  || '';
-      const deptId = team.dept_id || '';
-      if (deptId) {
-        deptEl.value = deptId;
-        await _fillCsTeamHqSelect(deptId, team.hq_id || '');
-        if (team.hq_id) {
-          await _fillCsTeamManagerByHq(team.hq_id, team.manager_id || '');
+    if (id) {
+      const team = await API.get('cs_teams', id);
+      if (team) {
+        document.getElementById('csteam-name-input').value = team.cs_team_name || '';
+        document.getElementById('csteam-desc-input').value = team.description  || '';
+        const deptId = team.dept_id || '';
+        if (deptId) {
+          deptEl.value = deptId;
+          await _fillCsTeamHqSelect(deptId, team.hq_id || '');
+          if (team.hq_id) {
+            await _fillCsTeamManagerByHq(team.hq_id, team.manager_id || '');
+          }
         }
       }
     }
-  }
 
-  openModal('csTeamModal');
-  setTimeout(() => document.getElementById('csteam-name-input').focus(), 120);
+    openModal('csTeamModal');
+    setTimeout(() => document.getElementById('csteam-name-input').focus(), 120);
+  } catch(err) {
+    console.error('[openCsTeamModal] 오류:', err);
+    Toast.error('모달 열기 실패: ' + (err.message || '알 수 없는 오류'));
+  }
 }
 
 async function onCsTeamDeptChange() {
@@ -963,7 +979,7 @@ async function saveClient() {
     closeModal('clientModal');
     Master.invalidate('clients');
     await loadClients();
-  } catch { Toast.error('저장 실패'); }
+  } catch(err) { Toast.error('저장 실패: ' + (err && err.message ? err.message : '알 수 없는 오류')); }
 }
 
 async function deleteClient(id, name) {
@@ -1181,7 +1197,7 @@ async function saveCategory() {
     else    { await API.create('work_categories', data);      Toast.success('추가되었습니다.'); }
     closeModal('categoryModal');
     await loadCategories();
-  } catch { Toast.error('저장 실패'); }
+  } catch(err) { Toast.error('저장 실패: ' + (err && err.message ? err.message : '알 수 없는 오류')); }
 }
 
 async function deleteCategory(id, name, subCount) {
@@ -1226,7 +1242,7 @@ async function saveSubcategory() {
     else    { await API.create('work_subcategories', data);      Toast.success('추가되었습니다.'); }
     closeModal('subcategoryModal');
     await loadCategories();
-  } catch { Toast.error('저장 실패'); }
+  } catch(err) { Toast.error('저장 실패: ' + (err && err.message ? err.message : '알 수 없는 오류')); }
 }
 
 async function deleteSubcategory(id, name) {
