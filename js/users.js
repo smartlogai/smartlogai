@@ -669,7 +669,9 @@ async function deleteUser(id, name, email) {
     Master.invalidate('users');
     await loadUsers();
   } catch (err) {
-    Toast.error('삭제 실패');
+    const msg = err && err.message ? err.message : '알 수 없는 오류';
+    console.error('[deleteUser] 실패:', msg);
+    Toast.error('삭제 실패: ' + msg);
   }
 }
 
