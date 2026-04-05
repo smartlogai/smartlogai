@@ -307,7 +307,11 @@ async function deleteDept(id, name) {
       resetHqPanel();
     }
     await loadDepartments();
-  } catch { Toast.error('삭제 실패'); }
+  } catch (err) {
+    const msg = err && err.message ? err.message : '알 수 없는 오류';
+    console.error('[deleteDept] 실패:', msg);
+    Toast.error('삭제 실패: ' + msg);
+  }
 }
 
 /* ── 본부 모달 ── */
@@ -410,7 +414,11 @@ async function deleteHq(id, hqName) {
     if (_selectedDeptId) {
       await loadHqList(_selectedDeptId, _selectedDeptName);
     }
-  } catch { Toast.error('삭제 실패'); }
+  } catch (err) {
+    const msg = err && err.message ? err.message : '알 수 없는 오류';
+    console.error('[deleteHq] 실패:', msg);
+    Toast.error('삭제 실패: ' + msg);
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -422,9 +430,12 @@ async function init_master_teams() {
 }
 
 async function loadTeams() {
+  // 캐시 완전 무효화 (Master 캐시 + Cache 스토어 모두)
   Master.invalidate('teams');
+  Cache.invalidate('teams');
   const teams = await Master.teams();
   const tbody = document.getElementById('teams-body');
+  if (!tbody) return; // DOM 요소 없을 때 조용히 종료
   if (!teams.length) {
     tbody.innerHTML = `<tr><td colspan="6" class="table-empty">
       <i class="fas fa-users-cog"></i>
@@ -540,8 +551,13 @@ async function deleteTeam(id, name) {
     await API.delete('teams', id);
     Toast.success('삭제되었습니다.');
     Master.invalidate('teams');
+    Cache.invalidate('teams');
     await loadTeams();
-  } catch { Toast.error('삭제 실패'); }
+  } catch (err) {
+    const msg = err && err.message ? err.message : '알 수 없는 오류';
+    console.error('[deleteTeam] 실패:', msg);
+    Toast.error('삭제 실패: ' + msg);
+  }
 }
 
 function openTeamUploadModal() { openModal('teamUploadModal'); }
@@ -774,7 +790,11 @@ async function deleteCsTeam(id, name) {
     await API.delete('cs_teams', id);
     Toast.success('삭제되었습니다.');
     await loadCsTeams();
-  } catch { Toast.error('삭제 실패'); }
+  } catch (err) {
+    const msg = err && err.message ? err.message : '알 수 없는 오류';
+    console.error('[deleteCsTeam] 실패:', msg);
+    Toast.error('삭제 실패: ' + msg);
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -954,8 +974,13 @@ async function deleteClient(id, name) {
     await API.delete('clients', id);
     Toast.success('삭제되었습니다.');
     Master.invalidate('clients');
+    Cache.invalidate('clients');
     await loadClients();
-  } catch { Toast.error('삭제 실패'); }
+  } catch (err) {
+    const msg = err && err.message ? err.message : '알 수 없는 오류';
+    console.error('[deleteClient] 실패:', msg);
+    Toast.error('삭제 실패: ' + msg);
+  }
 }
 
 function openClientUploadModal() { openModal('clientUploadModal'); }
@@ -1168,7 +1193,11 @@ async function deleteCategory(id, name, subCount) {
     await API.delete('work_categories', id);
     Toast.success('삭제되었습니다.');
     await loadCategories();
-  } catch { Toast.error('삭제 실패'); }
+  } catch (err) {
+    const msg = err && err.message ? err.message : '알 수 없는 오류';
+    console.error('[deleteCategory] 실패:', msg);
+    Toast.error('삭제 실패: ' + msg);
+  }
 }
 
 function openSubcategoryModal(id='', name='', parentId='', parentName='', order=0) {
@@ -1208,7 +1237,11 @@ async function deleteSubcategory(id, name) {
     await API.delete('work_subcategories', id);
     Toast.success('삭제되었습니다.');
     await loadCategories();
-  } catch { Toast.error('삭제 실패'); }
+  } catch (err) {
+    const msg = err && err.message ? err.message : '알 수 없는 오류';
+    console.error('[deleteSubcategory] 실패:', msg);
+    Toast.error('삭제 실패: ' + msg);
+  }
 }
 
 function openCategoryUploadModal() { openModal('categoryUploadModal'); }
