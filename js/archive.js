@@ -262,8 +262,8 @@ async function loadArchiveList() {
   try {
     // ── mail_references + time_entries 병렬 로드 ──
     const [refResp, entryResp] = await Promise.all([
-      API.list('mail_references', { limit: 500 }),
-      API.list('time_entries',    { limit: 500 })
+      API.list('mail_references', { limit: 10000 }),
+      API.list('time_entries',    { limit: 10000 })
     ]);
 
     // entry_id → entry 맵
