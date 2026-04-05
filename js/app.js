@@ -240,8 +240,8 @@ const API = {
       url += `&order=created_at.desc`;
     }
 
-    // 삭제된 항목 제외
-    url += `&deleted.is.null`;
+    // deleted=true 항목 제외 (soft delete 잔존 데이터 + hard delete 전환기 모두 대응)
+    url += `&or=(deleted.is.null,deleted.is.false)`;
 
     // 전체 개수 포함 요청
     const res = await fetch(url, {
@@ -319,15 +319,57 @@ const API = {
     return result;
   },
 
-  // 삭제 (DELETE — 소프트 삭제)
+  // 삭제: Hard Delete 시도 → 실패 시 Soft Delete (deleted=true) 로 폴백
   async delete(table, id) {
-    // 실제 삭제 대신 deleted 플래그 설정
     const url = `${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`;
-    await this._fetch(url, {
+    // 1차: Hard Delete 시도
+    try {
+      const res = await fetch(url, {
+        method: 'DELETE',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+          'Prefer': 'return=minimal',
+        },
+      });
+      if (res.status === 204 || res.status === 200 || res.ok) {
+        console.log(`[API.delete] Hard Delete 성공: ${table}/${id}`);
+        return null;
+      }
+      // Hard Delete 실패 시 에러 메시지 읽기
+      const errBody = await res.text().catch(() => '');
+      let errMsg = `HTTP ${res.status}`;
+      try {
+        const parsed = JSON.parse(errBody);
+        errMsg = parsed.message || parsed.hint || parsed.error || errMsg;
+      } catch (_) {}
+      console.warn(`[API.delete] Hard Delete 실패 (${res.status}): ${errMsg} → Soft Delete 시도`);
+    } catch (netErr) {
+      console.warn(`[API.delete] Hard Delete 네트워크 오류 → Soft Delete 시도: ${netErr.message}`);
+    }
+    // 2차 폴백: Soft Delete (deleted=true, updated_at 갱신)
+    const patchRes = await fetch(url, {
       method: 'PATCH',
-      body:   JSON.stringify({ deleted: true, updated_at: Date.now() }),
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal',
+      },
+      body: JSON.stringify({ deleted: true, updated_at: Date.now() }),
     });
-    return null;
+    if (patchRes.ok || patchRes.status === 204) {
+      console.log(`[API.delete] Soft Delete 성공: ${table}/${id}`);
+      return null;
+    }
+    const patchBody = await patchRes.text().catch(() => '');
+    let patchErr = `HTTP ${patchRes.status}`;
+    try {
+      const p2 = JSON.parse(patchBody);
+      patchErr = p2.message || p2.hint || p2.error || patchErr;
+    } catch (_) {}
+    console.error(`[API.delete] Soft Delete도 실패 (${patchRes.status}): ${patchErr}`);
+    throw new Error(patchErr);
   },
 };
 
