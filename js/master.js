@@ -1,786 +1,1272 @@
-/* ============================================================
-   master.js  –  마스터 데이터 관리
-   (팀, 고객사, 카테고리, 하위카테고리, 사건/사업)
-   ============================================================ */
-'use strict';
+/* ============================================
+   master.js — 조직구성 / 기준정보 관리
+   ============================================
+   DB 구조:
+   - departments  : 사업부 (id, department_name, director_id, director_name, description)
+   - headquarters : 본부   (id, hq_name, dept_id, dept_name, manager_id, manager_name)
+   - teams        : 업무팀 (id, team_name, dept_id, dept_name, hq_id, hq_name)
+   - cs_teams     : 고객지원팀 (id, cs_team_name, dept_id, dept_name, hq_id, hq_name, manager_id, manager_name)
+   ============================================ */
 
-/* ── 상태 ── */
-let _msSession = null;
-let _msTab     = 'client';   /* client | category | case | team */
+// ─────────────────────────────────────────────
+// 공통 캐시
+// ─────────────────────────────────────────────
+let _deptCache = null;
+let _hqCache   = null;
 
-/* ══════════════════════════════════════════════
-   진입점
-══════════════════════════════════════════════ */
-async function init_master() {
-  _msSession = Session.require();
-  if (!_msSession) return;
+async function _getDepts(force = false) {
+  if (!_deptCache || force) {
+    const r = await API.list('departments', { limit: 200 });
+    _deptCache = (r && r.data) ? r.data : [];
+  }
+  return _deptCache;
+}
 
-  /* 권한 체크 – admin만 접근 */
-  if (!Auth.isAdmin(_msSession)) {
-    document.getElementById('master-no-permission')?.style &&
-      (document.getElementById('master-no-permission').style.display = '');
-    document.getElementById('master-main')?.style &&
-      (document.getElementById('master-main').style.display = 'none');
+async function _getHqs(force = false) {
+  if (!_hqCache || force) {
+    const r = await API.list('headquarters', { limit: 200 });
+    _hqCache = (r && r.data) ? r.data : [];
+  }
+  return _hqCache;
+}
+
+function _clearOrgCache() {
+  _deptCache = null;
+  _hqCache   = null;
+}
+
+// ─────────────────────────────────────────────
+// [1] 사업부·본부 통합 관리 (master-org)
+// ─────────────────────────────────────────────
+let _selectedDeptId   = '';
+let _selectedDeptName = '';
+
+let _legacyCleanDone = false; // ★ 레거시 정리는 세션 내 1회만
+
+async function init_master_org() {
+  _clearOrgCache();
+  _selectedDeptId   = '';
+  _selectedDeptName = '';
+  // 기존 오류 데이터 자동 정리 (세션 내 1회만)
+  if (!_legacyCleanDone) {
+    await _cleanLegacyDeptData();
+    _legacyCleanDone = true;
+  }
+  await loadDepartments();
+}
+
+/**
+ * 이전 버전에서 departments 테이블에 잘못 저장된 본부 행 자동 정리
+ * hq_name 필드가 있는 행은 실제 본부 데이터이므로
+ * headquarters 테이블로 마이그레이션 후 삭제
+ */
+async function _cleanLegacyDeptData() {
+  try {
+    const r    = await API.list('departments', { limit: 500 });
+    const rows = (r && r.data) ? r.data : [];
+
+    // hq_name 컬럼에 값이 있는 행 = 이전 버전 잘못 저장된 본부 행
+    const legacyHqRows = rows.filter(d => d.hq_name);
+    if (!legacyHqRows.length) return; // 정리할 데이터 없음
+
+    // headquarters 테이블의 기존 데이터 확인
+    const hqR  = await API.list('headquarters', { limit: 500 });
+    const hqRows = (hqR && hqR.data) ? hqR.data : [];
+    const existHqNames = new Set(hqRows.map(h => `${h.dept_id}::${h.hq_name}`));
+
+    let migrated = 0;
+    for (const d of legacyHqRows) {
+      // 마이그레이션: headquarters 테이블에 없는 경우만 추가
+      const key = `${d.id}::${d.hq_name}`;
+      // dept_id를 찾기 위해 같은 사업부명의 기본 행 검색
+      const baseRow = rows.find(r2 => r2.department_name === d.department_name && !r2.hq_name);
+      const deptId  = baseRow ? baseRow.id : d.id;
+      const deptKey = `${deptId}::${d.hq_name}`;
+
+      if (!existHqNames.has(deptKey)) {
+        await API.create('headquarters', {
+          hq_name:      d.hq_name,
+          dept_id:      deptId,
+          dept_name:    d.department_name || '',
+          manager_id:   d.hq_manager_id   || '',
+          manager_name: d.hq_manager_name || '',
+        });
+        existHqNames.add(deptKey);
+        migrated++;
+      }
+
+      // 잘못된 행 삭제 (hq_name이 있던 department 행)
+      await API.delete('departments', d.id);
+    }
+
+    if (migrated > 0 || legacyHqRows.length > 0) {
+      console.log(`[org-cleanup] 본부 데이터 정리 완료: ${legacyHqRows.length}개 행 삭제, ${migrated}개 headquarters 마이그레이션`);
+      _clearOrgCache();
+    }
+  } catch (err) {
+    // 정리 실패해도 계속 진행 (치명적 오류 아님)
+    console.warn('[org-cleanup] 데이터 정리 중 오류:', err.message);
+  }
+}
+
+/* ── 사업부 목록 ── */
+async function loadDepartments() {
+  const allRows = await _getDepts(true);
+  // 안전망: hq_name이 있는 잔여 레거시 행은 사업부 목록에서 제외
+  const depts = allRows.filter(d => !d.hq_name);
+  const tbody = document.getElementById('departments-body');
+  if (!tbody) return;
+
+  if (!depts.length) {
+    tbody.innerHTML = `<tr><td colspan="4" class="table-empty">
+      <i class="fas fa-sitemap"></i>
+      <p>등록된 사업부가 없습니다.<br>오른쪽 위 '사업부 추가' 버튼으로 등록하세요.</p>
+    </td></tr>`;
+    resetHqPanel();
     return;
   }
 
-  _bindMsTabEvents();
-  await _loadMsTab(_msTab);
-}
+  tbody.innerHTML = depts.map((d, i) => {
+    const isSel = d.id === _selectedDeptId;
+    return `
+    <tr class="dept-row"
+        data-dept-id="${d.id}"
+        onclick="selectDept('${d.id}','${esc(d.department_name)}')"
+        style="cursor:pointer;${isSel ? 'background:#eff6ff;' : ''}">
+      <td>${i + 1}</td>
+      <td>
+        <div style="font-weight:600;font-size:13px">${d.department_name || '-'}</div>
+        ${d.description ? `<div style="font-size:11px;color:var(--text-muted)">${d.description}</div>` : ''}
+      </td>
+      <td>${d.director_name
+        ? `<span class="org-badge org-badge-blue">${d.director_name}</span>`
+        : `<span style="color:var(--text-muted);font-size:11px">미지정</span>`}
+      </td>
+      <td style="text-align:center">
+        <div style="display:flex;gap:5px;justify-content:center">
+          <button class="btn btn-sm btn-outline btn-icon"
+            onclick="event.stopPropagation();openDeptModal('${d.id}')"
+            title="수정"><i class="fas fa-edit"></i></button>
+          <button class="btn btn-sm btn-danger btn-icon"
+            onclick="event.stopPropagation();deleteDept('${d.id}','${esc(d.department_name)}')"
+            title="삭제"><i class="fas fa-trash"></i></button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
 
-/* ══════════════════════════════════════════════
-   탭 이벤트
-══════════════════════════════════════════════ */
-function _bindMsTabEvents() {
-  document.querySelectorAll('[data-ms-tab]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      _msTab = btn.dataset.msTab;
-      document.querySelectorAll('[data-ms-tab]').forEach(b =>
-        b.classList.toggle('active', b.dataset.msTab === _msTab));
-      _loadMsTab(_msTab);
-    });
-  });
-}
-
-async function _loadMsTab(tab) {
-  if (tab === 'client')   await loadClients();
-  else if (tab === 'category') await loadCategories();
-  else if (tab === 'case')     await loadCases();
-  else if (tab === 'team')     await loadTeams();
-}
-
-/* ══════════════════════════════════════════════
-   고객사 관리
-══════════════════════════════════════════════ */
-async function loadClients() {
-  const wrap = document.getElementById('ms-client-list');
-  if (!wrap) return;
-  wrap.innerHTML = _msSkeleton(4);
-
-  try {
-    const r = await API.list('clients', { limit: 200, sort: 'name' });
-    const clients = r?.data ?? [];
-    Master.invalidate('clients');
-
-    if (!clients.length) {
-      wrap.innerHTML = _msEmpty('등록된 고객사가 없습니다.');
-      return;
-    }
-
-    wrap.innerHTML = `
-      <table style="width:100%;border-collapse:collapse;">
-        <thead>
-          <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0;">
-            <th style="padding:10px 12px;font-size:11px;color:#64748b;text-align:left;font-weight:600;">고객사명</th>
-            <th style="padding:10px 12px;font-size:11px;color:#64748b;text-align:left;font-weight:600;">코드</th>
-            <th style="padding:10px 12px;font-size:11px;color:#64748b;text-align:left;font-weight:600;">담당자</th>
-            <th style="padding:10px 12px;font-size:11px;color:#64748b;text-align:left;font-weight:600;">연락처</th>
-            <th style="padding:10px 12px;font-size:11px;color:#64748b;text-align:center;font-weight:600;">상태</th>
-            <th style="padding:10px 12px;font-size:11px;color:#64748b;text-align:center;font-weight:600;">관리</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${clients.map(c => `
-            <tr style="border-bottom:1px solid #f1f5f9;" data-client-id="${c.id}">
-              <td style="padding:10px 12px;font-size:13px;font-weight:600;color:#1e293b;">${Utils.escHtml(c.name)}</td>
-              <td style="padding:10px 12px;font-size:12px;color:#64748b;">${Utils.escHtml(c.code || '-')}</td>
-              <td style="padding:10px 12px;font-size:12px;color:#64748b;">${Utils.escHtml(c.contact_name || '-')}</td>
-              <td style="padding:10px 12px;font-size:12px;color:#64748b;">${Utils.escHtml(c.contact_phone || '-')}</td>
-              <td style="padding:10px 12px;text-align:center;">
-                <span class="badge ${c.is_active !== false ? 'badge-success' : 'badge-secondary'}">
-                  ${c.is_active !== false ? '활성' : '비활성'}
-                </span>
-              </td>
-              <td style="padding:10px 12px;text-align:center;white-space:nowrap;">
-                <button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;"
-                  onclick="openClientModal('${c.id}')">
-                  <i class="fa-solid fa-pen"></i> 수정
-                </button>
-                <button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;color:#dc2626;"
-                  onclick="deleteClient('${c.id}','${Utils.escHtml(c.name)}')">
-                  <i class="fa-solid fa-trash"></i>
-                </button>
-              </td>
-            </tr>`).join('')}
-        </tbody>
-      </table>`;
-  } catch (err) {
-    wrap.innerHTML = _msError('고객사 로드 실패');
+  // 선택 상태 복원
+  if (_selectedDeptId) {
+    await loadHqList(_selectedDeptId, _selectedDeptName);
   }
 }
-window.loadClients = loadClients;
 
-/* ── 고객사 모달 ── */
-async function openClientModal(id = null) {
-  let data = {};
-  if (id) {
-    const r = await API.get('clients', id);
-    data = r?.data ?? r ?? {};
+/* 사업부 클릭 → 본부 패널 갱신 */
+async function selectDept(deptId, deptName) {
+  _selectedDeptId   = deptId;
+  _selectedDeptName = deptName;
+
+  // 하이라이트
+  document.querySelectorAll('.dept-row').forEach(r => {
+    r.style.background = r.dataset.deptId === deptId ? '#eff6ff' : '';
+  });
+
+  await loadHqList(deptId, deptName);
+}
+
+/* ── 본부 목록 ── */
+async function loadHqList(deptId, deptName) {
+  const noMsg  = document.getElementById('hq-no-dept-msg');
+  const wrap   = document.getElementById('hq-table-wrap');
+  const addBtn = document.getElementById('hq-add-btn-wrap');
+  const nmEl   = document.getElementById('hq-selected-dept-name');
+  if (!noMsg || !wrap) return;
+
+  noMsg.style.display = 'none';
+  wrap.style.display  = '';
+  if (addBtn) addBtn.style.display = '';
+  if (nmEl)  nmEl.textContent = deptName;
+
+  const allHqs = await _getHqs(true);
+  const hqs    = allHqs.filter(h => h.dept_id === deptId);
+  const tbody  = document.getElementById('hq-body');
+
+  if (!hqs.length) {
+    tbody.innerHTML = `<tr><td colspan="4" class="table-empty">
+      <i class="fas fa-building"></i>
+      <p>등록된 본부가 없습니다.</p>
+      <button class="btn btn-sm btn-primary" onclick="openHqModal()" style="margin-top:8px">
+        <i class="fas fa-plus"></i> 본부 추가
+      </button>
+    </td></tr>`;
+    return;
   }
 
-  _openMsModal({
-    title: id ? '고객사 수정' : '고객사 추가',
-    fields: [
-      { key: 'name',          label: '고객사명',  type: 'text',     required: true,  value: data.name || '' },
-      { key: 'code',          label: '코드',      type: 'text',     required: false, value: data.code || '' },
-      { key: 'contact_name',  label: '담당자',    type: 'text',     required: false, value: data.contact_name || '' },
-      { key: 'contact_phone', label: '연락처',    type: 'text',     required: false, value: data.contact_phone || '' },
-      { key: 'contact_email', label: '이메일',    type: 'email',    required: false, value: data.contact_email || '' },
-      { key: 'memo',          label: '메모',      type: 'textarea', required: false, value: data.memo || '' },
-      { key: 'is_active',     label: '활성 여부', type: 'checkbox', required: false, value: data.is_active !== false },
-    ],
-    onSave: async (formData) => {
-      if (id) {
-        await API.update('clients', id, formData);
-        Toast.success('고객사가 수정되었습니다.');
-      } else {
-        await API.create('clients', formData);
-        Toast.success('고객사가 추가되었습니다.');
-      }
-      Master.invalidate('clients');
-      await loadClients();
-    }
-  });
+  tbody.innerHTML = hqs.map((h, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td><strong style="font-size:13px">${h.hq_name || '-'}</strong></td>
+      <td>${h.manager_name
+        ? `<span class="org-badge org-badge-green">${h.manager_name}</span>`
+        : `<span style="color:var(--text-muted);font-size:11px">미지정</span>`}
+      </td>
+      <td style="text-align:center">
+        <div style="display:flex;gap:5px;justify-content:center">
+          <button class="btn btn-sm btn-outline btn-icon"
+            onclick="openHqModal('${h.id}')"
+            title="수정"><i class="fas fa-edit"></i></button>
+          <button class="btn btn-sm btn-danger btn-icon"
+            onclick="deleteHq('${h.id}','${esc(h.hq_name)}')"
+            title="삭제"><i class="fas fa-trash"></i></button>
+        </div>
+      </td>
+    </tr>`).join('');
 }
-window.openClientModal = openClientModal;
 
-async function deleteClient(id, name) {
-  const ok = await Confirm.show({
-    title: '고객사 삭제',
-    message: `"${name}" 고객사를 삭제하시겠습니까?\n관련 업무 내역은 유지됩니다.`,
-    confirmText: '삭제',
-    confirmClass: 'btn-danger'
-  });
-  if (!ok) return;
-  try {
-    await API.delete('clients', id);
-    Master.invalidate('clients');
-    Toast.success('삭제되었습니다.');
-    await loadClients();
-  } catch (err) {
-    Toast.error('삭제 중 오류가 발생했습니다.');
-  }
+function resetHqPanel() {
+  const noMsg  = document.getElementById('hq-no-dept-msg');
+  const wrap   = document.getElementById('hq-table-wrap');
+  const addBtn = document.getElementById('hq-add-btn-wrap');
+  if (noMsg)  noMsg.style.display  = '';
+  if (wrap)   wrap.style.display   = 'none';
+  if (addBtn) addBtn.style.display = 'none';
 }
-window.deleteClient = deleteClient;
 
-/* ══════════════════════════════════════════════
-   카테고리 관리
-══════════════════════════════════════════════ */
-async function loadCategories() {
-  const wrap = document.getElementById('ms-category-list');
-  if (!wrap) return;
-  wrap.innerHTML = _msSkeleton(4);
+/* ── 사업부 모달 ── */
+async function openDeptModal(id = '') {
+  document.getElementById('dept-edit-id').value        = id;
+  document.getElementById('dept-name-input').value     = '';
+  document.getElementById('dept-desc-input').value     = '';
+  document.getElementById('deptModalTitle').textContent = id ? '사업부 수정' : '사업부 추가';
 
-  try {
-    const [catR, subR] = await Promise.all([
-      API.list('categories',    { limit: 200, sort: 'sort_order' }),
-      API.list('subcategories', { limit: 500, sort: 'sort_order' }),
-    ]);
-    const cats = catR?.data ?? [];
-    const subs = subR?.data ?? [];
-    Master.invalidate('categories');
-
-    if (!cats.length) {
-      wrap.innerHTML = _msEmpty('등록된 카테고리가 없습니다.');
-      return;
-    }
-
-    wrap.innerHTML = cats.map(cat => {
-      const mySubs = subs.filter(s => s.category_id === cat.id);
-      return `
-        <div class="card" style="margin-bottom:10px;">
-          <div class="card-header" style="background:#f8fafc;">
-            <span class="card-title" style="font-size:13.5px;">
-              <i class="fa-solid fa-folder" style="color:#d97706;"></i>
-              ${Utils.escHtml(cat.name)}
-              <span style="font-size:11px;color:#94a3b8;margin-left:6px;">하위 ${mySubs.length}개</span>
-            </span>
-            <div style="display:flex;gap:6px;">
-              <button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;"
-                onclick="openCategoryModal('${cat.id}')">
-                <i class="fa-solid fa-pen"></i> 수정
-              </button>
-              <button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;color:#2d6bb5;"
-                onclick="openSubcategoryModal(null,'${cat.id}')">
-                <i class="fa-solid fa-plus"></i> 하위 추가
-              </button>
-              <button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;color:#dc2626;"
-                onclick="deleteCategory('${cat.id}','${Utils.escHtml(cat.name)}')">
-                <i class="fa-solid fa-trash"></i>
-              </button>
-            </div>
-          </div>
-          ${mySubs.length ? `
-            <div style="padding:8px 12px;">
-              <div style="display:flex;flex-wrap:wrap;gap:6px;">
-                ${mySubs.map(s => `
-                  <div style="display:inline-flex;align-items:center;gap:5px;background:#f1f5f9;border-radius:6px;padding:4px 10px;">
-                    <span style="font-size:12px;color:#334155;">${Utils.escHtml(s.name)}</span>
-                    <button style="background:none;border:none;cursor:pointer;color:#94a3b8;padding:0 2px;font-size:11px;"
-                      onclick="openSubcategoryModal('${s.id}','${cat.id}')">✎</button>
-                    <button style="background:none;border:none;cursor:pointer;color:#dc2626;padding:0 2px;font-size:11px;"
-                      onclick="deleteSubcategory('${s.id}','${Utils.escHtml(s.name)}')">✕</button>
-                  </div>`).join('')}
-              </div>
-            </div>` : ''}
-        </div>`;
-    }).join('');
-  } catch (err) {
-    wrap.innerHTML = _msError('카테고리 로드 실패');
-  }
-}
-window.loadCategories = loadCategories;
-
-async function openCategoryModal(id = null) {
-  let data = {};
-  if (id) {
-    const r = await API.get('categories', id);
-    data = r?.data ?? r ?? {};
-  }
-  _openMsModal({
-    title: id ? '카테고리 수정' : '카테고리 추가',
-    fields: [
-      { key: 'name',       label: '카테고리명', type: 'text',   required: true,  value: data.name || '' },
-      { key: 'sort_order', label: '정렬순서',   type: 'number', required: false, value: data.sort_order ?? 0 },
-      { key: 'memo',       label: '메모',       type: 'textarea',required: false,value: data.memo || '' },
-    ],
-    onSave: async (formData) => {
-      if (id) { await API.update('categories', id, formData); Toast.success('수정되었습니다.'); }
-      else     { await API.create('categories', formData);    Toast.success('추가되었습니다.'); }
-      Master.invalidate('categories');
-      await loadCategories();
-    }
-  });
-}
-window.openCategoryModal = openCategoryModal;
-
-async function deleteCategory(id, name) {
-  const ok = await Confirm.show({
-    title: '카테고리 삭제',
-    message: `"${name}" 카테고리를 삭제하시겠습니까?\n하위 카테고리도 함께 삭제됩니다.`,
-    confirmText: '삭제', confirmClass: 'btn-danger'
-  });
-  if (!ok) return;
-  try {
-    await API.delete('categories', id);
-    Master.invalidate('categories');
-    Toast.success('삭제되었습니다.');
-    await loadCategories();
-  } catch (err) { Toast.error('삭제 실패'); }
-}
-window.deleteCategory = deleteCategory;
-
-async function openSubcategoryModal(id = null, categoryId) {
-  let data = {};
-  if (id) {
-    const r = await API.get('subcategories', id);
-    data = r?.data ?? r ?? {};
-  }
-  _openMsModal({
-    title: id ? '하위카테고리 수정' : '하위카테고리 추가',
-    fields: [
-      { key: 'name',       label: '하위카테고리명', type: 'text',   required: true,  value: data.name || '' },
-      { key: 'sort_order', label: '정렬순서',       type: 'number', required: false, value: data.sort_order ?? 0 },
-    ],
-    onSave: async (formData) => {
-      formData.category_id = categoryId;
-      if (id) { await API.update('subcategories', id, formData); Toast.success('수정되었습니다.'); }
-      else     { await API.create('subcategories', formData);    Toast.success('추가되었습니다.'); }
-      Master.invalidate('categories');
-      await loadCategories();
-    }
-  });
-}
-window.openSubcategoryModal = openSubcategoryModal;
-
-async function deleteSubcategory(id, name) {
-  const ok = await Confirm.show({
-    title: '하위카테고리 삭제',
-    message: `"${name}"을 삭제하시겠습니까?`,
-    confirmText: '삭제', confirmClass: 'btn-danger'
-  });
-  if (!ok) return;
-  try {
-    await API.delete('subcategories', id);
-    Master.invalidate('categories');
-    Toast.success('삭제되었습니다.');
-    await loadCategories();
-  } catch (err) { Toast.error('삭제 실패'); }
-}
-window.deleteSubcategory = deleteSubcategory;
-/* ══════════════════════════════════════════════
-   사건/사업 관리
-══════════════════════════════════════════════ */
-async function loadCases() {
-  const wrap = document.getElementById('ms-case-list');
-  if (!wrap) return;
-  wrap.innerHTML = _msSkeleton(4);
-
-  try {
-    const [caseR, cliR] = await Promise.all([
-      API.list('cases',   { limit: 500, sort: '-created_at' }),
-      API.list('clients', { limit: 200, sort: 'name' }),
-    ]);
-    const cases   = caseR?.data ?? [];
-    const clients = cliR?.data  ?? [];
-    const cliMap  = Object.fromEntries(clients.map(c => [c.id, c.name]));
-    Master.invalidate('cases');
-
-    if (!cases.length) {
-      wrap.innerHTML = _msEmpty('등록된 사건/사업이 없습니다.');
-      return;
-    }
-
-    /* 고객사별 그룹 */
-    const grouped = {};
-    cases.forEach(c => {
-      const cid = c.client_id || 'none';
-      if (!grouped[cid]) grouped[cid] = [];
-      grouped[cid].push(c);
+  // 사업부장 드롭다운 (Director/Admin) ★ Master 캐시 사용
+  const dirEl = document.getElementById('dept-director-input');
+  dirEl.innerHTML = '<option value="">사업부장 선택 (미지정)</option>';
+  const allDirUsers = await Master.users();
+  allDirUsers
+    .filter(u => (u.role === 'director' || u.role === 'admin') && u.is_active !== false)
+    .forEach(u => {
+      const o = new Option(u.name, u.id);
+      o.dataset.name = u.name;
+      dirEl.appendChild(o);
     });
 
-    wrap.innerHTML = Object.entries(grouped).map(([cid, items]) => {
-      const cliName = cid === 'none' ? '(고객사 없음)' : (cliMap[cid] || cid);
-      return `
-        <div class="card" style="margin-bottom:10px;">
-          <div class="card-header" style="background:#f8fafc;">
-            <span class="card-title" style="font-size:13px;">
-              <i class="fa-solid fa-building" style="color:#2d6bb5;"></i>
-              ${Utils.escHtml(cliName)}
-              <span style="font-size:11px;color:#94a3b8;margin-left:6px;">${items.length}건</span>
-            </span>
-          </div>
-          <div style="overflow-x:auto;">
-            <table style="width:100%;border-collapse:collapse;">
-              <thead>
-                <tr style="background:#fafbfc;">
-                  <th style="padding:8px 12px;font-size:11px;color:#64748b;text-align:left;font-weight:600;">사건/사업명</th>
-                  <th style="padding:8px 12px;font-size:11px;color:#64748b;text-align:left;font-weight:600;">코드</th>
-                  <th style="padding:8px 12px;font-size:11px;color:#64748b;text-align:left;font-weight:600;">시작일</th>
-                  <th style="padding:8px 12px;font-size:11px;color:#64748b;text-align:left;font-weight:600;">종료일</th>
-                  <th style="padding:8px 12px;font-size:11px;color:#64748b;text-align:center;font-weight:600;">상태</th>
-                  <th style="padding:8px 12px;font-size:11px;color:#64748b;text-align:center;font-weight:600;">관리</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${items.map(item => `
-                  <tr style="border-bottom:1px solid #f1f5f9;">
-                    <td style="padding:8px 12px;font-size:12.5px;color:#1e293b;font-weight:500;">${Utils.escHtml(item.name)}</td>
-                    <td style="padding:8px 12px;font-size:12px;color:#64748b;">${Utils.escHtml(item.code || '-')}</td>
-                    <td style="padding:8px 12px;font-size:12px;color:#64748b;">${item.start_date || '-'}</td>
-                    <td style="padding:8px 12px;font-size:12px;color:#64748b;">${item.end_date || '-'}</td>
-                    <td style="padding:8px 12px;text-align:center;">
-                      <span class="badge ${item.is_active !== false ? 'badge-success' : 'badge-secondary'}">
-                        ${item.is_active !== false ? '진행중' : '종료'}
-                      </span>
-                    </td>
-                    <td style="padding:8px 12px;text-align:center;white-space:nowrap;">
-                      <button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;"
-                        onclick="openCaseModal('${item.id}')">
-                        <i class="fa-solid fa-pen"></i> 수정
-                      </button>
-                      <button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;color:#dc2626;"
-                        onclick="deleteCase('${item.id}','${Utils.escHtml(item.name)}')">
-                        <i class="fa-solid fa-trash"></i>
-                      </button>
-                    </td>
-                  </tr>`).join('')}
-              </tbody>
-            </table>
-          </div>
-        </div>`;
-    }).join('');
-  } catch (err) {
-    wrap.innerHTML = _msError('사건/사업 로드 실패');
-  }
-}
-window.loadCases = loadCases;
-
-async function openCaseModal(id = null) {
-  const cliR = await API.list('clients', { limit: 200, sort: 'name' });
-  const clients = cliR?.data ?? [];
-
-  let data = {};
   if (id) {
-    const r = await API.get('cases', id);
-    data = r?.data ?? r ?? {};
+    const dept = await API.get('departments', id);
+    if (dept) {
+      document.getElementById('dept-name-input').value = dept.department_name || '';
+      document.getElementById('dept-desc-input').value = dept.description    || '';
+      if (dept.director_id) dirEl.value = dept.director_id;
+    }
+  }
+  openModal('deptModal');
+  setTimeout(() => document.getElementById('dept-name-input').focus(), 120);
+}
+
+async function saveDept() {
+  const id      = document.getElementById('dept-edit-id').value;
+  const name    = document.getElementById('dept-name-input').value.trim();
+  const desc    = document.getElementById('dept-desc-input').value.trim();
+  const dirEl   = document.getElementById('dept-director-input');
+  const dirId   = dirEl.value;
+  const dirName = dirId ? (dirEl.options[dirEl.selectedIndex]?.dataset.name || '') : '';
+
+  if (!name) { Toast.warning('사업부명을 입력하세요.'); return; }
+
+  try {
+    const data = { department_name: name, director_id: dirId, director_name: dirName, description: desc };
+    if (id) {
+      await API.update('departments', id, data);
+      Toast.success('사업부가 수정되었습니다.');
+    } else {
+      await API.create('departments', data);
+      Toast.success('사업부가 추가되었습니다.');
+    }
+    closeModal('deptModal');
+    _deptCache = null;
+    await loadDepartments();
+  } catch (err) { Toast.error('저장 실패: ' + err.message); }
+}
+
+async function deleteDept(id, name) {
+  // 해당 사업부에 본부가 있는지 확인
+  const hqs = await _getHqs(true);
+  const linkedHqs = hqs.filter(h => h.dept_id === id);
+  if (linkedHqs.length) {
+    Toast.warning(`소속 본부 ${linkedHqs.length}개가 있습니다. 본부를 먼저 삭제해주세요.`);
+    return;
+  }
+  if (!await Confirm.delete(name)) return;
+  try {
+    await API.delete('departments', id);
+    Toast.success('삭제되었습니다.');
+    _deptCache = null;
+    if (_selectedDeptId === id) {
+      _selectedDeptId   = '';
+      _selectedDeptName = '';
+      resetHqPanel();
+    }
+    await loadDepartments();
+  } catch { Toast.error('삭제 실패'); }
+}
+
+/* ── 본부 모달 ── */
+async function openHqModal(id = '') {
+  if (!id && !_selectedDeptId) {
+    Toast.warning('먼저 왼쪽에서 사업부를 선택하세요.');
+    return;
   }
 
-  _openMsModal({
-    title: id ? '사건/사업 수정' : '사건/사업 추가',
-    fields: [
-      {
-        key: 'client_id', label: '고객사', type: 'select', required: true,
-        value: data.client_id || '',
-        options: [
-          { value: '', label: '고객사 선택' },
-          ...clients.map(c => ({ value: c.id, label: c.name }))
-        ]
-      },
-      { key: 'name',       label: '사건/사업명', type: 'text',   required: true,  value: data.name || '' },
-      { key: 'code',       label: '코드',        type: 'text',   required: false, value: data.code || '' },
-      { key: 'start_date', label: '시작일',      type: 'date',   required: false, value: data.start_date || '' },
-      { key: 'end_date',   label: '종료일',      type: 'date',   required: false, value: data.end_date || '' },
-      { key: 'memo',       label: '메모',        type: 'textarea',required: false,value: data.memo || '' },
-      { key: 'is_active',  label: '진행중',      type: 'checkbox',required: false,value: data.is_active !== false },
-    ],
-    onSave: async (formData) => {
-      if (id) { await API.update('cases', id, formData); Toast.success('수정되었습니다.'); }
-      else     { await API.create('cases', formData);    Toast.success('추가되었습니다.'); }
-      Master.invalidate('cases');
-      await loadCases();
+  document.getElementById('hq-edit-id').value        = id;
+  document.getElementById('hq-name-input').value     = '';
+  document.getElementById('hq-dept-id').value        = _selectedDeptId;
+  document.getElementById('hqModalTitle').textContent = id ? '본부 수정' : '본부 추가';
+
+  const deptNmEl = document.getElementById('hq-modal-dept-name');
+  if (deptNmEl) deptNmEl.textContent = _selectedDeptName || '-';
+
+  // 본부장 드롭다운 (Manager/Director/Admin)
+  await _fillHqManagerSelect('');
+
+  if (id) {
+    const hq = await API.get('headquarters', id);
+    if (hq) {
+      document.getElementById('hq-name-input').value = hq.hq_name || '';
+      document.getElementById('hq-dept-id').value    = hq.dept_id || _selectedDeptId;
+      // 사업부명 표시
+      if (deptNmEl) deptNmEl.textContent = hq.dept_name || _selectedDeptName || '-';
+      // 선택 상태 보정
+      _selectedDeptId   = hq.dept_id   || _selectedDeptId;
+      _selectedDeptName = hq.dept_name  || _selectedDeptName;
+      await _fillHqManagerSelect(hq.manager_id || '');
     }
-  });
-}
-window.openCaseModal = openCaseModal;
+  }
 
-async function deleteCase(id, name) {
-  const ok = await Confirm.show({
-    title: '사건/사업 삭제',
-    message: `"${name}"을 삭제하시겠습니까?`,
-    confirmText: '삭제', confirmClass: 'btn-danger'
-  });
-  if (!ok) return;
+  openModal('hqModal');
+  setTimeout(() => document.getElementById('hq-name-input').focus(), 120);
+}
+
+async function _fillHqManagerSelect(selectedId = '') {
+  const mgrEl = document.getElementById('hq-manager-input');
+  mgrEl.innerHTML = '<option value="">본부장 선택 (미지정)</option>';
+  // ★ Master 캐시 사용
+  const allMgrUsers = await Master.users();
+  allMgrUsers
+    .filter(u => (u.role === 'manager' || u.role === 'director' || u.role === 'admin') && u.is_active !== false)
+    .forEach(u => {
+      const o = new Option(`${u.name} (${ROLE_LABEL_FULL[u.role] || u.role})`, u.id);
+      o.dataset.name = u.name;
+      if (u.id === selectedId) o.selected = true;
+      mgrEl.appendChild(o);
+    });
+}
+
+async function saveHq() {
+  const id      = document.getElementById('hq-edit-id').value;
+  const deptId  = document.getElementById('hq-dept-id').value || _selectedDeptId;
+  const hqName  = document.getElementById('hq-name-input').value.trim();
+  const mgrEl   = document.getElementById('hq-manager-input');
+  const mgrId   = mgrEl.value;
+  const mgrName = mgrId ? (mgrEl.options[mgrEl.selectedIndex]?.dataset.name || '') : '';
+
+  if (!hqName)  { Toast.warning('본부명을 입력하세요.'); return; }
+  if (!deptId)  { Toast.warning('사업부 정보가 없습니다. 사업부를 먼저 선택하세요.'); return; }
+
+  // 사업부명 조회
+  const depts   = await _getDepts();
+  const baseDept = depts.find(d => d.id === deptId);
+  const deptName = baseDept ? baseDept.department_name : _selectedDeptName;
+
   try {
-    await API.delete('cases', id);
-    Master.invalidate('cases');
-    Toast.success('삭제되었습니다.');
-    await loadCases();
-  } catch (err) { Toast.error('삭제 실패'); }
+    const data = {
+      hq_name:      hqName,
+      dept_id:      deptId,
+      dept_name:    deptName,
+      manager_id:   mgrId,
+      manager_name: mgrName,
+    };
+    if (id) {
+      await API.update('headquarters', id, data);
+      Toast.success('본부가 수정되었습니다.');
+    } else {
+      await API.create('headquarters', data);
+      Toast.success('본부가 추가되었습니다.');
+    }
+    closeModal('hqModal');
+    _hqCache = null;
+    // 현재 선택된 사업부의 본부 목록 갱신
+    if (_selectedDeptId) {
+      await loadHqList(_selectedDeptId, _selectedDeptName);
+    }
+  } catch (err) { Toast.error('저장 실패: ' + err.message); }
 }
-window.deleteCase = deleteCase;
 
-/* ══════════════════════════════════════════════
-   팀 관리
-══════════════════════════════════════════════ */
+async function deleteHq(id, hqName) {
+  if (!await Confirm.delete(hqName + ' 본부')) return;
+  try {
+    await API.delete('headquarters', id);
+    Toast.success('삭제되었습니다.');
+    _hqCache = null;
+    if (_selectedDeptId) {
+      await loadHqList(_selectedDeptId, _selectedDeptName);
+    }
+  } catch { Toast.error('삭제 실패'); }
+}
+
+// ─────────────────────────────────────────────
+// [2] 업무팀 관리 (master-teams)
+// ─────────────────────────────────────────────
+async function init_master_teams() {
+  _clearOrgCache();
+  await loadTeams();
+}
+
 async function loadTeams() {
-  const wrap = document.getElementById('ms-team-list');
-  if (!wrap) return;
-  wrap.innerHTML = _msSkeleton(3);
-
-  try {
-    const [teamR, userR] = await Promise.all([
-      API.list('teams', { limit: 100, sort: 'name' }),
-      API.list('users', { limit: 200 }),
-    ]);
-    const teams = teamR?.data ?? [];
-    const users = userR?.data ?? [];
-    const userMap = Object.fromEntries(users.map(u => [u.id, u.name]));
-
-    if (!teams.length) {
-      wrap.innerHTML = _msEmpty('등록된 팀이 없습니다.');
-      return;
-    }
-
-    wrap.innerHTML = `
-      <table style="width:100%;border-collapse:collapse;">
-        <thead>
-          <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0;">
-            <th style="padding:10px 12px;font-size:11px;color:#64748b;text-align:left;font-weight:600;">팀명</th>
-            <th style="padding:10px 12px;font-size:11px;color:#64748b;text-align:left;font-weight:600;">팀장</th>
-            <th style="padding:10px 12px;font-size:11px;color:#64748b;text-align:left;font-weight:600;">설명</th>
-            <th style="padding:10px 12px;font-size:11px;color:#64748b;text-align:center;font-weight:600;">관리</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${teams.map(t => `
-            <tr style="border-bottom:1px solid #f1f5f9;">
-              <td style="padding:10px 12px;font-size:13px;font-weight:600;color:#1e293b;">
-                <i class="fa-solid fa-people-group" style="color:#7c3aed;margin-right:6px;"></i>
-                ${Utils.escHtml(t.name)}
-              </td>
-              <td style="padding:10px 12px;font-size:12px;color:#64748b;">
-                ${Utils.escHtml(userMap[t.leader_id] || '-')}
-              </td>
-              <td style="padding:10px 12px;font-size:12px;color:#64748b;">
-                ${Utils.escHtml((t.description || '').slice(0, 40))}
-              </td>
-              <td style="padding:10px 12px;text-align:center;white-space:nowrap;">
-                <button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;"
-                  onclick="openTeamModal('${t.id}')">
-                  <i class="fa-solid fa-pen"></i> 수정
-                </button>
-                <button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;color:#dc2626;"
-                  onclick="deleteTeam('${t.id}','${Utils.escHtml(t.name)}')">
-                  <i class="fa-solid fa-trash"></i>
-                </button>
-              </td>
-            </tr>`).join('')}
-        </tbody>
-      </table>`;
-  } catch (err) {
-    wrap.innerHTML = _msError('팀 로드 실패');
+  Master.invalidate('teams');
+  const teams = await Master.teams();
+  const tbody = document.getElementById('teams-body');
+  if (!teams.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="table-empty">
+      <i class="fas fa-users-cog"></i>
+      <p>등록된 업무팀이 없습니다.</p>
+    </td></tr>`;
+    return;
   }
+  tbody.innerHTML = teams.map((t, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td><strong>${t.team_name}</strong></td>
+      <td style="font-size:12px;color:var(--text-secondary)">${t.dept_name || t.department_name || '-'}</td>
+      <td style="font-size:12px;color:var(--text-secondary)">${t.hq_name || '-'}</td>
+      <td style="font-size:12px;color:var(--text-muted)">${Utils.formatDate(t.created_at)}</td>
+      <td style="text-align:center">
+        <div style="display:flex;gap:6px;justify-content:center">
+          <button class="btn btn-sm btn-outline btn-icon"
+            onclick="openTeamModal('${t.id}')"><i class="fas fa-edit"></i></button>
+          <button class="btn btn-sm btn-danger btn-icon"
+            onclick="deleteTeam('${t.id}','${esc(t.team_name)}')"><i class="fas fa-trash"></i></button>
+        </div>
+      </td>
+    </tr>`).join('');
 }
-window.loadTeams = loadTeams;
 
-async function openTeamModal(id = null) {
-  const userR = await API.list('users', { limit: 200 });
-  const users = (userR?.data ?? []).filter(u => u.role === 'manager' || u.role === 'admin');
+async function openTeamModal(id = '') {
+  document.getElementById('team-edit-id').value        = id;
+  document.getElementById('team-name-input').value     = '';
+  document.getElementById('teamModalTitle').textContent = id ? '업무팀 수정' : '업무팀 추가';
 
-  let data = {};
+  // 사업부 드롭다운
+  const deptEl = document.getElementById('team-dept-input');
+  deptEl.innerHTML = '<option value="">사업부 선택</option>';
+  const depts = await _getDepts();
+  depts.forEach(d => {
+    const o = new Option(d.department_name, d.id);
+    o.dataset.name = d.department_name;
+    deptEl.appendChild(o);
+  });
+
+  // 본부 초기화
+  const hqEl = document.getElementById('team-hq-input');
+  hqEl.innerHTML = '<option value="">본부 선택 (사업부 먼저 선택)</option>';
+  hqEl.disabled = true;
+
   if (id) {
-    const r = await API.get('teams', id);
-    data = r?.data ?? r ?? {};
+    // Supabase REST API로 팀 정보 조회
+    const team = await API.get('teams', id);
+    if (team) {
+      document.getElementById('team-name-input').value = team.team_name || '';
+      const deptId = team.dept_id || '';
+      if (deptId) {
+        deptEl.value = deptId;
+        await _fillTeamHqSelect(deptId, team.hq_id || '');
+      }
+    }
   }
 
-  _openMsModal({
-    title: id ? '팀 수정' : '팀 추가',
-    fields: [
-      { key: 'name',        label: '팀명', type: 'text', required: true,  value: data.name || '' },
-      {
-        key: 'leader_id', label: '팀장', type: 'select', required: false,
-        value: data.leader_id || '',
-        options: [
-          { value: '', label: '팀장 선택' },
-          ...users.map(u => ({ value: u.id, label: u.name }))
-        ]
-      },
-      { key: 'description', label: '설명', type: 'textarea', required: false, value: data.description || '' },
-    ],
-    onSave: async (formData) => {
-      if (id) { await API.update('teams', id, formData); Toast.success('수정되었습니다.'); }
-      else     { await API.create('teams', formData);    Toast.success('추가되었습니다.'); }
-      await loadTeams();
-    }
+  openModal('teamModal');
+  setTimeout(() => document.getElementById('team-name-input').focus(), 120);
+}
+
+async function onTeamDeptChange() {
+  const deptEl = document.getElementById('team-dept-input');
+  await _fillTeamHqSelect(deptEl.value, '');
+}
+
+async function _fillTeamHqSelect(deptId, selectedHqId) {
+  const hqEl = document.getElementById('team-hq-input');
+  hqEl.innerHTML = '<option value="">본부 선택 (선택사항)</option>';
+  hqEl.disabled  = !deptId;
+  if (!deptId) return;
+
+  const hqs = await _getHqs();
+  hqs.filter(h => h.dept_id === deptId).forEach(h => {
+    const o = new Option(h.hq_name + (h.manager_name ? ` (${h.manager_name})` : ''), h.id);
+    o.dataset.hqName = h.hq_name;
+    if (h.id === selectedHqId) o.selected = true;
+    hqEl.appendChild(o);
   });
 }
-window.openTeamModal = openTeamModal;
+
+async function saveTeam() {
+  const id      = document.getElementById('team-edit-id').value;
+  const name    = document.getElementById('team-name-input').value.trim();
+  const deptEl  = document.getElementById('team-dept-input');
+  const deptId  = deptEl.value;
+  const deptNm  = deptEl.options[deptEl.selectedIndex]?.dataset.name || '';
+  const hqEl    = document.getElementById('team-hq-input');
+  const hqId    = hqEl.value;
+  const hqNm    = hqEl.options[hqEl.selectedIndex]?.dataset.hqName || '';
+
+  if (!name) { Toast.warning('업무팀명을 입력하세요.'); return; }
+
+  try {
+    const data = { team_name: name, dept_id: deptId, dept_name: deptNm, hq_id: hqId, hq_name: hqNm };
+    if (id) {
+      await API.update('teams', id, data);
+      Toast.success('업무팀이 수정되었습니다.');
+    } else {
+      await API.create('teams', data);
+      Toast.success('업무팀이 추가되었습니다.');
+    }
+    closeModal('teamModal');
+    Master.invalidate('teams');
+    await loadTeams();
+  } catch (err) { Toast.error('저장 실패: ' + err.message); }
+}
 
 async function deleteTeam(id, name) {
-  const ok = await Confirm.show({
-    title: '팀 삭제',
-    message: `"${name}" 팀을 삭제하시겠습니까?`,
-    confirmText: '삭제', confirmClass: 'btn-danger'
-  });
-  if (!ok) return;
+  if (!await Confirm.delete(name)) return;
   try {
     await API.delete('teams', id);
     Toast.success('삭제되었습니다.');
+    Master.invalidate('teams');
     await loadTeams();
-  } catch (err) { Toast.error('삭제 실패'); }
+  } catch { Toast.error('삭제 실패'); }
 }
-window.deleteTeam = deleteTeam;
-/* ══════════════════════════════════════════════
-   공통 모달 빌더
-══════════════════════════════════════════════ */
-function _openMsModal({ title, fields, onSave }) {
-  /* 기존 모달 제거 */
-  const existing = document.getElementById('_ms-modal');
-  if (existing) document.body.removeChild(existing);
 
-  const overlay = document.createElement('div');
-  overlay.id = '_ms-modal';
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+function openTeamUploadModal() { openModal('teamUploadModal'); }
 
-  const fieldsHtml = fields.map(f => {
-    let input = '';
-    if (f.type === 'text' || f.type === 'email' || f.type === 'date') {
-      input = `<input type="${f.type}" id="_ms-f-${f.key}"
-        class="form-control" value="${Utils.escHtml(String(f.value ?? ''))}"
-        ${f.required ? 'required' : ''} style="width:100%;box-sizing:border-box;">`;
-    } else if (f.type === 'number') {
-      input = `<input type="number" id="_ms-f-${f.key}"
-        class="form-control" value="${f.value ?? 0}"
-        style="width:100%;box-sizing:border-box;">`;
-    } else if (f.type === 'textarea') {
-      input = `<textarea id="_ms-f-${f.key}" class="form-control" rows="3"
-        style="width:100%;box-sizing:border-box;resize:vertical;">${Utils.escHtml(String(f.value ?? ''))}</textarea>`;
-    } else if (f.type === 'checkbox') {
-      input = `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-        <input type="checkbox" id="_ms-f-${f.key}" ${f.value ? 'checked' : ''}
-          style="width:16px;height:16px;">
-        <span style="font-size:13px;color:#334155;">활성화</span>
-      </label>`;
-    } else if (f.type === 'select') {
-      const opts = (f.options || []).map(o =>
-        `<option value="${Utils.escHtml(String(o.value))}" ${String(f.value) === String(o.value) ? 'selected' : ''}>
-          ${Utils.escHtml(o.label)}
-        </option>`).join('');
-      input = `<select id="_ms-f-${f.key}" class="form-control"
-        style="width:100%;box-sizing:border-box;">${opts}</select>`;
+async function uploadTeams() {
+  const file = document.getElementById('team-upload-file').files[0];
+  if (!file) { Toast.warning('파일을 선택하세요.'); return; }
+  try {
+    const data     = await Utils.parseExcel(file);
+    const existing = await Master.teams();
+    const existNames = new Set(existing.map(t => t.team_name));
+    let added = 0, skipped = 0;
+    for (const row of data) {
+      const name = String(row['팀명'] || Object.values(row)[0] || '').trim();
+      if (!name) continue;
+      if (existNames.has(name)) { skipped++; continue; }
+      await API.create('teams', { team_name: name });
+      added++;
     }
+    const result = document.getElementById('team-upload-result');
+    result.style.display = '';
+    result.innerHTML = `<i class="fas fa-check-circle"></i> 추가 ${added}건 완료 / 중복 스킵 ${skipped}건`;
+    Master.invalidate('teams');
+    await loadTeams();
+  } catch (err) { Toast.error('업로드 실패: ' + err.message); }
+}
 
-    return `<div class="form-group" style="margin-bottom:14px;">
-      <label class="form-label" style="font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;display:block;">
-        ${Utils.escHtml(f.label)}${f.required ? ' <span style="color:#dc2626;">*</span>' : ''}
-      </label>
-      ${input}
-    </div>`;
-  }).join('');
+async function downloadTeamTemplate() {
+  if (typeof XLSX === 'undefined') await LibLoader.load('xlsx');
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([['팀명'], ['예: 세무1팀'], ['예: 법무팀']]);
+  XLSX.utils.book_append_sheet(wb, ws, '팀목록');
+  await xlsxDownload(wb, '팀_업로드_양식.xlsx');
+}
 
-  overlay.innerHTML = `
-    <div style="background:#fff;border-radius:12px;padding:24px;width:480px;max-width:92vw;
-      max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.2);">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
-        <h3 style="font-size:16px;font-weight:700;color:#1e293b;margin:0;">${Utils.escHtml(title)}</h3>
-        <button id="_ms-close" style="background:none;border:none;font-size:20px;color:#94a3b8;cursor:pointer;padding:2px 6px;border-radius:4px;">✕</button>
-      </div>
-      <div id="_ms-form-body">${fieldsHtml}</div>
-      <div id="_ms-form-err" style="color:#dc2626;font-size:12px;margin-bottom:8px;display:none;"></div>
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;padding-top:14px;border-top:1px solid #f1f5f9;">
-        <button id="_ms-cancel" class="btn btn-outline">취소</button>
-        <button id="_ms-save"   class="btn btn-primary">
-          <i class="fa-solid fa-floppy-disk"></i> 저장
-        </button>
-      </div>
-    </div>`;
+// ─────────────────────────────────────────────
+// [3] 고객지원팀 관리 (master-csteams)
+// ─────────────────────────────────────────────
+async function init_master_csteams() {
+  _clearOrgCache();
+  await loadCsTeams();
+}
 
-  document.body.appendChild(overlay);
+async function loadCsTeams() {
+  const r     = await API.list('cs_teams', { limit: 200 });
+  const teams = (r && r.data) ? r.data : [];
+  const tbody = document.getElementById('csteams-body');
+  if (!teams.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="table-empty">
+      <i class="fas fa-headset"></i>
+      <p>등록된 고객지원팀이 없습니다.</p>
+    </td></tr>`;
+    return;
+  }
+  tbody.innerHTML = teams.map((t, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td><strong>${t.cs_team_name}</strong></td>
+      <td style="font-size:12px">${t.dept_name || '-'}</td>
+      <td style="font-size:12px;color:var(--text-secondary)">${t.hq_name || '-'}</td>
+      <td>${t.manager_name
+        ? `<span class="org-badge org-badge-green"><i class="fas fa-user-check" style="font-size:9px"></i> ${t.manager_name}</span>`
+        : `<span style="color:var(--text-muted);font-size:11px">미지정</span>`}
+      </td>
+      <td style="font-size:12px;color:var(--text-muted)">${Utils.formatDate(t.created_at)}</td>
+      <td style="text-align:center">
+        <div style="display:flex;gap:6px;justify-content:center">
+          <button class="btn btn-sm btn-outline btn-icon"
+            onclick="openCsTeamModal('${t.id}')"><i class="fas fa-edit"></i></button>
+          <button class="btn btn-sm btn-danger btn-icon"
+            onclick="deleteCsTeam('${t.id}','${esc(t.cs_team_name)}')"><i class="fas fa-trash"></i></button>
+        </div>
+      </td>
+    </tr>`).join('');
+}
 
-  /* 닫기 */
-  const close = () => { if (document.body.contains(overlay)) document.body.removeChild(overlay); };
-  overlay.querySelector('#_ms-close').onclick  = close;
-  overlay.querySelector('#_ms-cancel').onclick = close;
-  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+async function openCsTeamModal(id = '') {
+  document.getElementById('csteam-edit-id').value        = id;
+  document.getElementById('csteam-name-input').value     = '';
+  document.getElementById('csteam-desc-input').value     = '';
+  document.getElementById('csTeamModalTitle').textContent = id ? '고객지원팀 수정' : '고객지원팀 추가';
 
-  /* 저장 */
-  overlay.querySelector('#_ms-save').onclick = async () => {
-    const errEl  = overlay.querySelector('#_ms-form-err');
-    const saveBtn = overlay.querySelector('#_ms-save');
-    errEl.style.display = 'none';
-
-    /* 유효성 */
-    for (const f of fields) {
-      if (f.required && f.type !== 'checkbox') {
-        const el = overlay.querySelector(`#_ms-f-${f.key}`);
-        if (!el || !el.value.trim()) {
-          errEl.textContent = `"${f.label}" 항목을 입력하세요.`;
-          errEl.style.display = '';
-          el?.focus();
-          return;
-        }
-      }
-    }
-
-    /* 데이터 수집 */
-    const formData = {};
-    fields.forEach(f => {
-      const el = overlay.querySelector(`#_ms-f-${f.key}`);
-      if (!el) return;
-      if (f.type === 'checkbox') formData[f.key] = el.checked;
-      else if (f.type === 'number') formData[f.key] = Number(el.value) || 0;
-      else formData[f.key] = el.value.trim();
-    });
-
-    const restore = BtnLoading.start(saveBtn, '저장 중…');
-    try {
-      await onSave(formData);
-      close();
-    } catch (err) {
-      console.error('[master] 저장 오류:', err);
-      errEl.textContent = '저장 중 오류가 발생했습니다.';
-      errEl.style.display = '';
-    } finally {
-      restore();
-    }
-  };
-
-  /* Enter 키 저장 */
-  overlay.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
-      overlay.querySelector('#_ms-save').click();
-    }
-    if (e.key === 'Escape') close();
+  // 사업부 드롭다운
+  const deptEl = document.getElementById('csteam-dept-input');
+  deptEl.innerHTML = '<option value="">사업부 선택</option>';
+  const depts = await _getDepts();
+  depts.forEach(d => {
+    const o = new Option(d.department_name, d.id);
+    o.dataset.name = d.department_name;
+    deptEl.appendChild(o);
   });
 
-  /* 첫 번째 인풋 포커스 */
-  setTimeout(() => {
-    const first = overlay.querySelector('input,select,textarea');
-    if (first) first.focus();
-  }, 80);
-}
+  // 본부 초기화
+  const hqEl = document.getElementById('csteam-hq-input');
+  hqEl.innerHTML = '<option value="">본부 선택 (사업부 먼저 선택)</option>';
+  hqEl.disabled  = true;
 
-/* ══════════════════════════════════════════════
-   공통 헬퍼
-══════════════════════════════════════════════ */
-function _msSkeleton(n) {
-  return `<div style="display:flex;flex-direction:column;gap:10px;padding:12px;">
-    ${Array(n).fill(0).map(() => `
-      <div style="height:44px;background:linear-gradient(90deg,#f1f5f9 25%,#e2e8f0 50%,#f1f5f9 75%);
-        background-size:200% 100%;animation:arch-shimmer 1.4s infinite;border-radius:8px;"></div>
-    `).join('')}
-  </div>`;
-}
+  // 매니저 초기화
+  const mgrEl = document.getElementById('csteam-manager-input');
+  mgrEl.innerHTML = '<option value="">본부 선택 시 자동 연결</option>';
+  mgrEl.disabled  = true;
 
-function _msEmpty(msg) {
-  return `<div style="padding:48px;text-align:center;color:#94a3b8;font-size:13px;">
-    <i class="fa-solid fa-inbox" style="font-size:28px;display:block;margin-bottom:10px;opacity:0.4;"></i>
-    ${msg}
-  </div>`;
-}
-
-function _msError(msg) {
-  return `<div style="padding:24px;text-align:center;color:#dc2626;font-size:13px;">
-    <i class="fa-solid fa-triangle-exclamation"></i> ${msg}
-  </div>`;
-}
-
-/* ══════════════════════════════════════════════
-   Excel 가져오기 (고객사/사건)
-══════════════════════════════════════════════ */
-async function importMasterExcel(type) {
-  const input = document.createElement('input');
-  input.type  = 'file';
-  input.accept = '.xlsx,.xls';
-  input.onchange = async () => {
-    const file = input.files[0];
-    if (!file) return;
-    try {
-      const rows = await Utils.parseExcel(file);
-      if (!rows || rows.length < 2) { Toast.error('데이터가 없습니다.'); return; }
-
-      let success = 0;
-      for (const row of rows.slice(1)) {
-        if (!row[0]) continue;
-        if (type === 'client') {
-          await API.create('clients', {
-            name: String(row[0]).trim(),
-            code: String(row[1] || '').trim(),
-            contact_name:  String(row[2] || '').trim(),
-            contact_phone: String(row[3] || '').trim(),
-            contact_email: String(row[4] || '').trim(),
-            is_active: true,
-          });
-        } else if (type === 'case') {
-          await API.create('cases', {
-            name:       String(row[0]).trim(),
-            code:       String(row[1] || '').trim(),
-            start_date: String(row[2] || '').trim(),
-            end_date:   String(row[3] || '').trim(),
-            is_active:  true,
-          });
+  if (id) {
+    const team = await API.get('cs_teams', id);
+    if (team) {
+      document.getElementById('csteam-name-input').value = team.cs_team_name || '';
+      document.getElementById('csteam-desc-input').value = team.description  || '';
+      const deptId = team.dept_id || '';
+      if (deptId) {
+        deptEl.value = deptId;
+        await _fillCsTeamHqSelect(deptId, team.hq_id || '');
+        if (team.hq_id) {
+          await _fillCsTeamManagerByHq(team.hq_id, team.manager_id || '');
         }
-        success++;
       }
-      Master.invalidate(type === 'client' ? 'clients' : 'cases');
-      Toast.success(`${success}건 가져오기 완료`);
-      if (type === 'client') await loadClients();
-      else await loadCases();
-    } catch (err) {
-      Toast.error('가져오기 중 오류 발생');
     }
-  };
-  input.click();
-}
-window.importMasterExcel = importMasterExcel;
+  }
 
-/* ══════════════════════════════════════════════
-   외부 노출
-══════════════════════════════════════════════ */
-window.init_master          = init_master;
-window.loadClients          = loadClients;
-window.loadCategories       = loadCategories;
-window.loadCases            = loadCases;
-window.loadTeams            = loadTeams;
-window.openClientModal      = openClientModal;
-window.deleteClient         = deleteClient;
-window.openCategoryModal    = openCategoryModal;
-window.deleteCategory       = deleteCategory;
-window.openSubcategoryModal = openSubcategoryModal;
-window.deleteSubcategory    = deleteSubcategory;
-window.openCaseModal        = openCaseModal;
-window.deleteCase           = deleteCase;
-window.openTeamModal        = openTeamModal;
-window.deleteTeam           = deleteTeam;
-window.importMasterExcel    = importMasterExcel;
+  openModal('csTeamModal');
+  setTimeout(() => document.getElementById('csteam-name-input').focus(), 120);
+}
+
+async function onCsTeamDeptChange() {
+  const deptEl = document.getElementById('csteam-dept-input');
+  await _fillCsTeamHqSelect(deptEl.value, '');
+  // 매니저 초기화
+  const mgrEl = document.getElementById('csteam-manager-input');
+  mgrEl.innerHTML = '<option value="">본부 선택 시 자동 연결</option>';
+  mgrEl.disabled  = true;
+}
+
+async function onCsTeamHqChange() {
+  const hqEl = document.getElementById('csteam-hq-input');
+  await _fillCsTeamManagerByHq(hqEl.value, '');
+}
+
+async function _fillCsTeamHqSelect(deptId, selectedHqId) {
+  const hqEl    = document.getElementById('csteam-hq-input');
+  hqEl.innerHTML = '<option value="">본부 선택 (선택사항)</option>';
+  hqEl.disabled  = !deptId;
+  if (!deptId) return;
+
+  const hqs = await _getHqs();
+  hqs.filter(h => h.dept_id === deptId).forEach(h => {
+    const o = new Option(h.hq_name, h.id);
+    o.dataset.hqName     = h.hq_name;
+    o.dataset.managerId   = h.manager_id   || '';
+    o.dataset.managerName = h.manager_name || '';
+    if (h.id === selectedHqId) o.selected = true;
+    hqEl.appendChild(o);
+  });
+}
+
+async function _fillCsTeamManagerByHq(hqId, selectedMgrId) {
+  const mgrEl = document.getElementById('csteam-manager-input');
+
+  if (!hqId) {
+    mgrEl.innerHTML = '<option value="">본부 선택 시 자동 연결</option>';
+    mgrEl.disabled  = true;
+    return;
+  }
+
+  mgrEl.disabled  = false;
+
+  // 해당 본부의 본부장을 먼저 확인
+  const hqs    = await _getHqs();
+  const hqRow  = hqs.find(h => h.id === hqId);
+
+  // 전체 Manager/Director 목록 로드 ★ Master 캐시 사용
+  const allTeamMgrUsers = await Master.users();
+  const managers = allTeamMgrUsers.filter(u =>
+    (u.role === 'manager' || u.role === 'director') && u.is_active !== false
+  );
+
+  mgrEl.innerHTML = '<option value="">팀장 선택 (미지정)</option>';
+  managers.forEach(u => {
+    const o = new Option(`${u.name} (${ROLE_LABEL_FULL[u.role] || u.role})`, u.id);
+    o.dataset.name = u.name;
+    mgrEl.appendChild(o);
+  });
+
+  // 본부장 자동 선택
+  const autoId = (hqRow && hqRow.manager_id) ? hqRow.manager_id : selectedMgrId;
+  if (autoId) mgrEl.value = autoId;
+}
+
+async function saveCsTeam() {
+  const id     = document.getElementById('csteam-edit-id').value;
+  const name   = document.getElementById('csteam-name-input').value.trim();
+  const desc   = document.getElementById('csteam-desc-input').value.trim();
+  const deptEl = document.getElementById('csteam-dept-input');
+  const deptId = deptEl.value;
+  const deptNm = deptEl.options[deptEl.selectedIndex]?.dataset.name || '';
+  const hqEl   = document.getElementById('csteam-hq-input');
+  const hqId   = hqEl.value;
+  const hqNm   = hqEl.options[hqEl.selectedIndex]?.dataset.hqName || '';
+  const mgrEl  = document.getElementById('csteam-manager-input');
+  const mgrId  = mgrEl.disabled ? '' : mgrEl.value;
+  const mgrNm  = mgrId ? (mgrEl.options[mgrEl.selectedIndex]?.dataset.name || '') : '';
+
+  if (!name)   { Toast.warning('고객지원팀명을 입력하세요.'); return; }
+  if (!deptId) { Toast.warning('소속 사업부를 선택하세요.');  return; }
+
+  try {
+    const data = {
+      cs_team_name: name,
+      dept_id:      deptId,
+      dept_name:    deptNm,
+      hq_id:        hqId,
+      hq_name:      hqNm,
+      manager_id:   mgrId,
+      manager_name: mgrNm,
+      description:  desc,
+    };
+    if (id) {
+      await API.update('cs_teams', id, data);
+      Toast.success('고객지원팀이 수정되었습니다.');
+    } else {
+      await API.create('cs_teams', data);
+      Toast.success('고객지원팀이 추가되었습니다.');
+    }
+    closeModal('csTeamModal');
+    await loadCsTeams();
+  } catch (err) { Toast.error('저장 실패: ' + err.message); }
+}
+
+async function deleteCsTeam(id, name) {
+  if (!await Confirm.delete(name)) return;
+  try {
+    await API.delete('cs_teams', id);
+    Toast.success('삭제되었습니다.');
+    await loadCsTeams();
+  } catch { Toast.error('삭제 실패'); }
+}
+
+// ─────────────────────────────────────────────
+// [4] 고객사 관리 (master-clients)
+// ─────────────────────────────────────────────
+async function init_master_clients() {
+  const session = getSession();
+  if (!Auth.canManageRefData(session)) {
+    navigateTo('dashboard');
+    Toast.warning('고객사 관리 권한이 없습니다.');
+    return;
+  }
+  await loadClients();
+}
+
+async function loadClients() {
+  Master.invalidate('clients');
+  const clients = await Master.clients();
+  const tbody   = document.getElementById('clients-body');
+  if (!clients.length) {
+    tbody.innerHTML = `<tr><td colspan="4" class="table-empty"><i class="fas fa-building"></i><p>등록된 고객사가 없습니다.</p></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = clients.map((c, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td><strong>${c.company_name}</strong></td>
+      <td>${Utils.formatDate(c.created_at)}</td>
+      <td style="text-align:center">
+        <div style="display:flex;gap:6px;justify-content:center">
+          <button class="btn btn-sm btn-outline btn-icon"
+            onclick="openClientModal('${c.id}','${esc(c.company_name)}')"><i class="fas fa-edit"></i></button>
+          <button class="btn btn-sm btn-danger btn-icon"
+            onclick="deleteClient('${c.id}','${esc(c.company_name)}')"><i class="fas fa-trash"></i></button>
+        </div>
+      </td>
+    </tr>`).join('');
+}
+
+function openClientModal(id, name) {
+  id   = id   || '';
+  name = name || '';
+  document.getElementById('client-edit-id').value        = id;
+  document.getElementById('client-name-input').value     = name;
+  document.getElementById('clientModalTitle').textContent = id ? '고객사 수정' : '고객사 추가';
+  // 힌트 초기화
+  var hintEl = document.getElementById('client-name-hint');
+  if (hintEl) hintEl.style.display = 'none';
+  openModal('clientModal');
+  setTimeout(function() {
+    var inp = document.getElementById('client-name-input');
+    if (inp) inp.focus();
+  }, 100);
+}
+
+// ─────────────────────────────────────────────
+// 고객사명 정규화 (중복 비교용)
+// ─────────────────────────────────────────────
+function _normalizeClientName(name) {
+  return (name || '')
+    .replace(/\(\s*주\s*\)/gi, '')   // (주)
+    .replace(/\(\s*유\s*\)/gi, '')   // (유)
+    .replace(/\(\s*재\s*\)/gi, '')   // (재)
+    .replace(/\(\s*사\s*\)/gi, '')   // (사)
+    .replace(/㈜/g, '')
+    .replace(/㈔/g, '')
+    .replace(/주식회사/gi, '')
+    .replace(/[\s·\-_]/g, '')        // 공백·중간점·하이픈 제거
+    .toLowerCase();
+}
+
+// ─────────────────────────────────────────────
+// 유사 고객사 검색 (정규화 기반)
+// ─────────────────────────────────────────────
+function _findSimilarClients(name, existingClients, excludeId) {
+  const norm = _normalizeClientName(name);
+  if (!norm) return [];
+  return existingClients.filter(function(c) {
+    if (c.id === excludeId) return false;
+    var cNorm = _normalizeClientName(c.company_name);
+    return cNorm === norm || cNorm.includes(norm) || norm.includes(cNorm);
+  });
+}
+
+// ─────────────────────────────────────────────
+// 실시간 입력 힌트 (Phase 2)
+// ─────────────────────────────────────────────
+var _clientHintDebounce = null;
+async function _onClientNameInput() {
+  var input  = document.getElementById('client-name-input');
+  var hintEl = document.getElementById('client-name-hint');
+  if (!input || !hintEl) return;
+
+  var val = input.value.trim();
+  if (val.length < 2) { hintEl.style.display = 'none'; return; }
+
+  clearTimeout(_clientHintDebounce);
+  _clientHintDebounce = setTimeout(async function() {
+    try {
+      var existing = await Master.clients();
+      var editId   = document.getElementById('client-edit-id').value;
+      var similar  = _findSimilarClients(val, existing, editId);
+
+      if (!similar.length) { hintEl.style.display = 'none'; return; }
+
+      hintEl.style.display = 'block';
+      hintEl.innerHTML =
+        '<div style="display:flex;align-items:flex-start;gap:8px">' +
+        '<i class="fas fa-exclamation-triangle" style="color:#f59e0b;margin-top:2px;flex-shrink:0"></i>' +
+        '<div>' +
+        '<div style="font-weight:600;font-size:12px;color:#92400e;margin-bottom:4px">유사한 고객사가 이미 있습니다</div>' +
+        similar.map(function(c) {
+          return '<div style="font-size:12px;color:#78350f;padding:2px 0">' +
+            '<i class="fas fa-building" style="font-size:10px;margin-right:4px"></i>' +
+            '<strong>' + Utils.escHtml(c.company_name) + '</strong></div>';
+        }).join('') +
+        '<div style="font-size:11px;color:#b45309;margin-top:4px">다른 고객사라면 계속 저장하실 수 있습니다.</div>' +
+        '</div></div>';
+    } catch(e) { hintEl.style.display = 'none'; }
+  }, 350);
+}
+
+async function saveClient() {
+  const session = getSession();
+  if (!Auth.canManageRefData(session)) { Toast.warning('권한이 없습니다.'); return; }
+  const id   = document.getElementById('client-edit-id').value;
+  const name = document.getElementById('client-name-input').value.trim();
+  if (!name) { Toast.warning('고객사명을 입력하세요.'); return; }
+
+  // ── Phase 1: 중복 체크 ──────────────────────────────
+  try {
+    const existing = await Master.clients();
+    const similar  = _findSimilarClients(name, existing, id);
+
+    // 정규화 완전일치 → 즉시 차단
+    const normInput = _normalizeClientName(name);
+    const exact = similar.find(function(c) {
+      return _normalizeClientName(c.company_name) === normInput;
+    });
+    if (exact) {
+      Toast.warning('"' + exact.company_name + '"과(와) 동일한 고객사입니다. 중복 등록할 수 없습니다.');
+      document.getElementById('client-name-input').focus();
+      return;
+    }
+
+    // 유사일치 → 사용자 확인 후 저장
+    if (similar.length) {
+      const names = similar.map(function(c) { return '"' + c.company_name + '"'; }).join(', ');
+      const ok = await Confirm.show({
+        icon: '⚠️',
+        title: '유사한 고객사 존재',
+        desc: names + '와(과) 유사합니다.<br>다른 고객사라면 계속 저장하시겠습니까?',
+        confirmText: '계속 저장',
+        confirmClass: 'btn-warning'
+      });
+      if (!ok) return;
+    }
+  } catch(e) {
+    console.warn('client duplicate check error:', e);
+  }
+
+  // ── 저장 ────────────────────────────────────────────
+  try {
+    if (id) { await API.update('clients', id, { company_name: name }); Toast.success('수정되었습니다.'); }
+    else    { await API.create('clients', { company_name: name });       Toast.success('추가되었습니다.'); }
+    closeModal('clientModal');
+    Master.invalidate('clients');
+    await loadClients();
+  } catch { Toast.error('저장 실패'); }
+}
+
+async function deleteClient(id, name) {
+  const session = getSession();
+  if (!Auth.canManageRefData(session)) { Toast.warning('권한이 없습니다.'); return; }
+  if (!await Confirm.delete(name)) return;
+  try {
+    await API.delete('clients', id);
+    Toast.success('삭제되었습니다.');
+    Master.invalidate('clients');
+    await loadClients();
+  } catch { Toast.error('삭제 실패'); }
+}
+
+function openClientUploadModal() { openModal('clientUploadModal'); }
+
+async function uploadClients() {
+  const session = getSession();
+  if (!Auth.canManageRefData(session)) { Toast.warning('권한이 없습니다.'); return; }
+  const file = document.getElementById('client-upload-file').files[0];
+  if (!file) { Toast.warning('파일을 선택하세요.'); return; }
+
+  const btn = document.querySelector('#clientUploadModal .btn-primary');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 처리 중...'; }
+
+  try {
+    const data     = await Utils.parseExcel(file);
+    const existing = await Master.clients();
+
+    // ── Phase 3: 정규화 기반 중복 맵 구성 ──────────────
+    // key: 정규화된 이름, value: 원본 company_name
+    const normMap = {};
+    existing.forEach(function(c) {
+      normMap[_normalizeClientName(c.company_name)] = c.company_name;
+    });
+
+    let added = 0, skipped = 0, errors = 0;
+    const skipDetails = [];   // 중복 스킵된 항목 상세
+    const errorDetails = [];  // 오류 항목
+
+    for (const row of data) {
+      const name = String(row['고객사명'] || Object.values(row)[0] || '').trim();
+      if (!name) continue;
+
+      const normName = _normalizeClientName(name);
+
+      // 정규화 기준 중복 체크
+      if (normMap[normName]) {
+        skipped++;
+        skipDetails.push({ input: name, matched: normMap[normName] });
+        continue;
+      }
+
+      try {
+        await API.create('clients', { company_name: name });
+        // 새로 추가된 항목도 즉시 normMap에 반영 (같은 파일 내 중복 방지)
+        normMap[normName] = name;
+        added++;
+      } catch(e) {
+        errors++;
+        errorDetails.push(name);
+      }
+    }
+
+    // ── 결과 표시 ──────────────────────────────────────
+    const result = document.getElementById('client-upload-result');
+    result.style.display = '';
+
+    let html = '<div style="font-size:13px;line-height:1.8">';
+
+    if (added > 0) {
+      html += '<div style="color:#059669"><i class="fas fa-check-circle"></i> <strong>' + added + '건</strong> 추가 완료</div>';
+    }
+    if (skipped > 0) {
+      html += '<div style="color:#d97706;margin-top:4px"><i class="fas fa-minus-circle"></i> <strong>' + skipped + '건</strong> 중복 스킵';
+      if (skipDetails.length <= 5) {
+        skipDetails.forEach(function(d) {
+          var note = d.input !== d.matched ? ' (기존: ' + Utils.escHtml(d.matched) + ')' : '';
+          html += '<div style="font-size:11px;color:#92400e;padding-left:16px">· ' + Utils.escHtml(d.input) + note + '</div>';
+        });
+      } else {
+        html += '<div style="font-size:11px;color:#92400e;padding-left:16px">· ' + skipDetails.slice(0,3).map(function(d){ return Utils.escHtml(d.input); }).join(', ') + ' 외 ' + (skipDetails.length - 3) + '건</div>';
+      }
+      html += '</div>';
+    }
+    if (errors > 0) {
+      html += '<div style="color:#dc2626;margin-top:4px"><i class="fas fa-times-circle"></i> <strong>' + errors + '건</strong> 오류: ' + errorDetails.slice(0,3).map(Utils.escHtml).join(', ') + '</div>';
+    }
+    html += '</div>';
+    result.innerHTML = html;
+
+    Master.invalidate('clients');
+    await loadClients();
+  } catch (err) {
+    Toast.error('업로드 실패: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-upload"></i> 업로드'; }
+  }
+}
+
+async function downloadClientTemplate() {
+  if (typeof XLSX === 'undefined') await LibLoader.load('xlsx');
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([['고객사명'], ['예: ABC기업'], ['예: DEF법인']]);
+  XLSX.utils.book_append_sheet(wb, ws, '고객사목록');
+  await xlsxDownload(wb, '고객사_업로드_양식.xlsx');
+}
+
+// ─────────────────────────────────────────────
+// [5] 업무 카테고리 관리 (master-categories)
+// ─────────────────────────────────────────────
+async function init_master_categories() {
+  const session = getSession();
+  if (!Auth.canManageRefData(session)) {
+    navigateTo('dashboard');
+    Toast.warning('업무분류 관리 권한이 없습니다.');
+    return;
+  }
+  await loadCategories();
+}
+
+async function loadCategories() {
+  Master.invalidate('categories');
+  Master.invalidate('subcategories');
+  const [cats, subs] = await Promise.all([Master.categories(), Master.subcategories()]);
+  renderCategoryTree(cats, subs);
+}
+
+function renderCategoryTree(cats, subs) {
+  const tree = document.getElementById('category-tree');
+  if (!cats.length) {
+    tree.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-muted)">
+      <i class="fas fa-tags" style="font-size:32px;margin-bottom:12px;display:block"></i>
+      <p>등록된 카테고리가 없습니다.</p>
+    </div>`;
+    return;
+  }
+  tree.innerHTML = cats.map(cat => {
+    const catSubs  = subs.filter(s => s.category_id === cat.id);
+    const typeBadge = cat.category_type === 'client'
+      ? '<span class="badge badge-blue" style="font-size:10px">고객업무</span>'
+      : '<span class="badge badge-gray" style="font-size:10px">내부업무</span>';
+    return `
+      <div style="margin-bottom:12px;border:1px solid var(--border-light);border-radius:10px;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#f7f9fc;border-bottom:1px solid var(--border-light)">
+          <i class="fas fa-folder" style="color:var(--primary)"></i>
+          <strong style="font-size:14px">${cat.category_name}</strong>
+          ${typeBadge}
+          <span style="font-size:11px;color:var(--text-muted);margin-left:4px">소분류 ${catSubs.length}개</span>
+          <div style="margin-left:auto;display:flex;gap:6px">
+            <button class="btn btn-sm btn-primary btn-icon"
+              onclick="openSubcategoryModal('','','${cat.id}','${esc(cat.category_name)}',${catSubs.length+1})"
+              title="소분류 추가"><i class="fas fa-plus"></i></button>
+            <button class="btn btn-sm btn-ghost btn-icon"
+              onclick="openCategoryModal('${cat.id}','${esc(cat.category_name)}','${cat.category_type||'client'}',${cat.sort_order||0})"
+              title="수정"><i class="fas fa-edit" style="color:var(--text-secondary)"></i></button>
+            <button class="btn btn-sm btn-ghost btn-icon"
+              onclick="deleteCategory('${cat.id}','${esc(cat.category_name)}',${catSubs.length})"
+              title="삭제"><i class="fas fa-trash" style="color:var(--danger)"></i></button>
+          </div>
+        </div>
+        ${catSubs.length > 0
+          ? `<div style="padding:8px 12px">
+              ${catSubs.map(s => `
+                <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;"
+                     onmouseover="this.style.background='#f0f4f8'" onmouseout="this.style.background=''">
+                  <i class="fas fa-tag" style="color:var(--text-muted);font-size:12px;margin-left:16px"></i>
+                  <span style="font-size:13px">${s.sub_category_name}</span>
+                  <div style="margin-left:auto;display:flex;gap:4px">
+                    <button class="btn btn-sm btn-ghost btn-icon"
+                      onclick="openSubcategoryModal('${s.id}','${esc(s.sub_category_name)}','${cat.id}','',${s.sort_order||0})"
+                      title="수정"><i class="fas fa-edit" style="color:var(--text-secondary)"></i></button>
+                    <button class="btn btn-sm btn-ghost btn-icon"
+                      onclick="deleteSubcategory('${s.id}','${esc(s.sub_category_name)}')">
+                      <i class="fas fa-trash" style="color:var(--danger)"></i></button>
+                  </div>
+                </div>`).join('')}
+            </div>`
+          : `<div style="padding:12px 16px 12px 44px;color:var(--text-muted);font-size:12.5px">
+               소분류가 없습니다.
+               <button class="btn btn-sm btn-outline"
+                 onclick="openSubcategoryModal('','','${cat.id}','${esc(cat.category_name)}',1)"
+                 style="padding:3px 10px;font-size:12px">+ 추가</button>
+             </div>`}
+      </div>`;
+  }).join('');
+}
+
+function openCategoryModal(id='', name='', type='client', order=0) {
+  document.getElementById('category-edit-id').value        = id;
+  document.getElementById('category-name-input').value     = name;
+  document.getElementById('category-type-input').value     = type;
+  document.getElementById('category-order-input').value    = order;
+  document.getElementById('categoryModalTitle').textContent = id ? '대분류 수정' : '대분류 추가';
+  openModal('categoryModal');
+  setTimeout(() => document.getElementById('category-name-input').focus(), 100);
+}
+
+async function saveCategory() {
+  const session = getSession();
+  if (!Auth.canManageRefData(session)) { Toast.warning('권한이 없습니다.'); return; }
+  const id    = document.getElementById('category-edit-id').value;
+  const name  = document.getElementById('category-name-input').value.trim();
+  const type  = document.getElementById('category-type-input').value;
+  const order = parseInt(document.getElementById('category-order-input').value) || 0;
+  if (!name) { Toast.warning('대분류명을 입력하세요.'); return; }
+  try {
+    const data = { category_name: name, category_type: type, sort_order: order };
+    if (id) { await API.update('work_categories', id, data); Toast.success('수정되었습니다.'); }
+    else    { await API.create('work_categories', data);      Toast.success('추가되었습니다.'); }
+    closeModal('categoryModal');
+    await loadCategories();
+  } catch { Toast.error('저장 실패'); }
+}
+
+async function deleteCategory(id, name, subCount) {
+  const session = getSession();
+  if (!Auth.canManageRefData(session)) { Toast.warning('권한이 없습니다.'); return; }
+  if (subCount > 0) { Toast.warning(`소분류 ${subCount}개가 있습니다. 먼저 삭제해주세요.`); return; }
+  if (!await Confirm.delete(name)) return;
+  try {
+    await API.delete('work_categories', id);
+    Toast.success('삭제되었습니다.');
+    await loadCategories();
+  } catch { Toast.error('삭제 실패'); }
+}
+
+function openSubcategoryModal(id='', name='', parentId='', parentName='', order=0) {
+  document.getElementById('subcategory-edit-id').value     = id;
+  document.getElementById('subcategory-name-input').value  = name;
+  document.getElementById('subcategory-parent-id').value   = parentId;
+  document.getElementById('subcategory-order-input').value = order;
+  document.getElementById('subcategoryModalTitle').textContent =
+    (id ? '소분류 수정' : '소분류 추가') + (parentName ? ` — ${parentName}` : '');
+  openModal('subcategoryModal');
+  setTimeout(() => document.getElementById('subcategory-name-input').focus(), 100);
+}
+
+async function saveSubcategory() {
+  const session = getSession();
+  if (!Auth.canManageRefData(session)) { Toast.warning('권한이 없습니다.'); return; }
+  const id       = document.getElementById('subcategory-edit-id').value;
+  const name     = document.getElementById('subcategory-name-input').value.trim();
+  const parentId = document.getElementById('subcategory-parent-id').value;
+  const order    = parseInt(document.getElementById('subcategory-order-input').value) || 0;
+  if (!name)     { Toast.warning('소분류명을 입력하세요.'); return; }
+  if (!parentId) { Toast.warning('대분류 정보가 없습니다.'); return; }
+  try {
+    const data = { category_id: parentId, sub_category_name: name, sort_order: order };
+    if (id) { await API.update('work_subcategories', id, data); Toast.success('수정되었습니다.'); }
+    else    { await API.create('work_subcategories', data);      Toast.success('추가되었습니다.'); }
+    closeModal('subcategoryModal');
+    await loadCategories();
+  } catch { Toast.error('저장 실패'); }
+}
+
+async function deleteSubcategory(id, name) {
+  const session = getSession();
+  if (!Auth.canManageRefData(session)) { Toast.warning('권한이 없습니다.'); return; }
+  if (!await Confirm.delete(name)) return;
+  try {
+    await API.delete('work_subcategories', id);
+    Toast.success('삭제되었습니다.');
+    await loadCategories();
+  } catch { Toast.error('삭제 실패'); }
+}
+
+function openCategoryUploadModal() { openModal('categoryUploadModal'); }
+
+async function uploadCategories() {
+  const file = document.getElementById('category-upload-file').files[0];
+  if (!file) { Toast.warning('파일을 선택하세요.'); return; }
+  try {
+    const data     = await Utils.parseExcel(file);
+    const existing = await Master.categories();
+    const existSubs = await Master.subcategories();
+    const catNameMap = {};
+    existing.forEach(c => { catNameMap[c.category_name] = c.id; });
+    const existSubSet = new Set(existSubs.map(s => `${s.category_id}::${s.sub_category_name}`));
+    let added = 0, skipped = 0, order = existing.length;
+    for (const row of data) {
+      const catName = String(row['대분류'] || Object.values(row)[0] || '').trim();
+      const subName = String(row['소분류'] || Object.values(row)[1] || '').trim();
+      const typeRaw = String(row['유형']   || Object.values(row)[2] || 'client').trim().toLowerCase();
+      const catType = typeRaw === 'internal' ? 'internal' : 'client';
+      if (!catName) continue;
+      if (!catNameMap[catName]) {
+        const r = await API.create('work_categories', { category_name: catName, category_type: catType, sort_order: order++ });
+        catNameMap[catName] = r.id;
+        added++;
+      }
+      if (subName) {
+        const key = `${catNameMap[catName]}::${subName}`;
+        if (existSubSet.has(key)) { skipped++; continue; }
+        await API.create('work_subcategories', { category_id: catNameMap[catName], sub_category_name: subName, sort_order: 0 });
+        existSubSet.add(key);
+        added++;
+      }
+    }
+    const result = document.getElementById('category-upload-result');
+    result.style.display = '';
+    result.innerHTML = `<i class="fas fa-check-circle"></i> 추가 ${added}건 완료 / 중복 스킵 ${skipped}건`;
+    await loadCategories();
+  } catch (err) { Toast.error('업로드 실패: ' + err.message); }
+}
+
+async function downloadCategoryTemplate() {
+  if (typeof XLSX === 'undefined') await LibLoader.load('xlsx');
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([
+    ['대분류', '소분류', '유형(client/internal)'],
+    ['세무자문', '세무조사 대응', 'client'],
+    ['세무자문', '세금신고서 검토', 'client'],
+    ['법률자문', '계약서 검토', 'client'],
+    ['내부업무', '팀 내부회의', 'internal'],
+  ]);
+  XLSX.utils.book_append_sheet(wb, ws, '카테고리');
+  xlsxDownload(wb, '업무카테고리_업로드_양식.xlsx');
+}
+
+// ─────────────────────────────────────────────
+// 유틸: HTML 특수문자 이스케이프 (인라인 이벤트용)
+// ─────────────────────────────────────────────
+function esc(str) {
+  return (str || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
