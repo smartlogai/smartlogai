@@ -312,13 +312,13 @@ const PAGE_INIT_MAP = {
 // Settings 메뉴(master-*, users) 진입 시에만 동적 로드 (초기 81KB 절감)
 // ─────────────────────────────────────────────
 const _LAZY_SCRIPTS = {
-  'master-teams'      : 'js/master.js?v=20260331l',
-  'master-clients'    : 'js/master.js?v=20260331l',
-  'master-categories' : 'js/master.js?v=20260331l',
-  'master-org'        : 'js/master.js?v=20260331l',
-  'master-departments': 'js/master.js?v=20260331l',
-  'master-csteams'    : 'js/master.js?v=20260331l',
-  'users'             : 'js/users.js?v=20260331l',
+  'master-teams'      : 'js/master.js?v=20260405b',
+  'master-clients'    : 'js/master.js?v=20260405b',
+  'master-categories' : 'js/master.js?v=20260405b',
+  'master-org'        : 'js/master.js?v=20260405b',
+  'master-departments': 'js/master.js?v=20260405b',
+  'master-csteams'    : 'js/master.js?v=20260405b',
+  'users'             : 'js/users.js?v=20260405b',
 };
 const _lazyLoaded = {};  // 이미 로드된 파일 추적
 
