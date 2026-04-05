@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>자문자료실 업무분류 진단</title>
+  <style>
+    body { font-family: 'Malgun Gothic', sans-serif; background: #f1f5f9; margin: 0; padding: 20px; }
+    h2 { color: #1e293b; margin-bottom: 4px; }
+    .sub { color: #64748b; font-size: 13px; margin-bottom: 20px; }
+    .card { background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    .card h3 { margin: 0 0 12px; font-size: 14px; color: #475569; display: flex; align-items: center; gap: 6px; }
+    .step { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+    .step:last-child { border-bottom: none; }
+    .badge { display: inline-block; min-width: 22px; height: 22px; border-radius: 50%; text-align: center; line-height: 22px; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+    .badge.wait  { background: #e2e8f0; color: #94a3b8; }
+    .badge.ok    { background: #dcfce7; color: #16a34a; }
+    .badge.err   { background: #fee2e2; color: #dc2626; }
+    .badge.run   { background: #dbeafe; color: #2563eb; }
+    .step-txt { flex: 1; line-height: 1.5; }
+    .step-txt strong { color: #1e293b; }
+    .step-txt .detail { color: #64748b; font-size: 12px; margin-top: 2px; word-break: break-all; }
+    .step-txt .detail.red { color: #dc2626; font-weight: 600; }
+    .step-txt .detail.green { color: #16a34a; font-weight: 600; }
+    .btn { display: inline-block; padding: 12px 28px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; margin-bottom: 20px; }
+    .btn:hover { background: #1d4ed8; }
+    .btn:disabled { background: #94a3b8; cursor: not-allowed; }
+    .result-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; font-size: 12px; color: #475569; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; margin-top: 8px; }
+    .final { padding: 16px; border-radius: 10px; font-size: 14px; font-weight: 600; margin-top: 8px; }
+    .final.ok  { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
+    .final.err { background: #fee2e2; color: #dc2626; border: 1px solid #fecaca; }
+    .final.wait { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
+  </style>
+</head>
+<body>
+<h2>🔍 자문자료실 업무분류 드롭다운 진단</h2>
+<p class="sub">DB 연결부터 소분류 매핑까지 단계별로 확인합니다.</p>
+<button class="btn" id="btnRun" onclick="runDiag()">▶ 진단 시작</button>
+<div class="card">
+  <h3>📋 진단 단계</h3>
+  <div id="steps">
+    <div class="step"><span class="badge wait" id="b1">1</span><div class="step-txt"><strong>Supabase API 연결 확인</strong><div class="detail" id="d1">대기 중...</div></div></div>
+    <div class="step"><span class="badge wait" id="b2">2</span><div class="step-txt"><strong>work_categories 테이블 조회</strong><div class="detail" id="d2">대기 중...</div></div></div>
+    <div class="step"><span class="badge wait" id="b3">3</span><div class="step-txt"><strong>'일반자문업무' 대분류 찾기</strong><div class="detail" id="d3">대기 중...</div></div></div>
+    <div class="step"><span class="badge wait" id="b4">4</span><div class="step-txt"><strong>work_subcategories 테이블 조회</strong><div class="detail" id="d4">대기 중...</div></div></div>
+    <div class="step"><span class="badge wait" id="b5">5</span><div class="step-txt"><strong>일반자문업무 소분류 필터링</strong><div class="detail" id="d5">대기 중...</div></div></div>
+    <div class="step"><span class="badge wait" id="b6">6</span><div class="step-txt"><strong>드롭다운 옵션 최종 결과</strong><div class="detail" id="d6">대기 중...</div></div></div>
+  </div>
+</div>
+<div class="card" id="catCard" style="display:none">
+  <h3>📂 전체 대분류 목록 (DB)</h3>
+  <div class="result-box" id="catList"></div>
+</div>
+<div class="card" id="subCard" style="display:none">
+  <h3>📂 전체 소분류 목록 (DB)</h3>
+  <div class="result-box" id="subList"></div>
+</div>
+<div id="finalBox" class="final wait">진단을 시작하려면 위 버튼을 클릭하세요.</div>
+<script>
+const SUPABASE_URL = 'https://dvjagzcqdgolspyngtxj.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR2amFnemNxZGdvbHNweW5ndHhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDMxMjI0OTQsImV4cCI6MjA1ODY5ODQ5NH0.x8omtRKEXBGhtxSq7-PJGV_dFMGjxEGBDMg4-P9vvs4';
+function setStep(n,status,msg,detail=''){
+  const b=document.getElementById('b'+n), d=document.getElementById('d'+n);
+  b.className='badge '+status;
+  b.textContent=status==='ok'?'✓':status==='err'?'✗':status==='run'?'…':n;
+  d.innerHTML=msg+(detail?`<br><span class="detail ${status==='err'?'red':'green'}">${detail}</span>`:'');
+}
+async function apiList(table,limit=200){
+  const url=`${SUPABASE_URL}/rest/v1/${table}?select=*&limit=${limit}&offset=0`;
+  const res=await fetch(url,{headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Prefer':'count=exact'}});
+  const total=res.headers.get('Content-Range')?.split('/')[1]||'?';
+  if(!res.ok){const txt=await res.text();throw new Error(`HTTP ${res.status} - ${txt}`);}
+  return{data:await res.json(),total};
+}
+async function runDiag(){
+  document.getElementById('btnRun').disabled=true;
+  document.getElementById('finalBox').className='final wait';
+  document.getElementById('finalBox').textContent='진단 중...';
+  setStep(1,'run','Supabase 연결 테스트 중...');
+  try{
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/work_categories?select=id&limit=1`,{headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY}});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    setStep(1,'ok','Supabase API 연결 성공',`HTTP ${r.status}`);
+  }catch(e){
+    setStep(1,'err','API 연결 실패',e.message);
+    document.getElementById('finalBox').className='final err';
+    document.getElementById('finalBox').textContent='❌ Supabase API 연결 실패: '+e.message;
+    document.getElementById('btnRun').disabled=false; return;
+  }
+  setStep(2,'run','work_categories 조회 중...');
+  let cats=[];
+  try{
+    const r=await apiList('work_categories',200);
+    cats=r.data||[];
+    setStep(2,'ok',`대분류 ${cats.length}개 조회 성공`,`총 ${r.total}건`);
+    document.getElementById('catCard').style.display='';
+    document.getElementById('catList').textContent=cats.map((c,i)=>`[${i+1}] id: ${c.id}\n    category_name: "${c.category_name}"\n    deleted: ${c.deleted}`).join('\n\n');
+  }catch(e){
+    setStep(2,'err','work_categories 조회 실패',e.message);
+    document.getElementById('finalBox').className='final err';
+    document.getElementById('finalBox').textContent='❌ work_categories 조회 실패: '+e.message;
+    document.getElementById('btnRun').disabled=false; return;
+  }
+  setStep(3,'run',"대분류 중 '일반자문업무' 검색 중...");
+  const target=cats.find(c=>c.category_name==='일반자문업무');
+  if(!target){
+    const names=cats.map(c=>`"${c.category_name}"`).join(', ');
+    setStep(3,'err',"❌ '일반자문업무'를 찾을 수 없음",`실제 대분류명: ${names}`);
+    document.getElementById('finalBox').className='final err';
+    document.getElementById('finalBox').innerHTML=`❌ DB에 '일반자문업무' 대분류가 없습니다.<br>실제 등록된 대분류명: <strong>${names}</strong>`;
+    document.getElementById('btnRun').disabled=false; return;
+  }
+  setStep(3,'ok',`'일반자문업무' 찾기 성공`,`id: ${target.id}`);
+  setStep(4,'run','work_subcategories 조회 중...');
+  let subs=[];
+  try{
+    const r=await apiList('work_subcategories',500);
+    subs=r.data||[];
+    setStep(4,'ok',`소분류 ${subs.length}개 조회 성공`,`총 ${r.total}건`);
+    document.getElementById('subCard').style.display='';
+    document.getElementById('subList').textContent=subs.map((s,i)=>`[${i+1}] sub_category_name: "${s.sub_category_name}"\n    category_id: "${s.category_id}"\n    sort_order: ${s.sort_order}`).join('\n\n');
+  }catch(e){
+    setStep(4,'err','work_subcategories 조회 실패',e.message);
+    document.getElementById('finalBox').className='final err';
+    document.getElementById('finalBox').textContent='❌ work_subcategories 조회 실패: '+e.message;
+    document.getElementById('btnRun').disabled=false; return;
+  }
+  setStep(5,'run',`category_id = '${target.id}' 로 필터링 중...`);
+  const filtered=subs.filter(s=>s.category_id===target.id).sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+  if(!filtered.length){
+    const sampleIds=[...new Set(subs.map(s=>s.category_id))].slice(0,5);
+    setStep(5,'err','❌ 매칭되는 소분류 없음',`target.id="${target.id}" / DB category_id 샘플: ${sampleIds.map(x=>`"${x}"`).join(', ')}`);
+    document.getElementById('finalBox').className='final err';
+    document.getElementById('finalBox').innerHTML=`❌ <strong>category_id 불일치</strong><br>일반자문업무 id: <code>${target.id}</code><br>소분류의 category_id 값이 다릅니다.`;
+    document.getElementById('btnRun').disabled=false; return;
+  }
+  setStep(5,'ok',`${filtered.length}개 소분류 매칭 성공`,filtered.map(s=>`"${s.sub_category_name}"`).join(', '));
+  setStep(6,'ok','드롭다운 옵션 정상 생성 가능',`${filtered.length}개: `+filtered.map(s=>s.sub_category_name).join(' / '));
+  document.getElementById('finalBox').className='final ok';
+  document.getElementById('finalBox').innerHTML=`✅ DB 연동 정상! 드롭다운 소분류 ${filtered.length}개:<br><br>`+filtered.map((s,i)=>`${i+1}. ${s.sub_category_name}`).join('<br>');
+  document.getElementById('btnRun').disabled=false;
+}
+</script>
+</body>
+</html>
