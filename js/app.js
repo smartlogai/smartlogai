@@ -226,7 +226,7 @@ const API = {
     const offset = (page - 1) * limit;
     const search = params.search || '';
 
-    let url = `${SUPABASE_URL}/rest/v1/${table}?limit=${limit}&offset=${offset}`;
+    let url = `${SUPABASE_URL}/rest/v1/${table}?select=*&limit=${limit}&offset=${offset}`;
 
     // 검색어 처리 (간단 텍스트 검색)
     if (search) {
