@@ -1919,8 +1919,8 @@ async function saveArchiveRecord() {
     sender_name:          session.name,
     sender_email:         session.email || '',
     recipients:           '',
-    sent_at:              todayStr,
-    client_id:            '',
+        sent_at:              Date.now(),
+    client_id:            null,
     client_name:          '',
     work_category:        catName,
     work_subcategory:     subcatVal,
@@ -1968,8 +1968,8 @@ async function saveArchiveRecord() {
     restoreBtn(); restoreClose();
     Toast.success('✅ 자문 자료가 등록되었습니다.');
     closeModal('archiveNewModal');
-    loadArchiveList();
-      } catch(e) {
+        loadArchiveList();
+  } catch(e) {
     restoreBtn(); restoreClose();
     console.error('saveArchiveRecord error', e);
     const msg = e?.message || '알 수 없는 오류';
