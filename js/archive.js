@@ -1936,7 +1936,8 @@ async function saveArchiveRecord() {
     archive_note:         '',
     is_template:          document.getElementById('archive-is-template')?.checked || false,
     source_type:          'manual',
-    registered_by_id:     session.id,
+    registered_by_id:     String(session.id ?? ''),
+
     registered_by_name:   session.name,
     status:               'active',
     view_count:           0,
