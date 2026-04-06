@@ -287,10 +287,16 @@ const API = {
       method: 'POST',
       body:   JSON.stringify(payload),
     });
-    // 배열로 반환되면 첫 번째 항목
-    if (Array.isArray(result)) return result[0];
+        // 배열로 반환되면 첫 번째 항목
+    if (Array.isArray(result) && result.length > 0) return result[0];
+    // RLS 또는 return=representation 미지원 시 빈 배열 반환 → null 처리
+    if (Array.isArray(result) && result.length === 0) {
+      console.warn(`[API.create] ${table}: 응답 빈 배열 (RLS 또는 Prefer 미지원). null 반환.`);
+      return null;
+    }
     return result;
   },
+
 
   // 전체 수정 (PUT → PATCH로 처리)
   async update(table, id, data) {
