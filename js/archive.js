@@ -2339,9 +2339,7 @@ async function deleteArchive(refId) {
   // ── 삭제 실행 ──────────────────────────────────────
   try {
     await API.patch('mail_references', refId, {
-      status: 'hidden',
-      deleted_by: _session.name,
-      deleted_at: Date.now()
+      status: 'hidden',      
     });
     Cache.invalidate('ref_search_index_list');
     closeModal('archiveDetailModal');
