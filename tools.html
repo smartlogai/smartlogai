@@ -1,263 +1,219 @@
 <!DOCTYPE html>
-     2	<html lang="ko">
-     3	<head>
-     4	<meta charset="UTF-8"/>
-     5	<meta name="viewport" content="width=device-width,initial-scale=1"/>
-     6	<title>SmartLog Tools</title>
-     7	<style>
-     8	*{box-sizing:border-box;margin:0;padding:0}
-     9	body{font-family:'Segoe UI',sans-serif;background:#0d1117;color:#c9d1d9;padding:20px}
-    10	h1{font-size:20px;color:#f0f6fc;margin-bottom:4px}
-    11	.sub{font-size:12px;color:#8b949e;margin-bottom:20px}
-    12	.card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:18px;margin-bottom:16px}
-    13	.ct{font-size:13px;font-weight:700;color:#f0f6fc;margin-bottom:12px}
-    14	label{font-size:11px;color:#8b949e;display:block;margin-bottom:4px}
-    15	input,textarea{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#c9d1d9;padding:8px 10px;font-size:12px;outline:none;margin-bottom:10px;font-family:inherit}
-    16	input:focus,textarea:focus{border-color:#388bfd}
-    17	textarea{font-family:'Consolas','Courier New',monospace;resize:vertical}
-    18	.row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
-    19	.btn{padding:8px 16px;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer}
-    20	.g{background:#238636;color:#fff}.g:hover{background:#2ea043}
-    21	.b{background:#1f6feb;color:#fff}.b:hover{background:#388bfd}
-    22	.s{background:#21262d;color:#c9d1d9;border:1px solid #30363d}.s:hover{background:#30363d}
-    23	.ok{color:#3fb950}.er{color:#f85149}.wn{color:#d29922}.in{color:#58a6ff}.gr{color:#6e7681}
-    24	.ok-b{background:#0d2a16;border:1px solid #238636;color:#3fb950;border-radius:6px;padding:10px 12px;font-size:12px;margin-bottom:12px;line-height:1.6}
-    25	#log{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px;font-family:monospace;font-size:11px;line-height:1.8;min-height:60px;max-height:250px;overflow-y:auto;margin-top:10px}
-    26	.tabs{display:flex;gap:0;border-bottom:1px solid #30363d;margin-bottom:0}
-    27	.tab{padding:8px 16px;background:transparent;border:1px solid transparent;border-bottom:none;border-radius:6px 6px 0 0;font-size:12px;font-weight:600;cursor:pointer;color:#8b949e;position:relative;bottom:-1px}
-    28	.tab.on{background:#161b22;border-color:#30363d;color:#f0f6fc}
-    29	.pane{display:none}.pane.on{display:block}
-    30	.file-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:12px}
-    31	.fi{border:2px solid #30363d;border-radius:7px;padding:9px 11px;cursor:pointer;background:#0d1117;transition:.12s}
-    32	.fi:hover{border-color:#388bfd}
-    33	.fi.on{border-color:#3fb950;background:#061a0e}
-    34	.fi.done{border-color:#3fb950;background:#061a0e;opacity:.6}
-    35	.fi.run{border-color:#d29922;background:#1a1300}
-    36	.fi.fail{border-color:#f85149;background:#1c0507}
-    37	.fn{font-size:11px;font-weight:700;color:#f0f6fc;margin-bottom:2px}
-    38	.fd{font-size:10px;color:#8b949e}
-    39	.fi.on .fd,.fi.done .fd{color:#3fb950}
-    40	.fi.run .fd{color:#d29922}
-    41	.fi.fail .fd{color:#f85149}
-    42	.prog{width:100%;height:4px;background:#21262d;border-radius:2px;overflow:hidden;margin:8px 0}
-    43	.pf{height:100%;background:linear-gradient(90deg,#238636,#3fb950);width:0%;transition:width .3s}
-    44	</style>
-    45	</head>
-    46	<body>
-    47	<h1>🛠 SmartLog AI — Tools</h1>
-    48	<p class="sub">GitHub API 기반 | 서버 캐시 완전 우회</p>
-    49	
-    50	<div class="tabs">
-    51	  <button class="tab on" onclick="sw(0)">✏️ 파일 편집 Push</button>
-    52	  <button class="tab" onclick="sw(1)">📦 일괄 Push</button>
-    53	</div>
-    54	
-    55	<!-- ═══ TAB 0: 직접 편집 ═══ -->
-    56	<div class="pane on" id="p0">
-    57	<div class="card" style="border-radius:0 10px 10px 10px">
-    58	  <div class="ct">✏️ GitHub 직접 편집 Push <span style="color:#3fb950;font-weight:400;font-size:11px">— 서버 캐시 완전 무관</span></div>
-    59	  <div class="ok-b">✅ GitHub API로 파일을 읽고 → 수정 → GitHub API로 Push합니다.<br>Genspark·Netlify 캐시와 완전히 무관합니다.</div>
-    60	  <label>PAT (repo 권한 필요)</label>
-    61	  <input type="password" id="tok" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"/>
-    62	  <label>저장소</label>
-    63	  <input id="repo" value="smartlogai/smartlogai"/>
-    64	  <label>브랜치</label>
-    65	  <input id="br" value="main"/>
-    66	  <hr style="border:none;border-top:1px solid #30363d;margin:4px 0 12px"/>
-    67	  <label>파일 경로</label>
-    68	  <input id="fp" placeholder="js/archive.js"/>
-    69	  <div class="row">
-    70	    <button class="btn b" onclick="qs('js/app.js')">⭐ app.js</button>
-    71	    <button class="btn b" onclick="qs('js/archive.js')">archive.js</button>
-    72	    <button class="btn b" onclick="qs('main.html')">main.html</button>
-    73	    <button class="btn b" onclick="qs('archive-debug.html')">debug.html</button>
-    74	    <button class="btn b" onclick="qs('tools.html')">tools.html</button>
-    75	  </div>
-    76	  <button class="btn b" onclick="ghLoad()" style="width:100%;margin-bottom:10px">📥 GitHub에서 현재 내용 불러오기</button>
-    77	  <label>커밋 메시지</label>
-    78	  <input id="cm" placeholder="fix: 파일 수정"/>
-    79	  <label>파일 내용 <span style="color:#3fb950;font-size:10px">(불러온 후 수정하세요)</span></label>
-    80	  <textarea id="fc" style="height:260px" placeholder="위 버튼으로 불러오거나 직접 붙여넣기..."></textarea>
-    81	  <div class="row">
-    82	    <button class="btn g" onclick="ghPush()">🚀 이 내용으로 GitHub Push</button>
-    83	    <button class="btn s" onclick="document.getElementById('fc').value=''">지우기</button>
-    84	  </div>
-    85	  <div id="log"><span class="gr">// 결과 대기 중</span></div>
-    86	</div>
-    87	</div>
-    88	
-    89	<!-- ═══ TAB 1: 일괄 Push ═══ -->
-    90	<div class="pane" id="p1">
-    91	<div class="card" style="border-radius:0 10px 10px 10px">
-    92	  <div class="ct">📦 파일 일괄 Push</div>
-    93	  <div id="domBanner" style="background:#0c2d6b;border:1px solid #1f6feb;color:#79c0ff;border-radius:6px;padding:10px 12px;font-size:12px;margin-bottom:12px">🔍 도메인 확인 중...</div>
-    94	  <label>PAT</label>
-    95	  <input type="password" id="tok2" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"/>
-    96	  <label>저장소</label>
-    97	  <input id="repo2" value="smartlogai/smartlogai"/>
-    98	  <label>브랜치</label>
-    99	  <input id="br2" value="main"/>
-   100	  <label>커밋 메시지</label>
-   101	  <input id="cm2" value="fix: archive.js DB연동 최신화"/>
-   102	  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12px">
-   103	    <input type="checkbox" id="ac" onchange="allTog(this.checked)" style="width:auto;margin:0"/>
-   104	    <label for="ac" style="margin:0;cursor:pointer;color:#c9d1d9">전체 선택/해제</label>
-   105	  </div>
-   106	  <div class="file-grid" id="fg"></div>
-   107	  <div class="prog"><div class="pf" id="pf"></div></div>
-   108	  <div class="row">
-   109	    <button class="btn g" id="pb" onclick="bPush()">🚀 GitHub Push</button>
-   110	    <button class="btn s" onclick="bVerify()">🔑 토큰 검증</button>
-   111	  </div>
-   112	  <div id="log2"><span class="gr">// 로그 대기 중</span></div>
-   113	</div>
-   114	</div>
-   115	
-   116	<script>
-   117	function sw(n){
-   118	  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('on',i===n));
-   119	  document.querySelectorAll('.pane').forEach((p,i)=>p.classList.toggle('on',i===n));
-   120	  const a=document.getElementById('tok').value,b=document.getElementById('tok2').value;
-   121	  if(a&&!b)document.getElementById('tok2').value=a;
-   122	  if(b&&!a)document.getElementById('tok').value=b;
-   123	}
-   124	
-   125	// ─ 직접 편집 ─
-   126	function c1(){return{tok:document.getElementById('tok').value.trim(),repo:document.getElementById('repo').value.trim(),br:document.getElementById('br').value.trim()||'main'};}
-   127	function qs(p){document.getElementById('fp').value=p;ghLoad();}
-   128	function eL(m,c='in'){
-   129	  const b=document.getElementById('log');
-   130	  if(b.innerHTML.includes('대기'))b.innerHTML='';
-   131	  b.innerHTML+=`<span class="${c}">[${new Date().toLocaleTimeString('ko-KR')}] ${m}</span>\n`;
-   132	  b.scrollTop=b.scrollHeight;
-   133	}
-   134	async function api(path,opts={},tok){
-   135	  const r=await fetch('https://api.github.com'+path,{...opts,headers:{'Authorization':'token '+tok,'Accept':'application/vnd.github.v3+json','Content-Type':'application/json',...(opts.headers||{})}});
-   136	  return{ok:r.ok,st:r.status,d:await r.json().catch(()=>({}))};
-   137	}
-   138	async function ghLoad(){
-   139	  const c=c1(),p=document.getElementById('fp').value.trim();
-   140	  if(!c.tok){eL('❌ PAT 입력','er');return;}
-   141	  if(!p){eL('❌ 파일 경로 입력','er');return;}
-   142	  eL('📥 불러오는 중: '+p,'in');
-   143	  try{
-   144	    const r=await api('/repos/'+c.repo+'/contents/'+p+'?ref='+c.br,{},c.tok);
-   145	    if(!r.ok){eL('❌ 실패('+r.st+'): '+r.d?.message,'er');return;}
-   146	    document.getElementById('fc').value=decodeURIComponent(escape(atob(r.d.content.replace(/\n/g,''))));
-   147	    if(!document.getElementById('cm').value)document.getElementById('cm').value='fix: '+p+' 수정';
-   148	    eL('✅ '+(document.getElementById('fc').value.length/1024).toFixed(1)+'KB 불러오기 완료 (sha:'+r.d.sha.slice(0,7)+')','ok');
-   149	  }catch(e){eL('❌ '+e.message,'er');}
-   150	}
-   151	async function ghPush(){
-   152	  const c=c1(),p=document.getElementById('fp').value.trim(),content=document.getElementById('fc').value,msg=document.getElementById('cm').value||'chore: update';
-   153	  if(!c.tok||!p||!content){eL('❌ PAT·경로·내용 필수','er');return;}
-   154	  eL('📤 Push 중: '+p,'in');
-   155	  try{
-   156	    const sr=await api('/repos/'+c.repo+'/contents/'+p+'?ref='+c.br,{},c.tok);
-   157	    const sha=sr.ok&&sr.d.sha?sr.d.sha:null;
-   158	    const body={message:msg,content:btoa(unescape(encodeURIComponent(content))),branch:c.br};
-   159	    if(sha)body.sha=sha;
-   160	    const r=await api('/repos/'+c.repo+'/contents/'+p,{method:'PUT',body:JSON.stringify(body)},c.tok);
-   161	    if(!r.ok)throw new Error(r.d?.message||'HTTP '+r.st);
-   162	    eL('✅ Push 성공! sha:'+r.d?.content?.sha?.slice(0,7),'ok');
-   163	    eL('⏳ Netlify 배포 시작 — 1~3분 후 시크릿 창에서 확인','ok');
-   164	  }catch(e){eL('❌ '+e.message,'er');}
-   165	}
-   166	
-   167	// ─ 일괄 Push ─
-   168	const FILES=[
-   169	  {p:'js/main.js',l:'main.js',d:'앱 초기화',hi:false},
-   170	  {p:'js/notify.js',l:'notify.js',d:'알림',hi:false},
-   171	  {p:'js/master.js',l:'master.js',d:'마스터데이터',hi:false},
-   172	  {p:'js/security.js',l:'security.js',d:'보안',hi:false},
-   173	  {p:'js/app.js',l:'app.js',d:'API·Session',hi:false},
-   174	  {p:'js/dashboard.js',l:'dashboard.js',d:'대시보드',hi:false},
-   175	  {p:'js/entry.js',l:'entry.js',d:'타임시트',hi:false},
-   176	  {p:'js/approval.js',l:'approval.js',d:'결재',hi:false},
-   177	  {p:'js/analysis.js',l:'analysis.js',d:'분석',hi:false},
-   178	  {p:'js/archive.js',l:'archive.js ★',d:'자문자료실',hi:true},
-   179	  {p:'js/users.js',l:'users.js',d:'직원관리',hi:false},
-   180	  {p:'index.html',l:'index.html',d:'로그인',hi:false},
-   181	  {p:'main.html',l:'main.html ★',d:'SPA 메인',hi:true},
-   182	  {p:'css/style.css',l:'style.css',d:'스타일',hi:false},
-   183	  {p:'settings-test.html',l:'settings-test.html',d:'CRUD 테스트',hi:false},
-   184	  {p:'archive-debug.html',l:'debug.html ★',d:'DB진단',hi:true},
-   185	  {p:'github-push.html',l:'push.html ★',d:'구 배포도구',hi:false},
-   186	  {p:'tools.html',l:'tools.html ★',d:'이 도구',hi:true},
-   187	];
-   188	const ST={};FILES.forEach(f=>{ST[f.p]=f.hi?'on':'idle';});
-   189	
-   190	window.addEventListener('DOMContentLoaded',()=>{
-   191	  rg();
-   192	  const b=document.getElementById('domBanner');
-   193	  if(location.hostname.includes('gensparkspace.com')||location.hostname.includes('netlify.app')||location.hostname.includes('github.io')){
-   194	    b.style.cssText='background:#0d2a16;border:1px solid #238636;color:#3fb950;border-radius:6px;padding:10px 12px;font-size:12px;margin-bottom:12px';
-   195	    b.innerHTML='✅ 도메인 확인 완료. 일괄 Push 사용 가능.';
-   196	  }
-   197	});
-   198	
-   199	function rg(){
-   200	  document.getElementById('fg').innerHTML=FILES.map(f=>{
-   201	    const s=ST[f.p];
-   202	    const cls=s==='on'?'on':s==='done'?'done':s==='run'?'run':s==='fail'?'fail':'';
-   203	    const sx=s==='on'?'✔ 선택':s==='run'?'⏳ 업로드':s==='done'?'✅ 완료':s==='fail'?'❌ 실패':'클릭하여 선택';
-   204	    return`<div class="fi ${cls}" onclick="tog('${f.p}')"><div class="fn">${f.l}</div><div class="fd">${f.d}</div><div class="fd">${sx}</div></div>`;
-   205	  }).join('');
-   206	}
-   207	function tog(p){const s=ST[p];if(s==='run'||s==='done'||s==='fail')return;ST[p]=s==='on'?'idle':'on';rg();}
-   208	function allTog(v){FILES.forEach(f=>{if(ST[f.p]!=='run'&&ST[f.p]!=='done')ST[f.p]=v?'on':'idle';});rg();}
-   209	function c2(){return{tok:document.getElementById('tok2').value.trim(),repo:document.getElementById('repo2').value.trim(),br:document.getElementById('br2').value.trim()||'main',msg:document.getElementById('cm2').value.trim()||'chore: update'};}
-   210	function L2(m,c='in'){
-   211	  const b=document.getElementById('log2');
-   212	  if(b.innerHTML.includes('대기'))b.innerHTML='';
-   213	  b.innerHTML+=`<span class="${c}">[${new Date().toLocaleTimeString('ko-KR')}] ${m}</span>\n`;
-   214	  b.scrollTop=b.scrollHeight;
-   215	}
-   216	async function bVerify(){
-   217	  const c=c2();if(!c.tok){L2('❌ PAT 입력','er');return;}
-   218	  try{
-   219	    const u=await api('/user',{},c.tok);
-   220	    if(!u.ok){L2('❌ 토큰 오류('+u.st+')','er');return;}
-   221	    L2('✅ @'+u.d.login,'ok');
-   222	    const rp=await api('/repos/'+c.repo,{},c.tok);
-   223	    L2(rp.ok?'✅ '+rp.d.full_name:'❌ 저장소 오류',rp.ok?'ok':'er');
-   224	  }catch(e){L2('❌ '+e.message,'er');}
-   225	}
-   226	
-   227	// ★ 일괄 Push: GitHub에서 직접 읽어서 Push (캐시 완전 우회)
-   228	async function bPush(){
-   229	  const c=c2();
-   230	  if(!c.tok){L2('❌ PAT 입력','er');return;}
-   231	  const sel=FILES.filter(f=>ST[f.p]==='on');
-   232	  if(!sel.length){L2('⚠️ 파일 선택','wn');return;}
-   233	  document.getElementById('pb').disabled=true;
-   234	  L2('🚀 Push: '+sel.length+'개 → '+c.repo,'in');
-   235	  for(let i=0;i<sel.length;i++){
-   236	    const f=sel[i];ST[f.p]='run';rg();
-   237	    document.getElementById('pf').style.width=Math.round(i/sel.length*100)+'%';
-   238	    L2('📥 ['+(i+1)+'/'+sel.length+'] '+f.p,'in');
-   239	    try{
-   240	      const rawUrl='https://raw.githubusercontent.com/'+c.repo+'/'+c.br+'/'+f.p+'?_='+Date.now();
-   241	      const rawRes=await fetch(rawUrl,{cache:'no-store'});
-   242	      if(!rawRes.ok)throw new Error('GitHub raw 읽기 실패 HTTP '+rawRes.status);
-   243	      const txt=await rawRes.text();
-   244	      L2('   └ '+(new Blob([txt]).size/1024).toFixed(1)+'KB (GitHub raw)','gr');
-   245	      const sr=await api('/repos/'+c.repo+'/contents/'+f.p+'?ref='+c.br,{},c.tok);
-   246	      const sha=sr.ok&&sr.d.sha?sr.d.sha:null;
-   247	      const body={message:c.msg,content:btoa(unescape(encodeURIComponent(txt))),branch:c.br};
-   248	      if(sha)body.sha=sha;
-   249	      const pr=await api('/repos/'+c.repo+'/contents/'+f.p,{method:'PUT',body:JSON.stringify(body)},c.tok);
-   250	      if(!pr.ok)throw new Error(pr.d?.message||'HTTP '+pr.st);
-   251	      ST[f.p]='done';L2('✅ '+f.p+' ('+pr.d?.content?.sha?.slice(0,7)+')','ok');
-   252	    }catch(e){ST[f.p]='fail';L2('❌ '+f.p+': '+e.message,'er');}
-   253	    rg();
-   254	    if(i<sel.length-1)await new Promise(r=>setTimeout(r,300));
-   255	  }
-   256	  document.getElementById('pf').style.width='100%';
-   257	  document.getElementById('pb').disabled=false;
-   258	  L2('🎉 완료! Netlify 배포 시작 (~1-3분)','ok');
-   259	}
-   260	</script>
-   261	</body>
-   262	</html>
-   263	
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>SmartLog Tools</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',sans-serif;background:#0d1117;color:#c9d1d9;padding:20px}
+h1{font-size:20px;color:#f0f6fc;margin-bottom:4px}
+.sub{font-size:12px;color:#8b949e;margin-bottom:20px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:18px;margin-bottom:16px}
+.ct{font-size:13px;font-weight:700;color:#f0f6fc;margin-bottom:12px}
+label{font-size:11px;color:#8b949e;display:block;margin-bottom:4px}
+input,textarea{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#c9d1d9;padding:8px 10px;font-size:12px;outline:none;margin-bottom:10px;font-family:inherit}
+input:focus,textarea:focus{border-color:#388bfd}
+textarea{font-family:'Consolas','Courier New',monospace;resize:vertical}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.btn{padding:8px 16px;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer}
+.g{background:#238636;color:#fff}.g:hover{background:#2ea043}
+.b{background:#1f6feb;color:#fff}.b:hover{background:#388bfd}
+.s{background:#21262d;color:#c9d1d9;border:1px solid #30363d}.s:hover{background:#30363d}
+.ok{color:#3fb950}.er{color:#f85149}.wn{color:#d29922}.in{color:#58a6ff}.gr{color:#6e7681}
+.ok-b{background:#0d2a16;border:1px solid #238636;color:#3fb950;border-radius:6px;padding:10px 12px;font-size:12px;margin-bottom:12px;line-height:1.6}
+#log{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px;font-family:monospace;font-size:11px;line-height:1.8;min-height:60px;max-height:250px;overflow-y:auto;margin-top:10px}
+.tabs{display:flex;gap:0;border-bottom:1px solid #30363d;margin-bottom:0}
+.tab{padding:8px 16px;background:transparent;border:1px solid transparent;border-bottom:none;border-radius:6px 6px 0 0;font-size:12px;font-weight:600;cursor:pointer;color:#8b949e;position:relative;bottom:-1px}
+.tab.on{background:#161b22;border-color:#30363d;color:#f0f6fc}
+.pane{display:none}.pane.on{display:block}
+.file-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:12px}
+.fi{border:2px solid #30363d;border-radius:7px;padding:9px 11px;cursor:pointer;background:#0d1117;transition:.12s}
+.fi:hover{border-color:#388bfd}
+.fi.on{border-color:#3fb950;background:#061a0e}
+.fi.done{border-color:#3fb950;background:#061a0e;opacity:.6}
+.fi.run{border-color:#d29922;background:#1a1300}
+.fi.fail{border-color:#f85149;background:#1c0507}
+.fn{font-size:11px;font-weight:700;color:#f0f6fc;margin-bottom:2px}
+.fd{font-size:10px;color:#8b949e}
+.fi.on .fd,.fi.done .fd{color:#3fb950}
+.fi.run .fd{color:#d29922}
+.fi.fail .fd{color:#f85149}
+.prog{width:100%;height:4px;background:#21262d;border-radius:2px;overflow:hidden;margin:8px 0}
+.pf{height:100%;background:linear-gradient(90deg,#238636,#3fb950);width:0%;transition:width .3s}
+</style>
+</head>
+<body>
+<h1>🛠 SmartLog AI — Tools</h1>
+<p class="sub">GitHub API 기반 | 서버 캐시 완전 우회</p>
+<div class="tabs">
+  <button class="tab on" onclick="sw(0)">✏️ 파일 편집 Push</button>
+  <button class="tab" onclick="sw(1)">📦 일괄 Push</button>
+</div>
+<!-- TAB 0 -->
+<div class="pane on" id="p0">
+<div class="card" style="border-radius:0 10px 10px 10px">
+  <div class="ct">✏️ GitHub 직접 편집 Push <span style="color:#3fb950;font-weight:400;font-size:11px">— 서버 캐시 완전 무관</span></div>
+  <div class="ok-b">✅ GitHub API로 파일을 읽고 → 수정 → GitHub API로 Push합니다.<br>Genspark·Netlify 캐시와 완전히 무관합니다.</div>
+  <label>PAT (repo 권한 필요)</label>
+  <input type="password" id="tok" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"/>
+  <label>저장소</label><input id="repo" value="smartlogai/smartlogai"/>
+  <label>브랜치</label><input id="br" value="main"/>
+  <hr style="border:none;border-top:1px solid #30363d;margin:4px 0 12px"/>
+  <label>파일 경로</label><input id="fp" placeholder="js/archive.js"/>
+  <div class="row">
+    <button class="btn b" onclick="qs('js/app.js')">⭐ app.js</button>
+    <button class="btn b" onclick="qs('js/archive.js')">archive.js</button>
+    <button class="btn b" onclick="qs('main.html')">main.html</button>
+    <button class="btn b" onclick="qs('archive-debug.html')">debug.html</button>
+    <button class="btn b" onclick="qs('tools.html')">tools.html</button>
+  </div>
+  <button class="btn b" onclick="ghLoad()" style="width:100%;margin-bottom:10px">📥 GitHub에서 현재 내용 불러오기</button>
+  <label>커밋 메시지</label><input id="cm" placeholder="fix: 파일 수정"/>
+  <label>파일 내용</label>
+  <textarea id="fc" style="height:260px" placeholder="위 버튼으로 불러오거나 직접 붙여넣기..."></textarea>
+  <div class="row">
+    <button class="btn g" onclick="ghPush()">🚀 이 내용으로 GitHub Push</button>
+    <button class="btn s" onclick="document.getElementById('fc').value=''">지우기</button>
+  </div>
+  <div id="log"><span class="gr">// 결과 대기 중</span></div>
+</div></div>
+<!-- TAB 1 -->
+<div class="pane" id="p1">
+<div class="card" style="border-radius:0 10px 10px 10px">
+  <div class="ct">📦 파일 일괄 Push</div>
+  <div id="domBanner" style="background:#0c2d6b;border:1px solid #1f6feb;color:#79c0ff;border-radius:6px;padding:10px 12px;font-size:12px;margin-bottom:12px">🔍 도메인 확인 중...</div>
+  <label>PAT</label><input type="password" id="tok2" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"/>
+  <label>저장소</label><input id="repo2" value="smartlogai/smartlogai"/>
+  <label>브랜치</label><input id="br2" value="main"/>
+  <label>커밋 메시지</label><input id="cm2" value="fix: 파일 업데이트"/>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12px">
+    <input type="checkbox" id="ac" onchange="allTog(this.checked)" style="width:auto;margin:0"/>
+    <label for="ac" style="margin:0;cursor:pointer;color:#c9d1d9">전체 선택/해제</label>
+  </div>
+  <div class="file-grid" id="fg"></div>
+  <div class="prog"><div class="pf" id="pf"></div></div>
+  <div class="row">
+    <button class="btn g" id="pb" onclick="bPush()">🚀 GitHub Push</button>
+    <button class="btn s" onclick="bVerify()">🔑 토큰 검증</button>
+  </div>
+  <div id="log2"><span class="gr">// 로그 대기 중</span></div>
+</div></div>
+<script>
+function sw(n){
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('on',i===n));
+  document.querySelectorAll('.pane').forEach((p,i)=>p.classList.toggle('on',i===n));
+  const a=document.getElementById('tok').value,b=document.getElementById('tok2').value;
+  if(a&&!b)document.getElementById('tok2').value=a;
+  if(b&&!a)document.getElementById('tok').value=b;
+}
+function c1(){return{tok:document.getElementById('tok').value.trim(),repo:document.getElementById('repo').value.trim(),br:document.getElementById('br').value.trim()||'main'};}
+function qs(p){document.getElementById('fp').value=p;ghLoad();}
+function eL(m,c='in'){const b=document.getElementById('log');if(b.innerHTML.includes('대기'))b.innerHTML='';b.innerHTML+=`<span class="${c}">[${new Date().toLocaleTimeString('ko-KR')}] ${m}</span>\n`;b.scrollTop=b.scrollHeight;}
+async function api(path,opts={},tok){const r=await fetch('https://api.github.com'+path,{...opts,headers:{'Authorization':'token '+tok,'Accept':'application/vnd.github.v3+json','Content-Type':'application/json',...(opts.headers||{})}});return{ok:r.ok,st:r.status,d:await r.json().catch(()=>({}))};}
+async function ghLoad(){
+  const c=c1(),p=document.getElementById('fp').value.trim();
+  if(!c.tok){eL('❌ PAT 입력','er');return;}
+  if(!p){eL('❌ 파일 경로 입력','er');return;}
+  eL('📥 불러오는 중: '+p,'in');
+  try{
+    const r=await api('/repos/'+c.repo+'/contents/'+p+'?ref='+c.br,{},c.tok);
+    if(!r.ok){eL('❌ 실패('+r.st+'): '+r.d?.message,'er');return;}
+    document.getElementById('fc').value=decodeURIComponent(escape(atob(r.d.content.replace(/\n/g,''))));
+    if(!document.getElementById('cm').value)document.getElementById('cm').value='fix: '+p+' 수정';
+    eL('✅ '+(document.getElementById('fc').value.length/1024).toFixed(1)+'KB 불러오기 완료 (sha:'+r.d.sha.slice(0,7)+')','ok');
+  }catch(e){eL('❌ '+e.message,'er');}
+}
+async function ghPush(){
+  const c=c1(),p=document.getElementById('fp').value.trim(),content=document.getElementById('fc').value,msg=document.getElementById('cm').value||'chore: update';
+  if(!c.tok||!p||!content){eL('❌ PAT·경로·내용 필수','er');return;}
+  eL('📤 Push 중: '+p,'in');
+  try{
+    const sr=await api('/repos/'+c.repo+'/contents/'+p+'?ref='+c.br,{},c.tok);
+    const sha=sr.ok&&sr.d.sha?sr.d.sha:null;
+    const body={message:msg,content:btoa(unescape(encodeURIComponent(content))),branch:c.br};
+    if(sha)body.sha=sha;
+    const r=await api('/repos/'+c.repo+'/contents/'+p,{method:'PUT',body:JSON.stringify(body)},c.tok);
+    if(!r.ok)throw new Error(r.d?.message||'HTTP '+r.st);
+    eL('✅ Push 성공! sha:'+r.d?.content?.sha?.slice(0,7),'ok');
+    eL('⏳ Netlify 배포 시작 — 1~3분 후 시크릿 창에서 확인','ok');
+  }catch(e){eL('❌ '+e.message,'er');}
+}
+const FILES=[
+  {p:'js/main.js',l:'main.js',d:'앱 초기화',hi:false},
+  {p:'js/notify.js',l:'notify.js',d:'알림',hi:false},
+  {p:'js/master.js',l:'master.js',d:'마스터데이터',hi:false},
+  {p:'js/security.js',l:'security.js',d:'보안',hi:false},
+  {p:'js/app.js',l:'app.js',d:'API·Session',hi:false},
+  {p:'js/dashboard.js',l:'dashboard.js',d:'대시보드',hi:false},
+  {p:'js/entry.js',l:'entry.js',d:'타임시트',hi:false},
+  {p:'js/approval.js',l:'approval.js',d:'결재',hi:false},
+  {p:'js/analysis.js',l:'analysis.js',d:'분석',hi:false},
+  {p:'js/archive.js',l:'archive.js ★',d:'자문자료실',hi:true},
+  {p:'js/users.js',l:'users.js',d:'직원관리',hi:false},
+  {p:'index.html',l:'index.html',d:'로그인',hi:false},
+  {p:'main.html',l:'main.html ★',d:'SPA 메인',hi:true},
+  {p:'css/style.css',l:'style.css',d:'스타일',hi:false},
+  {p:'settings-test.html',l:'settings-test.html',d:'CRUD 테스트',hi:false},
+  {p:'archive-debug.html',l:'debug.html ★',d:'DB진단',hi:true},
+  {p:'tools.html',l:'tools.html ★',d:'이 도구',hi:true},
+];
+const ST={};FILES.forEach(f=>{ST[f.p]=f.hi?'on':'idle';});
+window.addEventListener('DOMContentLoaded',()=>{
+  rg();
+  const b=document.getElementById('domBanner');
+  if(location.hostname.includes('gensparkspace.com')||location.hostname.includes('netlify.app')||location.hostname.includes('github.io')){
+    b.style.cssText='background:#0d2a16;border:1px solid #238636;color:#3fb950;border-radius:6px;padding:10px 12px;font-size:12px;margin-bottom:12px';
+    b.innerHTML='✅ 도메인 확인 완료. 일괄 Push 사용 가능.';
+  }
+});
+function rg(){document.getElementById('fg').innerHTML=FILES.map(f=>{const s=ST[f.p];const cls=s==='on'?'on':s==='done'?'done':s==='run'?'run':s==='fail'?'fail':'';const sx=s==='on'?'✔ 선택':s==='run'?'⏳ 업로드':s==='done'?'✅ 완료':s==='fail'?'❌ 실패':'클릭하여 선택';return`<div class="fi ${cls}" onclick="tog('${f.p}')"><div class="fn">${f.l}</div><div class="fd">${f.d}</div><div class="fd">${sx}</div></div>`;}).join('');}
+function tog(p){const s=ST[p];if(s==='run'||s==='done'||s==='fail')return;ST[p]=s==='on'?'idle':'on';rg();}
+function allTog(v){FILES.forEach(f=>{if(ST[f.p]!=='run'&&ST[f.p]!=='done')ST[f.p]=v?'on':'idle';});rg();}
+function c2(){return{tok:document.getElementById('tok2').value.trim(),repo:document.getElementById('repo2').value.trim(),br:document.getElementById('br2').value.trim()||'main',msg:document.getElementById('cm2').value.trim()||'chore: update'};}
+function L2(m,c='in'){const b=document.getElementById('log2');if(b.innerHTML.includes('대기'))b.innerHTML='';b.innerHTML+=`<span class="${c}">[${new Date().toLocaleTimeString('ko-KR')}] ${m}</span>\n`;b.scrollTop=b.scrollHeight;}
+async function bVerify(){
+  const c=c2();if(!c.tok){L2('❌ PAT 입력','er');return;}
+  try{
+    const u=await api('/user',{},c.tok);
+    if(!u.ok){L2('❌ 토큰 오류('+u.st+')','er');return;}
+    L2('✅ @'+u.d.login,'ok');
+    const rp=await api('/repos/'+c.repo,{},c.tok);
+    L2(rp.ok?'✅ '+rp.d.full_name:'❌ 저장소 오류',rp.ok?'ok':'er');
+  }catch(e){L2('❌ '+e.message,'er');}
+}
+async function bPush(){
+  const c=c2();
+  if(!c.tok){L2('❌ PAT 입력','er');return;}
+  const sel=FILES.filter(f=>ST[f.p]==='on');
+  if(!sel.length){L2('⚠️ 파일 선택','wn');return;}
+  document.getElementById('pb').disabled=true;
+  L2('🚀 Push: '+sel.length+'개 → '+c.repo,'in');
+  for(let i=0;i<sel.length;i++){
+    const f=sel[i];ST[f.p]='run';rg();
+    document.getElementById('pf').style.width=Math.round(i/sel.length*100)+'%';
+    L2('📥 ['+(i+1)+'/'+sel.length+'] '+f.p,'in');
+    try{
+      const rawUrl='https://raw.githubusercontent.com/'+c.repo+'/'+c.br+'/'+f.p+'?_='+Date.now();
+      const rawRes=await fetch(rawUrl,{cache:'no-store'});
+      if(!rawRes.ok)throw new Error('GitHub raw 읽기 실패 HTTP '+rawRes.status);
+      const txt=await rawRes.text();
+      L2('   └ '+(new Blob([txt]).size/1024).toFixed(1)+'KB (GitHub raw)','gr');
+      const sr=await api('/repos/'+c.repo+'/contents/'+f.p+'?ref='+c.br,{},c.tok);
+      const sha=sr.ok&&sr.d.sha?sr.d.sha:null;
+      const body={message:c.msg,content:btoa(unescape(encodeURIComponent(txt))),branch:c.br};
+      if(sha)body.sha=sha;
+      const pr=await api('/repos/'+c.repo+'/contents/'+f.p,{method:'PUT',body:JSON.stringify(body)},c.tok);
+      if(!pr.ok)throw new Error(pr.d?.message||'HTTP '+pr.st);
+      ST[f.p]='done';L2('✅ '+f.p+' ('+pr.d?.content?.sha?.slice(0,7)+')','ok');
+    }catch(e){ST[f.p]='fail';L2('❌ '+f.p+': '+e.message,'er');}
+    rg();
+    if(i<sel.length-1)await new Promise(r=>setTimeout(r,300));
+  }
+  document.getElementById('pf').style.width='100%';
+  document.getElementById('pb').disabled=false;
+  L2('🎉 완료! Netlify 배포 시작 (~1-3분)','ok');
+}
+</script>
+</body>
+</html>
