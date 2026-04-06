@@ -1952,7 +1952,11 @@ async function saveArchiveRecord() {
 
   try {
     const created = await API.create('mail_references', payload);
+    if (!created || !created.id) {
+      throw new Error('저장 응답에 id가 없습니다. RLS 또는 스키마 오류일 수 있습니다.');
+    }
     const refId = created.id;
+
 
     // 검색 인덱스 업데이트
     await _updateSearchIndex(refId).catch(e => console.warn('검색인덱스 업데이트 실패(무시):', e));
