@@ -2918,13 +2918,19 @@ function _renderWordPreview(container, blob, blobUrl) {
 }
 
 // ── Excel 미리보기 (SheetJS) ───────────────────────────
-function _renderExcelPreview(container, blob, blobUrl) {
+async function _renderExcelPreview(container, blob, blobUrl) {
+
   const loading = _previewLoading(container, 'Excel 데이터 로드 중...');
-  if (typeof XLSX === 'undefined') {
-    loading.remove();
-    _previewError(container, 'SheetJS(XLSX)가 로드되지 않았습니다.');
-    return;
+      if (typeof XLSX === 'undefined') {
+    try {
+      await LibLoader.load('xlsx');
+    } catch(e) {
+      loading.remove();
+      _previewError(container, 'SheetJS(XLSX) 로드 실패: ' + e.message);
+      return;
+    }
   }
+
   const reader = new FileReader();
   reader.onload = (e) => {
     try {
