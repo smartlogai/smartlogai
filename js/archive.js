@@ -2347,8 +2347,10 @@ async function deleteArchive(refId) {
     closeModal('archiveDetailModal');
     Toast.success('자료가 삭제되었습니다.');
     loadArchiveList();
-  } catch(e) {
-    Toast.error('삭제 중 오류가 발생했습니다.');
+   } catch(e) {
+    console.error('deleteArchive error', e);
+    const msg = e?.message || '알 수 없는 오류';
+    Toast.error('삭제 실패: ' + msg);
   }
 }
 
