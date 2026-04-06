@@ -1969,11 +1969,14 @@ async function saveArchiveRecord() {
     Toast.success('✅ 자문 자료가 등록되었습니다.');
     closeModal('archiveNewModal');
     loadArchiveList();
-  } catch(e) {
+      } catch(e) {
     restoreBtn(); restoreClose();
     console.error('saveArchiveRecord error', e);
-        const msg = e?.message || '알 수 없는 오류';
+    const msg = e?.message || '알 수 없는 오류';
     Toast.error('저장 실패: ' + msg);
+  }
+}
+
 
 }
 
