@@ -1972,8 +1972,9 @@ async function saveArchiveRecord() {
   } catch(e) {
     restoreBtn(); restoreClose();
     console.error('saveArchiveRecord error', e);
-    Toast.error('저장 중 오류가 발생했습니다.');
-  }
+        const msg = e?.message || '알 수 없는 오류';
+    Toast.error('저장 실패: ' + msg);
+
 }
 
 // ─────────────────────────────────────────────
