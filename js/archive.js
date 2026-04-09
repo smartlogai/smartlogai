@@ -18,31 +18,14 @@ let _archKwTags    = [];   // 핵심키워드 검색 태그
 let _archReasonTags = [];  // 판단사유 검색 태그
 let _archLawTags   = [];   // 관련법령 검색 태그 [{name, article}]
 
+/** 인라인 onclick 인자용 — 작은따옴표/역슬래시 등으로 속성·스크립트가 깨지는 것 방지 */
+function _archJsLitId(id) {
+  return JSON.stringify(String(id));
+}
+
 // PDF.js worker 경로 설정은 LibLoader.load('pdfjs') 에서 자동 처리됨
 
-// ─────────────────────────────────────────────
-//  업무분류별 예시 태그
-// ─────────────────────────────────────────────
-const _ARCH_EXAMPLE_KW = {
-  '': ['거래가격', '품목분류', '수출허가', 'FTA', '환급신청', '요건확인'],  // 전체
-  '품목분류 자문': ['HS코드 분류', '품목번호', '유권해석', '재질성분', '기능용도', '결합물품', '세트물품', 'GRI원칙'],
-  '과세가격 자문': ['권리사용료 가산여부', '특수관계 거래가격 인정여부', '경영지원비 가산여부', '로열티 가산여부', '수수료 공제여부'],
-  'FTA 자문': ['원산지기준', '실질변형', '부가가치기준', '세번변경', '불인정공정', '직접운송', '원산지확인서'],
-  '전략물자 자문': ['전략물자 해당여부', '상황허가 대상여부', '이중용도품목 수출통제', '캐치올 규정 적용여부'],
-  'FTA 자문': ['원산지증명서 유효여부', '사후검증 대응방안', '누적조항 적용여부', '직접운송원칙 충족여부', '원산지소급적용 가능여부', 'CTH기준 충족여부'],
-  '관세환급 자문': ['개별환급 적용가능 여부', '소요량 산정기준', '환급기한 기산점', '분할증명 가능여부', '간이정액환급 적용여부'],
-  '요건대상 자문': ['의료기기 요건대상 여부', '식품 검역대상 여부', '화학물질 등록대상 여부', '안전인증 면제여부', '전파인증 대상여부'],
-};
-const _ARCH_EXAMPLE_REASON = {
-  '': ['거래조건성불충족', '세번변경기준충족', '원산지기준충족', '수출허가대상해당'],  // 전체
-  '품목분류 자문': ['용도기준적용', '재질기준적용', '결합기준적용', '완성품분류원칙', 'GRI적용', '관세율표해석통칙'],
-  '과세가격 자문': ['거래조건성불충족', '처분제한조건', '권리사용료포함', '특수관계영향', '공제방법선택', '역산가격적용'],
-  'FTA 자문': ['세번변경기준충족', '부가가치기준미충족', '불인정공정해당', '직접운송불충족', '원산지기준충족'],
-  '전략물자 자문': ['수출허가대상해당', '허가예외적용', '이중용도해당', 'EAR적용', '전략물자해당없음'],
-  'FTA 자문': ['원산지기준충족', '원산지증명서유효', '검증결과불인정', '누적기준적용', '환급제한적용', '사후검증대상'],
-  '관세환급 자문': ['소요량기준충족', '환급대상해당', '직접환급가능', '간이환급적용', '분할환급적용'],
-  '요건대상 자문': ['요건확인필요', '허가취득필요', '검역증명필요', '안전인증미취득', '면제해당'],
-};
+// 업무분류별 예시 태그 데이터: js/kw-example-maps.js → KwExampleMaps
 
 // ─────────────────────────────────────────────
 //  페이지 초기화
@@ -153,14 +136,16 @@ function _archRenderTagUi() {
 /** 예시 태그 업데이트 (업무분류 변경 시) */
 function _archUpdateExampleTags() {
   const biz = document.getElementById('archive-filter-business')?.value || '';
-
-  // 키에 해당하는 예시 배열 (없으면 전체 배열 사용)
-  const kwEx     = _ARCH_EXAMPLE_KW[biz]     ?? _ARCH_EXAMPLE_KW['']     ?? [];
-  const reasonEx = _ARCH_EXAMPLE_REASON[biz] ?? _ARCH_EXAMPLE_REASON[''] ?? [];
+  const resolved = (typeof KwExampleMaps !== 'undefined' && KwExampleMaps.resolveExamples)
+    ? KwExampleMaps.resolveExamples(biz)
+    : { kw: [], reason: [] };
+  const kwEx     = resolved.kw     || [];
+  const reasonEx = resolved.reason || [];
 
   const kwCont     = document.getElementById('arch-kw-examples');
   const reasonCont = document.getElementById('arch-reason-examples');
   const kwArea     = document.getElementById('arch-kw-example-area');
+  const reasonArea = document.getElementById('arch-reason-example-area');
 
   // 예시 태그 렌더링 (이미 선택된 태그는 --used 처리)
   if (kwCont) {
@@ -168,7 +153,7 @@ function _archUpdateExampleTags() {
       const escaped  = Utils.escHtml(t);
       const safeCall = t.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
       const isUsed   = _archKwTags.includes(t) ? ' arch-ex-tag--used' : '';
-      return `<button class="arch-ex-tag${isUsed}" onclick="_archClickExTag('kw','${safeCall}',this)">${escaped}</button>`;
+      return `<button type="button" class="arch-ex-tag${isUsed}" onclick="_archClickExTag('kw','${safeCall}',this)">${escaped}</button>`;
     }).join('');
   }
 
@@ -177,7 +162,7 @@ function _archUpdateExampleTags() {
       const escaped  = Utils.escHtml(t);
       const safeCall = t.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
       const isUsed   = _archReasonTags.includes(t) ? ' arch-ex-tag--green arch-ex-tag--used' : ' arch-ex-tag--green';
-      return `<button class="arch-ex-tag${isUsed}" onclick="_archClickExTag('reason','${safeCall}',this)">${escaped}</button>`;
+      return `<button type="button" class="arch-ex-tag${isUsed}" onclick="_archClickExTag('reason','${safeCall}',this)">${escaped}</button>`;
     }).join('');
   }
 
@@ -195,6 +180,7 @@ function _archUpdateExampleTags() {
 
   // 예시 영역 표시/숨김
   if (kwArea) kwArea.style.display = kwEx.length ? 'flex' : 'none';
+  if (reasonArea) reasonArea.style.display = reasonEx.length ? 'flex' : 'none';
 }
 
 /** 예시 태그 클릭 핸들러 */
@@ -562,7 +548,7 @@ function _buildArchCard(r, keyword, kwTags) {
   <div class="arch-card" id="arch-card-${r.id}">
     <!-- 헤더: 제목 + 평가등급(우측) -->
     <div class="arch-card-header">
-      <a href="javascript:void(0)" onclick="openArchiveDetail('${r.id}')" class="arch-card-title">${titleDisp}</a>
+      <a href="javascript:void(0)" onclick='openArchiveDetail(${_archJsLitId(r.id)})' class="arch-card-title">${titleDisp}</a>
       ${starBadge}
     </div>
     <!-- 태그 통합 한 줄: 핵심키워드 + 관련법령 (같은 행) -->
@@ -584,7 +570,7 @@ function _buildArchCard(r, keyword, kwTags) {
       <span class="arch-meta-chip"><i class="fas fa-calendar-alt"></i> ${dateStr}</span>
       ${footerRight}
       <div class="arch-card-actions">
-        <button class="arch-card-btn arch-card-btn--view" onclick="openArchiveDetail('${r.id}')">
+        <button class="arch-card-btn arch-card-btn--view" onclick='openArchiveDetail(${_archJsLitId(r.id)})'>
           <i class="fas fa-eye"></i> 내용보기
         </button>
       </div>
@@ -665,7 +651,7 @@ async function showArchiveContentModal(refId) {
 
     // ── 텍스트 복사 버튼 ──
     const copyBtn = fullText
-      ? `<button class="arch-inline-copy-btn" onclick="archCopyInlineText('arch-inline-text-${refId}', this)" title="본문 복사">
+      ? `<button class="arch-inline-copy-btn" onclick='archCopyInlineText(${JSON.stringify('arch-inline-text-' + String(refId))}, this)' title="본문 복사">
            <i class="fas fa-copy"></i> 복사
          </button>`
       : '';
@@ -681,7 +667,7 @@ async function showArchiveContentModal(refId) {
           : ''}
         <div class="arch-inline-actions">
           ${copyBtn}
-          <button class="arch-inline-detail-btn" onclick="showArchiveContentModal('${refId}')">
+          <button class="arch-inline-detail-btn" onclick='showArchiveContentModal(${_archJsLitId(refId)})'>
             <i class="fas fa-times"></i> 닫기
           </button>
         </div>
@@ -830,10 +816,9 @@ function _renderArchiveKpi(rows) {
 async function openArchiveDetail(refId) {
   try {
     // ref + docs + entries 병렬 조회
-    const [ref, docsResp, entryResp] = await Promise.all([
+    const [ref, docsResp] = await Promise.all([
       API.get('mail_references', refId),
       API.list('doc_texts',    { limit: 200 }),
-      API.list('time_entries', { limit: 500 })
     ]);
 
     if (!ref || !ref.id) {
@@ -847,10 +832,12 @@ async function openArchiveDetail(refId) {
     // 조회수 +1 (비동기, 결과 무시)
     API.patch('mail_references', refId, { view_count: (ref.view_count||0)+1 }).catch(()=>{});
 
-    // entry 정보 추출
+    // entry 정보 추출 (목록 500건에서 찾지 않고 단건 조회 — 누락 방지)
     let entry = null;
     if (ref.entry_id) {
-      entry = (entryResp.data || []).find(e => String(e.id) === String(ref.entry_id)) || null;
+      try {
+        entry = await API.get('time_entries', ref.entry_id);
+      } catch (_) { entry = null; }
     }
 
     const isManual     = ref.source_type === 'manual';  // 직접등록(과거 참고사례) 여부
@@ -894,7 +881,7 @@ async function openArchiveDetail(refId) {
     const lawHtml = lawArr.length
       ? lawArr.map(l => {
           const label = typeof l === 'object'
-            ? ((l.name||'') + (l.article ? ' ' + l.article : ''))
+            ? (((l.law || l.name || '') + (l.article ? ' ' + l.article : '')).trim() || (l.article || ''))
             : String(l);
           return `<span class="arch-modal-law-tag"><i class="fas fa-gavel" style="font-size:10px"></i>${Utils.escHtml(label)}</span>`;
         }).join('')
@@ -923,7 +910,7 @@ async function openArchiveDetail(refId) {
       ? (descHtml.startsWith('<') ? descHtml : '<p>' + Utils.escHtml(descHtml) + '</p>')
       : (summaryText ? '<p>' + Utils.escHtml(summaryText) + '</p>' : '');
     // 표 포함 시 인라인 스타일 보강
-    if (contentHtml && contentHtml.includes('<table')) {
+    if (contentHtml && /<table[\s>]/i.test(contentHtml)) {
       contentHtml = _cleanPasteHtml(contentHtml);
     }
     const contentText = descHtml
@@ -1020,29 +1007,7 @@ async function openArchiveDetail(refId) {
           ${Utils.escHtml(utilNote)}
         </div>` : ''}
 
-        <!-- ⑦ 자문내용 (수행내용 HTML) -->
-        <div>
-          <div style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:.05em;margin-bottom:6px">
-            <i class="fas fa-file-alt" style="margin-right:5px"></i>자문내용
-          </div>
-          ${contentHtml
-            ? `<div class="arch-summary-box" style="position:relative">
-                 <div id="arch-desc-${ref.id}" class="arch-desc-view"
-                   style="font-size:13px;line-height:1.75;padding:12px 14px;border-radius:8px;
-                          border:1px solid #e2e8f0;background:#fffef7;color:#1e293b;
-                          max-height:380px;overflow-y:auto;overflow-x:auto;
-                          word-break:break-word;user-select:text;-webkit-user-select:text">
-                   ${contentHtml}
-                 </div>
-                 <div style="display:flex;justify-content:flex-end;margin-top:6px">
-                   <button class="arch-util-btn" onclick="_archCopyDesc('${ref.id}',this)" title="Outlook 호환 복사">
-                     <i class="fas fa-copy"></i> 원문 복사
-                   </button>
-                 </div>
-               </div>`
-            : `<div style="font-size:13px;color:#94a3b8;padding:10px 0">자문내용 없음</div>`
-          }
-        </div>
+        <!-- ⑦ 자문내용(수행내역) UI 제거 -->
 
         <!-- ⑧ 첨부 파일 -->
         ${docs.length ? `
@@ -1064,15 +1029,20 @@ async function openArchiveDetail(refId) {
         <i class="fas fa-times" style="margin-right:4px"></i>닫기
       </button>
       ${canForceDelete ? `
-      <button class="btn btn-danger" onclick="deleteArchive('${refId}')"
+      <button class="btn btn-outline" onclick='openArchiveEdit(${_archJsLitId(refId)})'
               style="margin-left:auto;display:inline-flex;align-items:center;gap:6px">
-        <i class="fas fa-trash-alt"></i> 자료 삭제
+        <i class="fas fa-pen"></i> 수정
+      </button>
+      <button class="btn btn-danger" onclick='deleteArchive(${_archJsLitId(refId)})'
+              style="display:inline-flex;align-items:center;gap:6px">
+        <i class="fas fa-trash-alt"></i> 삭제
       </button>` : ''}
     `;
     openModal('archiveDetailModal');
   } catch(e) {
     console.error('openArchiveDetail error', e);
-    Toast.error('자료를 불러오는 중 오류가 발생했습니다.');
+    const hint = (e && e.message) ? ' ' + String(e.message) : '';
+    Toast.error('자료를 불러오는 중 오류가 발생했습니다.' + hint);
   }
 }
 
@@ -1096,11 +1066,14 @@ function _buildDocsHtml(docs) {
     const fileSizeStr = d.file_size ? `${(d.file_size/1024).toFixed(0)}KB` : '';
     const fileTypeStr = (d.file_type||'').toUpperCase();
     const metaParts   = [fileTypeStr, fileSizeStr].filter(Boolean).join(' · ');
+    const isExcel     = d.file_type === 'excel';
     const extractBadge = hasText
       ? `<span class="arch-file-badge arch-file-badge--ok"><i class="fas fa-check-circle"></i> 본문 복사 가능</span>`
       : hasPdfEmbed
         ? `<span class="arch-file-badge" style="background:#fffbeb;color:#92400e;border:1px solid #fde68a"><i class="fas fa-eye"></i> 뷰어 복사</span>`
-        : `<span class="arch-file-badge arch-file-badge--no"><i class="fas fa-minus-circle"></i> 텍스트 없음</span>`;
+        : isExcel
+          ? `<span class="arch-file-badge" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0"><i class="fas fa-table"></i> 검색용 본문 미추출 · 다운로드로 확인</span>`
+          : `<span class="arch-file-badge arch-file-badge--no"><i class="fas fa-minus-circle"></i> 텍스트 없음</span>`;
     const mailPdfBadge = isMailPdf
       ? `<span class="arch-file-badge" style="background:#ede9fe;color:#5b21b6;border:1px solid #c4b5fd"><i class="fas fa-envelope"></i> 메일 PDF</span>` : '';
     const copyFn = `archCopyText('${d.id}',this)`;
@@ -1670,22 +1643,92 @@ function _generateAutoTags(bodyText, subcatName) {
   return [...tags].slice(0, 10);
 }
 
+/** 관련법령 객체를 등록 모달 형식 { law, article } 으로 통일 */
+function _archNormalizeLawForForm(l) {
+  if (typeof l === 'string') return { law: l, article: '' };
+  const law = (l.law != null && l.law !== '') ? l.law : (l.name || '');
+  const article = l.article != null ? String(l.article) : '';
+  return { law, article };
+}
+
 async function openArchiveEdit(refId) {
+  const session = Session.get();
+  if (!session || (session.role !== 'admin' && session.role !== 'director')) {
+    Toast.warning('수정 권한이 없습니다. 관리자 또는 사업부장만 수정할 수 있습니다.');
+    return;
+  }
   try {
+    // 상세(openArchiveDetail)와 동일하게 mail_references + time_entries 병합
     const ref = await API.get('mail_references', refId);
+    if (!ref || !ref.id) {
+      Toast.error('자료를 찾을 수 없습니다.');
+      return;
+    }
+    let entry = null;
+    if (ref.entry_id) {
+      try {
+        entry = await API.get('time_entries', ref.entry_id);
+      } catch (_) { entry = null; }
+    }
+
     _archiveNewPendingFiles = [];
+
+    // 등록 모달과 동일하게 태그·별점 UI 초기화 (이전 세션 잔여 제거)
+    document.getElementById('arch-new-kw-tags').innerHTML = '';
+    document.getElementById('arch-new-kw-input').value = '';
+    document.getElementById('arch-new-kw-hidden').value = '[]';
+    document.getElementById('arch-new-reason-tags').innerHTML = '';
+    document.getElementById('arch-new-reason-input').value = '';
+    document.getElementById('arch-new-reason-hidden').value = '[]';
+    document.getElementById('arch-new-law-tags').innerHTML = '';
+    document.getElementById('arch-new-law-name-input').value = '';
+    document.getElementById('arch-new-law-article-input').value = '';
+    document.getElementById('arch-new-law-hidden').value = '[]';
+    document.getElementById('archive-stars-value').value = '';
+    document.querySelectorAll('.arch-star-btn').forEach(btn => {
+      btn.style.background = '#fff';
+      btn.style.borderColor = '#d1d5db';
+      btn.style.color = '#6b7280';
+    });
+
     document.getElementById('archive-edit-id').value = refId;
     document.getElementById('archiveNewModalTitle').textContent = '자문 자료 수정';
-    document.getElementById('archive-subject-input').value = ref.subject||'';
-    document.getElementById('archive-sender-name-input').value = ref.sender_name||'';
-    document.getElementById('archive-sender-email-input').value = ref.sender_email||'';
-    document.getElementById('archive-recipients-input').value = ref.recipients||'';
-    document.getElementById('archive-sent-at-input').value = ref.sent_at||'';
-    document.getElementById('archive-body-input').value = ref.body_text||'';
-    document.getElementById('archive-summary-input').value = ref.summary||'';
-    document.getElementById('archive-tags-input').value = ref.tags||'';
+    document.getElementById('archive-subject-input').value = ref.subject || '';
+    document.getElementById('archive-sender-name-input').value = ref.sender_name || '';
+    document.getElementById('archive-sender-email-input').value = ref.sender_email || '';
+    document.getElementById('archive-recipients-input').value = ref.recipients || '';
+    document.getElementById('archive-sent-at-input').value = ref.sent_at || '';
+    document.getElementById('archive-summary-input').value = ref.summary || '';
+    document.getElementById('archive-tags-input').value = ref.tags || '';
 
     document.getElementById('archive-is-template').checked = !!ref.is_template;
+
+    _archResetEditor();
+    document.getElementById('archive-quill-hidden').value = '';
+
+    // 자문 본문: openArchiveDetail 과 동일 우선순위 (승인 entry → ref)
+    const entryWorkDesc = (entry?.work_description || '').trim();
+    let rawDesc = (entryWorkDesc || ref.work_description || ref.body_text || '').trim();
+    if (!rawDesc) {
+      const sum = (ref.summary || '').trim();
+      if (sum) rawDesc = sum.startsWith('<') ? sum : ('<p>' + Utils.escHtml(sum) + '</p>');
+    }
+    _archSetEditorHtml(rawDesc);
+
+    // 핵심키워드·판단사유·법령: saveArchiveRecord 가 읽는 hidden + 칩 UI (entry 우선)
+    const kwArr = _parseArr(entry?.kw_query ?? ref.kw_query);
+    const reasonArr = _parseArr(entry?.kw_reason ?? ref.kw_reason);
+    const lawArr = _parseArr(entry?.law_refs ?? ref.law_refs).map(_archNormalizeLawForForm);
+
+    document.getElementById('arch-new-kw-hidden').value = JSON.stringify(kwArr);
+    _archNewRenderTags('kw', kwArr);
+    document.getElementById('arch-new-reason-hidden').value = JSON.stringify(reasonArr);
+    _archNewRenderTags('reason', reasonArr);
+    document.getElementById('arch-new-law-hidden').value = JSON.stringify(lawArr);
+    _archNewRenderLaws(lawArr);
+
+    const stars = parseInt(entry?.quality_stars ?? ref.quality_stars) || 0;
+    if (stars >= 1 && stars <= 3) _archSelectStars(stars);
 
     // 태그 미리보기: 기존 태그 표시
     const preview = document.getElementById('archive-auto-tags-preview');
@@ -1697,14 +1740,20 @@ async function openArchiveEdit(refId) {
       ).join('');
       preview.style.display = existingTags.length ? 'block' : 'none';
       if (preview.style.display === 'block') {
-        preview.querySelector('span').innerHTML = '<i class="fas fa-tag" style="margin-right:4px"></i>저장된 태그';
+        const _tagLabel = preview.querySelector('span');
+        if (_tagLabel) _tagLabel.innerHTML = '<i class="fas fa-tag" style="margin-right:4px"></i>저장된 태그';
       }
     }
 
     await _fillArchiveModalSelects(ref);
-    document.getElementById('archive-pending-files').innerHTML = '';
+    const _pendingEl = document.getElementById('archive-pending-files');
+    if (_pendingEl) _pendingEl.innerHTML = '';
     openModal('archiveNewModal');
-  } catch(e) { Toast.error('자료를 불러오는 중 오류가 발생했습니다.'); }
+  } catch(e) {
+    console.error('openArchiveEdit error', e);
+    const hint = (e && e.message) ? ' ' + String(e.message) : '';
+    Toast.error('수정 폼을 불러오는 중 오류가 발생했습니다.' + hint);
+  }
 }
 
 async function _fillArchiveModalSelects(ref) {
@@ -1937,7 +1986,6 @@ async function saveArchiveRecord() {
     is_template:          document.getElementById('archive-is-template')?.checked || false,
     source_type:          'manual',
     registered_by_id:     String(session.id ?? ''),
-
     registered_by_name:   session.name,
     status:               'active',
     view_count:           0,
@@ -1949,13 +1997,42 @@ async function saveArchiveRecord() {
   const closeBtn2  = document.querySelector('#archiveNewModal .modal-footer .btn-ghost');
   const restoreBtn   = BtnLoading.start(saveBtn, '저장 중...');
   const restoreClose = BtnLoading.disableAll(closeBtn2);
+  const busyDone = GlobalBusy?.show ? GlobalBusy.show('저장 중...') : (() => {});
 
   try {
-    const created = await API.create('mail_references', payload);
-    if (!created || !created.id) {
-      throw new Error('저장 응답에 id가 없습니다. RLS 또는 스키마 오류일 수 있습니다.');
+    const editId = String(document.getElementById('archive-edit-id')?.value || '').trim();
+    const isEdit = !!editId;
+    let refId = editId;
+    if (isEdit) {
+      // 수정: 삭제 권한과 동일 (admin/director)
+      if (session.role !== 'admin' && session.role !== 'director') {
+        throw new Error('수정 권한이 없습니다.');
+      }
+      await API.patch('mail_references', editId, {
+        subject:           payload.subject,
+        body_text:         payload.body_text,
+        work_description:  payload.work_description,
+        work_category:     payload.work_category,
+        work_subcategory:  payload.work_subcategory,
+        kw_query:          payload.kw_query,
+        kw_reason:         payload.kw_reason,
+        law_refs:          payload.law_refs,
+        quality_stars:     payload.quality_stars,
+        quality_rating:    payload.quality_rating,
+        star_display:      payload.star_display,
+        tags:              payload.tags,
+        keywords:          payload.keywords,
+        summary:           payload.summary,
+        is_template:       payload.is_template,
+        status:            'active',
+      });
+    } else {
+      const created = await API.create('mail_references', payload);
+      if (!created || !created.id) {
+        throw new Error('저장 응답에 id가 없습니다. RLS 또는 API(Prefer: return=representation) 설정을 확인하세요.');
+      }
+      refId = created.id;
     }
-    const refId = created.id;
 
 
     // 검색 인덱스 업데이트
@@ -1965,14 +2042,18 @@ async function saveArchiveRecord() {
     Cache.invalidate('doc_texts_list');
     Cache.invalidate('ref_search_index_list');
 
-    restoreBtn(); restoreClose();
-    Toast.success('✅ 자문 자료가 등록되었습니다.');
+    restoreBtn(); restoreClose(); busyDone();
+    Toast.success(isEdit ? '✅ 자문 자료가 수정되었습니다.' : '✅ 자문 자료가 등록되었습니다.');
     closeModal('archiveNewModal');
-        loadArchiveList();
+    // 상세 모달이 열려있으면 갱신
+    if (document.getElementById('archiveDetailModal')?.style?.display !== 'none') {
+      openArchiveDetail(refId);
+    }
+    loadArchiveList();
   } catch(e) {
-    restoreBtn(); restoreClose();
+    restoreBtn(); restoreClose(); busyDone();
     console.error('saveArchiveRecord error', e);
-    const msg = e?.message || '알 수 없는 오류';
+    const msg = (e && e.message) ? String(e.message) : String(e);
     Toast.error('저장 실패: ' + msg);
   }
 }
@@ -2000,7 +2081,8 @@ function _cleanPasteHtml(html) {
     //   ex) <!--[if gte mso 9]><xml><w:WordDocument>...</xml><![endif]-->
     //   ex) Normal 0 0 2 false false false ... 같은 텍스트의 원본
     let cleaned = html
-      .replace(/<!--\[if[^\]]*\]>.*?<!\[endif\]-->/gis, '')  // 조건부 주석 전체 제거
+      // 조건부 주석은 “껍데기”만 제거하고 내부 HTML은 보존 (엑셀 표가 안에 들어있는 경우가 있음)
+      .replace(/<!--\[if[^\]]*\]>([\s\S]*?)<!\[endif\]-->/gi, (_, inner) => inner || '')
       .replace(/<xml[^>]*>.*?<\/xml>/gis, '')                // <xml>...</xml> 블록 제거
       .replace(/<o:[^>]*>.*?<\/o:[^>]*>/gis, '')             // <o:...>...</o:...> 태그 제거
       .replace(/<w:[^>]*>.*?<\/w:[^>]*>/gis, '')             // <w:...>...</w:...> 태그 제거
@@ -2038,19 +2120,16 @@ function _cleanPasteHtml(html) {
     tmp.querySelectorAll('table').forEach(t => {
       t.style.borderCollapse = 'collapse';
       t.style.maxWidth = '100%';
-      t.style.fontSize = '12px';
-      t.style.tableLayout = 'auto';
-      t.removeAttribute('width');
-      t.style.width = 'auto';
+      // 엑셀/워드 표는 col/td/th의 width/height 정보에 의존하는 경우가 많아서
+      // width 속성/스타일을 강제로 제거하면 레이아웃이 깨질 수 있음 → 보존
     });
     tmp.querySelectorAll('td, th').forEach(el => {
-      el.style.border = '1px solid #94a3b8';
-      el.style.padding = '4px 8px';
+      // 기본 가독성만 보강 (엑셀 표 레이아웃은 width/height에 의존할 수 있어 보존)
+      if (!el.style.border) el.style.border = '1px solid #94a3b8';
+      if (!el.style.padding) el.style.padding = '4px 8px';
       el.style.verticalAlign = 'top';
       el.style.wordBreak = 'break-word';
       el.style.whiteSpace = 'pre-wrap';
-      el.removeAttribute('width');
-      el.removeAttribute('height');
     });
     tmp.querySelectorAll('th').forEach(el => {
       el.style.background = '#e2e8f0';
@@ -2062,6 +2141,68 @@ function _cleanPasteHtml(html) {
   } catch(e) {
     return html;
   }
+}
+
+/** 엑셀/시트에서 복사된 TSV(탭/줄바꿈) → 간단한 HTML 표로 변환 */
+function _archTsvToTableHtml(tsv) {
+  const text = String(tsv || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const rows = text.split('\n').filter(r => r.length > 0);
+  if (rows.length < 2) return '';
+  const cells = rows.map(r => r.split('\t'));
+  const colCount = Math.max(...cells.map(r => r.length));
+  if (colCount < 2) return '';
+
+  const htmlRows = cells.map(r => {
+    const tds = [];
+    for (let i = 0; i < colCount; i++) {
+      const v = (r[i] == null ? '' : String(r[i]));
+      tds.push(`<td>${Utils.escHtml(v)}</td>`);
+    }
+    return `<tr>${tds.join('')}</tr>`;
+  }).join('');
+
+  return `<table><tbody>${htmlRows}</tbody></table>`;
+}
+
+async function _archTryClipboardTsvFallback() {
+  // 일부 환경에서 paste 이벤트의 clipboardData가 비어있거나 HTML이 누락됨
+  // 사용자 제스처(붙여넣기) 직후에만 readText가 성공할 수 있어, paste 핸들러에서만 호출 권장
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.readText) return '';
+    const t = await navigator.clipboard.readText();
+    return (t && t.includes('\t') && t.includes('\n')) ? t : '';
+  } catch {
+    return '';
+  }
+}
+
+function openArchiveTablePasteHelper() {
+  const ta = document.getElementById('archiveTablePasteText');
+  if (ta) ta.value = '';
+  openModal('archiveTablePasteModal');
+  setTimeout(() => { if (ta) ta.focus(); }, 50);
+}
+
+function applyArchiveTablePasteHelper() {
+  const ta = document.getElementById('archiveTablePasteText');
+  const raw = (ta?.value || '').trim();
+  if (!raw) { Toast.warning('붙여넣은 내용이 없습니다.'); return; }
+
+  let html = '';
+  if (/<table[\s>]/i.test(raw)) {
+    html = raw;
+  } else if (raw.includes('\t') && raw.includes('\n')) {
+    html = _archTsvToTableHtml(raw);
+  }
+  if (!html) { Toast.warning('표로 변환할 수 없습니다. (TSV 또는 <table> HTML만 지원)'); return; }
+
+  const cleanHtml = _cleanPasteHtml(html);
+  _archSwitchToRich(cleanHtml);
+  closeModal('archiveTablePasteModal');
+  setTimeout(() => {
+    const richEl = document.getElementById('archive-rich-editor');
+    if (richEl) richEl.focus();
+  }, 50);
 }
 
 /** 표 모드(contenteditable)로 전환 */
@@ -2112,6 +2253,22 @@ function _archGetEditorText() {
     return (_archiveQuill.getText().trim() || _archiveQuill.root.innerText.trim());
   }
   return '';
+}
+
+/** 에디터에 HTML 주입 (표가 있으면 rich 모드로 자동 전환) */
+function _archSetEditorHtml(html) {
+  const raw = String(html || '');
+  const clean = _cleanPasteHtml(raw);
+  if (/<table[\s>]/i.test(clean)) {
+    _archSwitchToRich(clean);
+    return;
+  }
+  _archSwitchToQuill();
+  _initArchiveQuill();
+  if (_archiveQuill) {
+    _archiveQuill.setContents([]);
+    _archiveQuill.clipboard.dangerouslyPasteHTML(clean || '');
+  }
 }
 
 /** 에디터 초기화 (모달 열 때마다 호출) */
@@ -2165,10 +2322,23 @@ function _initArchiveQuill() {
   // ── Quill 에디터 paste: 표가 포함되면 contenteditable로 자동 전환 ──
   _archiveQuill.root.addEventListener('paste', function(e) {
     const cd = e.clipboardData || window.clipboardData;
-    if (!cd) return;
-    const htmlData = cd.getData('text/html');
+    const htmlData = cd ? cd.getData('text/html') : '';
+    const textData = cd ? cd.getData('text/plain') : '';
 
-    if (htmlData && htmlData.includes('<table')) {
+    // 디버그(필요 시): 콘솔에서 window._archPasteDebug = true 로 켜기
+    try {
+      if (window._archPasteDebug) {
+        console.log('[arch paste]', {
+          types: cd ? Array.from(cd.types || []) : [],
+          htmlLen: htmlData ? htmlData.length : 0,
+          textLen: textData ? textData.length : 0,
+          hasTableHtml: !!(htmlData && /<table[\s>]/i.test(htmlData)),
+          hasTsv: !!(textData && textData.includes('\t') && textData.includes('\n')),
+        });
+      }
+    } catch {}
+
+    if (htmlData && /<table[\s>]/i.test(htmlData)) {
       // 표 감지 → Quill 처리 완전 차단 후 contenteditable 모드로 전환
       e.preventDefault();
       e.stopPropagation();
@@ -2182,7 +2352,42 @@ function _initArchiveQuill() {
         const richEl = document.getElementById('archive-rich-editor');
         if (richEl) richEl.focus();
       }, 50);
+      return;
     }
+
+    // HTML 테이블이 안 들어오는 환경(엑셀/브라우저 조합) 대비:
+    // 탭/줄바꿈으로 구성된 TSV가 들어오면 표로 변환해 표 모드로 전환
+    if (textData && textData.includes('\t') && textData.includes('\n')) {
+      const tableHtml = _archTsvToTableHtml(textData);
+      if (tableHtml) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+
+        const cleanHtml = _cleanPasteHtml(tableHtml);
+        _archSwitchToRich(cleanHtml);
+        setTimeout(() => {
+          const richEl = document.getElementById('archive-rich-editor');
+          if (richEl) richEl.focus();
+        }, 50);
+      }
+      return;
+    }
+
+    // 마지막 우회: clipboardData가 비어있거나 탭이 누락되는 환경에서는 navigator.clipboard로 다시 시도
+    // (권한/브라우저 정책에 따라 실패할 수 있음)
+    setTimeout(async () => {
+      if (_archiveUseRich) return; // 이미 전환됐다면 스킵
+      const tsv = await _archTryClipboardTsvFallback();
+      const tableHtml = tsv ? _archTsvToTableHtml(tsv) : '';
+      if (!tableHtml) return;
+      const cleanHtml = _cleanPasteHtml(tableHtml);
+      _archSwitchToRich(cleanHtml);
+      setTimeout(() => {
+        const richEl = document.getElementById('archive-rich-editor');
+        if (richEl) richEl.focus();
+      }, 50);
+    }, 0);
     // 표 없는 경우: Quill이 정상 처리
   }, true);
 }
@@ -2337,6 +2542,7 @@ async function deleteArchive(refId) {
   if (!ok2) return;
 
   // ── 삭제 실행 ──────────────────────────────────────
+  const busyDone = GlobalBusy?.show ? GlobalBusy.show('삭제 중...') : (() => {});
   try {
     await API.patch('mail_references', refId, {
       status: 'hidden',      
@@ -2345,10 +2551,11 @@ async function deleteArchive(refId) {
     closeModal('archiveDetailModal');
     Toast.success('자료가 삭제되었습니다.');
     loadArchiveList();
-   } catch(e) {
-    console.error('deleteArchive error', e);
-    const msg = e?.message || '알 수 없는 오류';
-    Toast.error('삭제 실패: ' + msg);
+  } catch (e) {
+    console.error('[deleteArchive]', e);
+    Toast.error('삭제 중 오류가 발생했습니다.' + (e && e.message ? ' ' + e.message : ''));
+  } finally {
+    busyDone();
   }
 }
 
@@ -2468,6 +2675,7 @@ async function _saveDocText(refId, entryId, fileObj, order) {
     file_type: fileObj.fileType,
     file_size: fileObj.fileSize,
     file_content: fileObj.content || '',
+    file_url: fileObj.fileUrl || '',
     extracted_text: fileObj.extractedText || '',
     page_count: fileObj.pageCount || 0,
     extract_method: _detectExtractMethod(fileObj.fileType),
@@ -2637,17 +2845,30 @@ async function processApprovalWithArchive() {
       registered_by_name: entryData?.user_name || '',
       archived_by_id: session.id,
       archived_by_name: session.name,
-      archived_at: new Date().toISOString(),
+      archived_at: Date.now(),
       view_count: 0,
       helpful_count: 0,
       status: 'active'
     };
     const ref = await API.create('mail_references', refPayload);
 
-    // 4. 기존 attachments → doc_texts 복사 (PDF는 텍스트 자동 추출 시도)
+    // 4. 기존 attachments → doc_texts 복사 (단건 API.get으로 file_content·file_size 확보)
+    let urlOnlyNoBinary = 0;
     for (const [i, att] of attachmentDocs.entries()) {
-      const fileType = att.file_type || 'other';
-      const content  = att.file_content || '';
+      let full = att;
+      if (att.id) {
+        try {
+          const g = await API.get('attachments', att.id);
+          if (g) full = g;
+        } catch (e) {
+          console.warn('[자료실] 첨부 단건 조회 실패:', att.id, e);
+        }
+      }
+      const fileType = full.file_type || 'other';
+      const content  = full.file_content || '';
+      const fileUrl  = (full.file_url || '').trim();
+      if (!content && fileUrl.startsWith('http')) urlOnlyNoBinary++;
+
       let extractedText = '';
       let extractStatus = 'pending';
       let pageCount = 0;
@@ -2665,15 +2886,19 @@ async function processApprovalWithArchive() {
       }
 
       const fileObj = {
-        fileName:      att.file_name || att.file_url || '첨부파일',
+        fileName:      full.file_name || full.file_url || '첨부파일',
         fileType:      fileType,
-        fileSize:      att.file_size || 0,
+        fileSize:      Number(full.file_size) || 0,
         content:       content,
+        fileUrl:       fileUrl,
         extractedText: extractedText,
         extractStatus: extractStatus,
         pageCount:     pageCount
       };
       await _saveDocText(ref.id, entryId, fileObj, i);
+    }
+    if (urlOnlyNoBinary > 0) {
+      Toast.warning(`링크만 등록된 첨부 ${urlOnlyNoBinary}건은 다운로드 대신 「링크 열기」로 확인하세요.`);
     }
 
     // 5. 검색 인덱스

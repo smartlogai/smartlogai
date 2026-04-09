@@ -70,7 +70,7 @@ body {
   flex-direction: column;
   position: fixed;
   top: 0; left: 0; bottom: 0;
-  z-index: 100;
+  z-index: 110;         /* 워터마크(0)보다 위, 모달(500+)보다 아래 */
   transition: transform 0.3s ease;
 }
 .sidebar-logo {
@@ -233,6 +233,8 @@ body {
   flex-direction: column;
   height: 100vh;        /* 뷰포트 높이 고정 — page-body가 스크롤 담당 */
   overflow: hidden;
+  position: relative;
+  z-index: 10;          /* security 워터마크(z-index:0)보다 위 — 텍스트·뱃지가 워터마크에 묻지 않음 */
 }
 .page-header {
   height: var(--header-height);
@@ -757,28 +759,35 @@ textarea.form-control {
   text-overflow: ellipsis;
 }
 /* No — 가운데 */
-#my-entries-table td:nth-child(1) { text-align: center; padding: 9px 6px; }
-/* 작성일자 — 고정 */
-#my-entries-table td:nth-child(2) { font-size: 12px; color: var(--text-secondary); }
+#my-entries-table td.td-no { text-align: center; padding: 9px 6px; }
+/* 작성일자 */
+#my-entries-table td.td-written { font-size: 12px; color: var(--text-secondary); }
 /* 고객사·업무팀·소분류 — ellipsis */
-#my-entries-table td:nth-child(3),
-#my-entries-table td:nth-child(4),
-#my-entries-table td:nth-child(5) { overflow: hidden; }
+#my-entries-table td.td-client,
+#my-entries-table td.td-team,
+#my-entries-table td.td-subcat { overflow: hidden; }
 /* 시작·종료일시 — 가운데, 작은 글씨 */
-#my-entries-table td:nth-child(6),
-#my-entries-table td:nth-child(7) {
+#my-entries-table td.td-start,
+#my-entries-table td.td-end {
   text-align: center;
   font-size: 12px;
   color: var(--text-secondary);
   padding: 9px 6px;
 }
 /* 업무시간·상태·관리 — 가운데, overflow visible */
-#my-entries-table td:nth-child(8),
-#my-entries-table td:nth-child(9),
-#my-entries-table td:nth-child(10) {
+#my-entries-table td.td-duration,
+#my-entries-table td.td-status,
+#my-entries-table td.td-action {
   text-align: center;
   overflow: visible;
-  padding: 9px 4px;
+  padding: 9px 6px;
+}
+
+/* 소분류 열: 내용이 길어도 좌우 균형 있게 */
+#my-entries-table th.th-subcat,
+#my-entries-table td.td-subcat {
+  padding-left: 12px;
+  padding-right: 12px;
 }
 /* 관리 버튼 hover 배경 */
 #my-entries-table button:hover {
@@ -1670,8 +1679,123 @@ input[type=date].filter-control {
 .filter-actions { display: flex; gap: 6px; align-self: flex-end; }
 
 /* ============================================
+   검색조건 바 내 검색형 셀렉트(고객사/담당자) 높이 정렬
+   - 분석 화면은 .filter-bar가 아닌 inline grid 컨테이너를 사용함
+   - filter-control(30px)과 동일하게 맞춤 (인라인 스타일 우선순위도 덮어쓰기)
+   ============================================ */
+.filter-group .cs-selected-box.form-control,
+.filter-group .cs-search-box .form-control {
+  height: 30px !important;
+  min-height: 30px !important;
+  line-height: 30px !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+.filter-group .cs-search-box .form-control {
+  padding-left: 30px !important; /* 검색 아이콘 영역 유지 */
+}
+.filter-group .cs-selected-box.form-control {
+  padding: 0 10px !important;
+}
+
+/* ============================================
    모달
    ============================================ */
+.global-busy-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 100000;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  pointer-events: all;
+}
+.global-busy-overlay.show { display: flex; }
+.global-busy-card {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  min-width: 280px;
+  max-width: 420px;
+}
+.global-busy-spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(59, 130, 246, 0.10);
+  color: var(--primary);
+  flex-shrink: 0;
+}
+.global-busy-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text-primary);
+  line-height: 1.2;
+  margin-bottom: 2px;
+}
+.global-busy-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.35;
+  word-break: keep-all;
+}
+
+/* ============================================
+   contenteditable 리치 편집 영역(표 포함) 공통
+   ============================================ */
+.rich-edit-surface {
+  overflow-y: auto;
+  overflow-x: auto;
+  max-height: 60vh;
+  user-select: text;
+  -webkit-user-select: text;
+  caret-color: auto;
+  white-space: normal;
+  word-break: break-word;
+  scrollbar-gutter: stable;
+  /* 대용량 표 편집 시 리플로우 범위를 줄여 커서 지연 완화 */
+  contain: content;
+  -webkit-font-smoothing: antialiased;
+}
+.rich-edit-surface:focus { outline: none; }
+
+/* 승인 모달 contenteditable 표 스타일 (archive-rich-editor와 동일 계열) */
+#approval-edit-rich table {
+  border-collapse: collapse !important;
+  width: auto !important;
+  max-width: 100% !important;
+  margin: 8px 0 !important;
+  font-size: 12px !important;
+  table-layout: auto !important;
+}
+#approval-edit-rich table td,
+#approval-edit-rich table th {
+  border: 1px solid #94a3b8 !important;
+  padding: 4px 8px !important;
+  min-width: 40px !important;
+  word-break: break-word !important;
+  white-space: pre-wrap !important;
+  vertical-align: top !important;
+}
+#approval-edit-rich table th {
+  background: #e2e8f0 !important;
+  font-weight: 700 !important;
+  text-align: center !important;
+}
+#approval-edit-rich table tr:nth-child(even) {
+  background: #f8fafc;
+}
+
 .modal-overlay {
   display: none;
   position: fixed;
@@ -1790,6 +1914,72 @@ input[type=date].filter-control {
   box-sizing: border-box;
   /* 내부 grid/flex가 컸테이너 폭을 넘치지 않도록 */
   min-width: 0;
+  position: relative;
+  z-index: 1;           /* 워터마크보다 위(메인 콘텐츠 스택과 일치) */
+}
+
+/* 대시보드「내 업무 기록」상태 뱃지 — 배경·테두리로 대비 확보 */
+.dash-status-pill {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  line-height: 1.45;
+  border: 1px solid transparent;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* 대시보드「내 업무 기록」테이블 — 카드 폭에 맞춤, 시간·상태 고정폭으로 우측 밀림·말줄임 방지 */
+.dash-recent-entries-scroll {
+  padding: 0 10px 0 8px;
+  box-sizing: border-box;
+}
+.dash-recent-entries-table {
+  table-layout: fixed;
+  width: 100%;
+  min-width: 0;
+  border-collapse: collapse;
+}
+.dash-recent-col-date   { width: 76px; }
+.dash-recent-col-time   { width: 52px; }
+.dash-recent-col-status { width: 140px; min-width: 140px; }
+/* 고객사·업무내용만 남는 폭을 나눠 쓰고 말줄임 (fixed 레이아웃 가변열 패턴) */
+.dash-recent-entries-table th:nth-child(2),
+.dash-recent-entries-table td:nth-child(2),
+.dash-recent-entries-table th:nth-child(3),
+.dash-recent-entries-table td:nth-child(3) {
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dash-recent-entries-table th:nth-child(1),
+.dash-recent-entries-table td:nth-child(1) {
+  max-width: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dash-recent-entries-table th:nth-child(4),
+.dash-recent-entries-table td:nth-child(4) {
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+  text-align: right;
+}
+.dash-recent-entries-table th:nth-child(5),
+.dash-recent-entries-table td.dash-recent-status-cell {
+  max-width: none;
+  min-width: 140px;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+  text-align: center;
+  vertical-align: middle;
 }
 
 /* 직원목록: page-section.active와 동일 스타일 상속, 별도 override 불필요 */
@@ -2044,6 +2234,39 @@ input[type=date].filter-control {
 #archive-rich-editor:focus {
   border-color: var(--primary) !important;
   box-shadow: 0 0 0 2px rgba(45,107,181,.1);
+}
+
+/* 타임시트 수행내용 — 표 모드 contenteditable (상세/자문 아카이브와 동일 계열) */
+#entry-rich-editor:empty::before {
+  content: attr(placeholder);
+  color: #9ca3af;
+  font-size: 12.5px;
+  pointer-events: none;
+}
+#entry-rich-editor table {
+  border-collapse: collapse !important;
+  width: auto !important;
+  max-width: 100% !important;
+  margin: 8px 0 !important;
+  font-size: 12px !important;
+  table-layout: auto !important;
+}
+#entry-rich-editor table td,
+#entry-rich-editor table th {
+  border: 1px solid #94a3b8 !important;
+  padding: 4px 8px !important;
+  min-width: 40px !important;
+  word-break: break-word !important;
+  white-space: pre-wrap !important;
+  vertical-align: top !important;
+}
+#entry-rich-editor table th {
+  background: #e2e8f0 !important;
+  font-weight: 700 !important;
+  text-align: center !important;
+}
+#entry-rich-editor table tr:nth-child(even) {
+  background: #f8fafc;
 }
 
 /* placeholder */
@@ -2994,6 +3217,20 @@ select.ep-ctrl {
   border-radius: 10px;
   padding: 3px 10px;
   font-size: 12px;
+}
+
+/* ── My Time Sheet: Admin만 Staff 열 표시 ── */
+#page-my-entries:not(.admin-all-entries) col.my-entries-col-author,
+#page-my-entries:not(.admin-all-entries) th.my-entries-col-author,
+#page-my-entries:not(.admin-all-entries) td.my-entries-col-author {
+  display: none;
+}
+#page-my-entries.admin-all-entries col.my-entries-col-author {
+  display: table-column;
+}
+#page-my-entries.admin-all-entries th.my-entries-col-author,
+#page-my-entries.admin-all-entries td.my-entries-col-author {
+  display: table-cell;
 }
 
 /* ── 반응형 ── */

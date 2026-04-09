@@ -11,10 +11,11 @@
   <meta name="referrer" content="no-referrer" />
   <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
   <meta http-equiv="X-Content-Type-Options" content="nosniff" />
-  <!-- 보안 모듈: 가장 먼저 로드 -->
-  <script src="js/security.js"></script>
-  <!-- Supabase 설정 (로컬: supabase.dev.js / 원격: 빌드 주입된 supabase-env.js) -->
+  <!-- 로컬 개발용 Supabase (없으면 404 — supabase.dev.example.js 참고) -->
+  <script src="js/supabase.dev.js"></script>
   <script src="js/supabase-env.js"></script>
+  <!-- 보안 모듈 -->
+  <script src="js/security.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <style>
@@ -686,7 +687,7 @@
     }
 
     // ─────────────────────────────────────────
-    // Supabase 설정
+    // Supabase 설정 (supabase-env.js 가 주입 — 로컬은 supabase.dev.js 필요)
     // ─────────────────────────────────────────
     const SUPABASE_URL = window.__SMARTLOG_SB_URL__ || '';
     const SUPABASE_KEY = window.__SMARTLOG_SB_KEY__ || '';
@@ -1115,7 +1116,17 @@
           alert('관리자 계정이 생성되었습니다. 직원 관리에서 팀원을 추가할 수 있습니다.');
           _completeLogin(user, true);
         } else {
-          showSetupError('계정 생성에 실패했습니다. 다시 시도해주세요.');
+          const detail =
+            (created && (created.message || created.error_description || created.hint)) ||
+            (typeof created === 'object' && created !== null && JSON.stringify(created).length < 400
+              ? JSON.stringify(created)
+              : '') ||
+            ('HTTP ' + res.status);
+          showSetupError(
+            '계정 생성에 실패했습니다. ' +
+            (detail ? '(' + detail + ')' : '') +
+            ' 개발 DB에서 docs/sql/dev_rls_anon_allow_all.sql 실행 여부를 확인하세요.'
+          );
         }
       } catch (err) {
         console.error(err);
@@ -1159,6 +1170,13 @@
     // 페이지 로드 시 초기화
     // ─────────────────────────────────────────
     window.addEventListener('DOMContentLoaded', () => {
+      if (window.__SMARTLOG_DEV_CONFIG_MISSING__) {
+        var devBanner = document.createElement('div');
+        devBanner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#b45309;color:#fff;padding:10px 14px;font-size:12.5px;text-align:center;z-index:100000;line-height:1.5';
+        devBanner.innerHTML = '<strong>로컬 개발</strong> — <code>js/supabase.dev.js</code>를 만들고 개발용 Supabase URL·anon 키를 넣으세요. (<a href="docs/PRE_DEV_INDEX.md" style="color:#ffedd5">사전 준비 색인</a>)';
+        document.body.appendChild(devBanner);
+        document.body.style.paddingTop = '48px';
+      }
       if (!checkExistingSession()) {
         checkFirstRun();
       }

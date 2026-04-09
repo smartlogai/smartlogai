@@ -2,34 +2,85 @@
    dashboard.js — 역할별 대시보드
    Staff   : 본인 업무 현황
    Manager : 승인자(본인)로 지정된 팀원 현황 + 승인 대기
-   Director: 전체 팀 현황 + 고객사별 투입
-   Admin   : 전체 현황 + 시스템 현황
+   Director: 전체 팀 현황 + 자문유형별 평균 소요
+   Admin   : 전체 현황 + 시스템 현황 · 사이드바에서 Staff 업무기록·1차/2차 승인 현황
    ============================================ */
 
 let _dashCharts = {};
+
+// ─────────────────────────────────────────────
+// ★ 대시보드 범위(권한) — Analysis와 동일 규칙
+// - Admin: 전체
+// - Manager(1차 승인자): approver_id == session.id 인 직원만
+// - Director:
+//    - 본부장: (hq_id가 있으면) reviewer2_id == session.id 인 직원만
+//    - 사업부장: (hq_id 없고 dept_id 있으면) dept_id == session.dept_id 직원 전체
+// - Staff: 본인만
+// ─────────────────────────────────────────────
+function _getVisibleUserIdSetForDashboard(session, allUsers) {
+  const s = session || {};
+  const users = Array.isArray(allUsers) ? allUsers : [];
+  const role = s.role || '';
+  const sid = String(s.id || '');
+  if (!sid) return new Set();
+
+  if (role === 'admin') return null; // null = 제한 없음
+  if (role === 'staff') return new Set([sid]);
+
+  if (role === 'manager') {
+    return new Set(
+      users
+        .filter(u => String(u.approver_id || '') === sid)
+        .map(u => String(u.id))
+        .filter(Boolean)
+    );
+  }
+
+  if (role === 'director') {
+    const deptId = String(s.dept_id || '');
+    const hqId = String(s.hq_id || '');
+
+    // 본부장: 최종승인자 지정(reviewer2_id) 직원만
+    if (hqId) {
+      return new Set(
+        users
+          .filter(u => String(u.reviewer2_id || '') === sid)
+          .map(u => String(u.id))
+          .filter(Boolean)
+      );
+    }
+    // 사업부장: 동일 사업부(dept_id) 전체 직원
+    if (deptId) {
+      return new Set(
+        users
+          .filter(u => String(u.dept_id || '') === deptId)
+          .map(u => String(u.id))
+          .filter(Boolean)
+      );
+    }
+    // 예외 fallback: 기존 scopeMatch
+    return new Set(
+      users
+        .filter(u => Auth.scopeMatch(s, u))
+        .map(u => String(u.id))
+        .filter(Boolean)
+    );
+  }
+
+  return new Set([sid]);
+}
+
+/** 과부하/저부하 카드 제목 — admin(전사)만 「전체」, 그 외 「팀원」 */
+function _overloadWorkloadCardTitle(session) {
+  return session && session.role === 'admin' ? '전체 과부하/저부하' : '팀원 과부하/저부하';
+}
 
 // ─────────────────────────────────────────────
 // ★ 성능 최적화: time_entries 캐시 (3분 TTL)
 // 대시보드 재진입 시 동일 데이터 재활용
 // ─────────────────────────────────────────────
 async function _getCachedEntries() {
-  return Cache.get('dash_time_entries', async () => {
-    // ★ 모든 상태 항목 한 번에 로드 (limit 1000 → 서버 최대 허용치 내)
-    const res = await API.list('time_entries', { limit: 1000 });
-    const data = (res && res.data) ? res.data : [];
-    const total = (res && res.total) || data.length;
-
-    // ★ 서버가 limit보다 많은 데이터를 가지고 있을 경우 2페이지도 로드
-    if (total > data.length && data.length >= 1000) {
-      try {
-        const res2 = await API.list('time_entries', { limit: 1000, page: 2 });
-        if (res2 && res2.data && res2.data.length > 0) {
-          data.push(...res2.data);
-        }
-      } catch(e) { console.warn('[Dashboard] 2페이지 로드 실패:', e); }
-    }
-    return data;
-  }, 60000); // 1분 TTL (승인 직후 반영)
+  return Cache.get('dash_time_entries', () => API.fetchAllTimeEntriesForDash(), 60000); // 1분 TTL (승인 직후 반영)
 }
 
 async function init_dashboard() {
@@ -165,25 +216,63 @@ function renderDonutChart(canvasId, dataMap) {
 }
 
 // ─────────────────────────────────────────────
-// 공통: 고객사 바 행 HTML 생성
-// cliEntries: [[name, min], ...] 전체 정렬된 배열 (opacity 계산용)
-// entries: 실제 렌더링할 슬라이스
-// totalCliMin: 전체 합계
+// 승인 완료 entries → 업무 소분류별 건당 평균 분 집계, 상위 topN + 기타(가중 평균)
 // ─────────────────────────────────────────────
-function buildCliRows(entries, cliEntries, totalCliMin) {
-  if (!entries.length) return `<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:20px">데이터 없음</div>`;
-  const maxMin = cliEntries[0][1];
-  return entries.map(([name, min], idx) => {
-    // 전체 리스트에서의 순위 인덱스로 opacity 계산
-    const globalIdx = cliEntries.findIndex(([n]) => n === name);
-    const opacity = Math.max(0.35, 1 - globalIdx * (0.55 / Math.max(cliEntries.length - 1, 1)));
-    const barClr  = `rgba(45,107,181,${opacity.toFixed(2)})`;
-    const txtClr  = `rgba(45,107,181,${Math.min(1, opacity + 0.2).toFixed(2)})`;
-    const hours   = (min / 60).toFixed(1);
-    const pct     = totalCliMin > 0 ? Math.round(min / totalCliMin * 100) : 0;
-    const barW    = maxMin > 0 ? (min / maxMin * 100).toFixed(1) : 0;
+function buildSubcategoryAvgSlices(approvedEntries, topN = 15) {
+  const agg = {};
+  approvedEntries.forEach(e => {
+    const k = e.work_subcategory_name || e.work_category_name || '미분류';
+    if (!agg[k]) agg[k] = { sumMin: 0, count: 0 };
+    agg[k].sumMin += (e.duration_minutes || 0);
+    agg[k].count += 1;
+  });
+  const rows = Object.entries(agg).map(([name, v]) => ({
+    name,
+    avgMin: v.count > 0 ? v.sumMin / v.count : 0,
+    count: v.count,
+    isEtc: false
+  }));
+  rows.sort((a, b) => b.avgMin - a.avgMin);
+  if (!rows.length) return { display: [] };
+  const top = rows.slice(0, topN);
+  const rest = rows.slice(topN);
+  const display = top.map(r => ({ ...r }));
+  if (rest.length) {
+    const cnt = rest.reduce((s, r) => s + r.count, 0);
+    const sumMinRest = rest.reduce((s, r) => s + r.avgMin * r.count, 0);
+    display.push({
+      name: '기타',
+      avgMin: cnt > 0 ? sumMinRest / cnt : 0,
+      count: cnt,
+      isEtc: true
+    });
+  }
+  return { display };
+}
+
+// ─────────────────────────────────────────────
+// 자문유형(소분류) 평균 소요 막대 행 HTML
+// display: { name, avgMin, count, isEtc }[] — 평균 분 큰 순, 기타는 맨 아래
+// 막대·%: 표시 행 중 최대 평균분 = 100%
+// ─────────────────────────────────────────────
+function buildSubcatAvgRows(display) {
+  if (!display.length) {
+    return `<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:20px">데이터 없음</div>`;
+  }
+  const maxAvg = Math.max(...display.map(r => r.avgMin), 0);
+  return display.map((r, idx) => {
+    const { name, avgMin, count, isEtc } = r;
+    const opacity = isEtc
+      ? 0.35
+      : Math.max(0.35, 1 - idx * (0.55 / Math.max(display.length - 1, 1)));
+    const barClr  = isEtc ? 'rgba(148,163,184,0.55)' : `rgba(45,107,181,${opacity.toFixed(2)})`;
+    const txtClr  = isEtc ? '#94a3b8' : `rgba(45,107,181,${Math.min(1, opacity + 0.2).toFixed(2)})`;
+    const hours   = (avgMin / 60).toFixed(1);
+    const pct     = maxAvg > 0 ? Math.round(avgMin / maxAvg * 100) : 0;
+    const barW    = maxAvg > 0 ? (avgMin / maxAvg * 100).toFixed(1) : 0;
+    const tip     = `${name} · ${count}건 · 평균 ${hours}h`;
     return `
-      <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #f4f6f9;" title="${name}">
+      <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #f4f6f9;" title="${tip.replace(/"/g, '&quot;')}">
         <div style="min-width:90px;max-width:150px;font-size:11px;color:#5a6878;font-weight:500;
                     white-space:normal;word-break:keep-all;flex-shrink:0;line-height:1.35;">${name}</div>
         <div style="flex:1;height:6px;background:#f0f4f8;border-radius:99px;overflow:hidden;min-width:0;">
@@ -334,38 +423,31 @@ function buildStaffStatRows(staffList, approvedEntries, allEntries, maxRefStaff,
 }
 
 // ─────────────────────────────────────────────
-// 공통: 고객사+직원 하단 섹션 렌더링
+// 공통: 자문유형(소분류) 평균 + 직원 하단 섹션 렌더링
 // mode: 'director' | 'manager' | 'staff'
 // ─────────────────────────────────────────────
 async function renderBottomSection(container, {
-  cliMap, allEntries, approvedEntries,
+  allEntries, approvedEntries,
   staffList, maxRefStaff, month, mode
 }) {
-  // 고객사 데이터 (상위 15 + 기타)
-  const cliAll     = Object.entries(cliMap).sort((a,b) => b[1] - a[1]);
-  const top15      = cliAll.slice(0, 15);
-  const etcMin     = cliAll.slice(15).reduce((s,[,v]) => s + v, 0);
-  const cliEntries = etcMin > 0 ? [...top15, ['기타', etcMin]] : top15;
-  const totalCliMin = cliEntries.reduce((s,[,v]) => s + v, 0);
+  const { display: subcatDisplay } = buildSubcategoryAvgSlices(approvedEntries, 15);
+  const subcatHTML = buildSubcatAvgRows(subcatDisplay);
 
   // ★ archive_items(별점) 없이 먼저 렌더링 → 별점만 나중에 업데이트 (지연 로드)
   const staffHTML = buildStaffStatRows(staffList, approvedEntries, allEntries, maxRefStaff, []);
 
-  // 고객사 행 HTML (단일 컬럼 — 카드 내부 스크롤)
-  const cliHTML = buildCliRows(cliEntries, cliEntries, totalCliMin);
-
   container.innerHTML = `
     <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-top:10px;">
-      <!-- 고객사별 투입시간 -->
+      <!-- 자문유형별(업무 소분류) 평균 소요시간 -->
       <div class="card">
         <div class="card-header" style="padding:12px 16px 10px">
-          <h2><i class="fas fa-building" style="color:var(--primary)"></i> &nbsp;고객사별 투입시간</h2>
+          <h2><i class="fas fa-bars" style="color:var(--primary)"></i> &nbsp;자문유형별 평균 소요시간</h2>
           <span style="font-size:11px;font-weight:400;color:var(--text-muted)">
-            상위 15+기타 · 승인 완료 기준
+            업무 소분류 · 상위 15+기타 · 승인 완료 · 건당 평균 · 막대는 최장 평균 대비
           </span>
         </div>
         <div class="card-body" style="padding:10px 14px;max-height:460px;overflow-y:auto;">
-          <div id="cli-rows-inner">${cliHTML}</div>
+          <div id="subcat-rows-inner">${subcatHTML}</div>
         </div>
       </div>
       <!-- 직원별 투입시간 통계 -->
@@ -422,6 +504,11 @@ function thisMonthStr() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
+function prevMonthStr() {
+  const now = new Date();
+  const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
 function entryMonth(e) {
   if (!e.work_start_at) return '';
   // 숫자형 타임스탬프(ms), 문자열 숫자, ISO 문자열 모두 처리
@@ -440,6 +527,65 @@ function entryMonth(e) {
   }
   if (isNaN(d.getTime())) return '';
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function _fmtPctDelta(cur, prev) {
+  const c = Number(cur) || 0;
+  const p = Number(prev) || 0;
+  if (p <= 0 && c <= 0) return { pct: 0, label: '0%', cls: 'muted' };
+  if (p <= 0 && c > 0) return { pct: 999, label: '+∞', cls: 'up' };
+  const pct = Math.round(((c - p) / p) * 100);
+  const cls = pct >= 0 ? 'up' : 'down';
+  const sign = pct >= 0 ? '+' : '';
+  return { pct, label: `${sign}${pct}%`, cls };
+}
+
+function _buildLeaderMonthlyStats(approvedCur, approvedPrev) {
+  const map = {};
+  function add(arr, key) {
+    (arr || []).forEach(e => {
+      const uid = String(e.user_id || '');
+      if (!uid) return;
+      if (!map[uid]) map[uid] = {
+        user_id: uid,
+        user_name: e.user_name || uid,
+        curMin: 0,
+        prevMin: 0,
+        curConsultCnt: 0,
+        prevConsultCnt: 0,
+        curConsultMin: 0,
+        prevConsultMin: 0,
+      };
+      const m = Number(e.duration_minutes) || 0;
+      map[uid][key + 'Min'] += m;
+      if (e.time_category === 'client') {
+        map[uid][key + 'ConsultCnt'] += 1;
+        map[uid][key + 'ConsultMin'] += m;
+      }
+    });
+  }
+  add(approvedCur, 'cur');
+  add(approvedPrev, 'prev');
+  return Object.values(map);
+}
+
+function _buildClientRadar(approvedCur, approvedPrev) {
+  const map = {};
+  function add(arr, key) {
+    (arr || []).forEach(e => {
+      if (e.time_category !== 'client') return;
+      const cid = String(e.client_id || '');
+      if (!cid) return;
+      const name = e.client_name || cid;
+      if (!map[cid]) map[cid] = { client_id: cid, client_name: name, curMin: 0, prevMin: 0, curCnt: 0, prevCnt: 0 };
+      const m = Number(e.duration_minutes) || 0;
+      map[cid][key + 'Min'] += m;
+      map[cid][key + 'Cnt'] += 1;
+    });
+  }
+  add(approvedCur, 'cur');
+  add(approvedPrev, 'prev');
+  return Object.values(map);
 }
 
 // ─────────────────────────────────────────────
@@ -503,13 +649,6 @@ async function renderStaffDashboard(session) {
       const k = e.work_subcategory_name || e.work_category_name || '미분류';
       subMap[k] = (subMap[k]||0) + (e.duration_minutes||0);
     });
-    // ★ 고객사별: 본인 승인 데이터만 (approvedMonth 기준)
-    const cliMap = {};
-    approvedMonth.filter(e => e.time_category === 'client').forEach(e => {
-      const k = e.client_name || '미지정';
-      cliMap[k] = (cliMap[k]||0) + (e.duration_minutes||0);
-    });
-
     // chart-row-1: 대분류(좌) + 소분류(우)
     renderBarChart('chart-type', collapseToTopN(majorMap, 8));
     renderBarChart('chart-sub',  collapseToTopN(subMap,   5));
@@ -537,13 +676,12 @@ async function renderStaffDashboard(session) {
       }
     }
 
-    // ── 하단: 본인 고객사별 투입시간(좌) + 본인 최근 업무 기록(우) ────────────────
+    // ── 하단: 자문유형별 평균(좌) + 본인 최근 업무 기록(우) ────────────────
     // ★ Staff는 본인 데이터만 표시 — 다른 직원 현황 비공개
     const recentSection = document.getElementById('recent-entries-section');
     if (recentSection) {
       recentSection.innerHTML = '';
       _renderStaffBottomSection(recentSection, {
-        cliMap,
         myEntries: entries,
         approvedMonth,
         allEntries,
@@ -557,40 +695,64 @@ async function renderStaffDashboard(session) {
 
 // ─────────────────────────────────────────────
 // Staff 전용 하단 섹션:
-//   좌) 고객사별 투입시간 (본인)
+//   좌) 자문유형별 평균 소요시간 (본인)
 //   우) 본인 최근 업무 기록 목록
 // ─────────────────────────────────────────────
-async function _renderStaffBottomSection(container, { cliMap, myEntries, approvedMonth, allEntries, month, session }) {
-  // 고객사 데이터 (상위 15 + 기타)
-  const cliAll      = Object.entries(cliMap).sort((a,b) => b[1]-a[1]);
-  const top15       = cliAll.slice(0, 15);
-  const etcMin      = cliAll.slice(15).reduce((s,[,v]) => s+v, 0);
-  const cliEntries  = etcMin > 0 ? [...top15, ['기타', etcMin]] : top15;
-  const totalCliMin = cliEntries.reduce((s,[,v]) => s+v, 0);
-  const cliHTML     = buildCliRows(cliEntries, cliEntries, totalCliMin);
+async function _renderStaffBottomSection(container, { myEntries, approvedMonth, allEntries, month, session }) {
+  const { display: subcatDisplay } = buildSubcategoryAvgSlices(approvedMonth, 15);
+  const subcatHTML = buildSubcatAvgRows(subcatDisplay);
 
-  // 본인 최근 업무기록 (이번달, 최신순 상위 10건)
+  // 본인 최근 업무기록: 이번 달만 · 승인완료 제외 · (1)반려 (2)1차 (3)2차 (4)임시 (5)기타 → 각 그룹 내 업무일 과거→최신, 상위 10건
+  const _dashRecentSortTs = (e) => {
+    const raw = e?.work_start_at ?? e?.created_at;
+    if (raw == null) return 0;
+    const num = Number(raw);
+    let ts;
+    if (!isNaN(num) && num > 1000000000000) ts = num;
+    else if (!isNaN(num) && num > 1000000000) ts = num * 1000;
+    else ts = new Date(raw).getTime();
+    return isNaN(ts) ? 0 : ts;
+  };
+  const _dashRecentStatusRank = (st) => {
+    if (st === 'rejected') return 0;
+    if (st === 'submitted') return 1;
+    if (st === 'pre_approved') return 2;
+    if (st === 'draft') return 3;
+    return 4;
+  };
   const recentMine = [...myEntries]
-    .sort((a,b) => Number(b.work_start_at||0) - Number(a.work_start_at||0))
+    .filter(e => entryMonth(e) === month && e.status !== 'approved')
+    .sort((a, b) => {
+      const ra = _dashRecentStatusRank(a.status);
+      const rb = _dashRecentStatusRank(b.status);
+      if (ra !== rb) return ra - rb;
+      const ta = _dashRecentSortTs(a);
+      const tb = _dashRecentSortTs(b);
+      if (ta !== tb) return ta - tb;
+      return String(a.id || '').localeCompare(String(b.id || ''));
+    })
     .slice(0, 10);
 
   const statusBadge = (s) => {
     const map = {
-      approved:    ['var(--success)',   '승인완료'],
-      submitted:   ['var(--warning)',   '1차승인대기'],
-      pre_approved:['#f97316',          '최종승인대기'],
-      rejected:    ['var(--danger)',    '반려'],
-      draft:       ['var(--text-muted)','임시저장'],
+      submitted:    { fg: '#b45309', bg: '#fffbeb', bd: '#fcd34d', lbl: '1차승인대기' },
+      pre_approved: { fg: '#9a3412', bg: '#fff7ed', bd: '#fdba74', lbl: '2차승인대기' },
+      rejected:     { fg: '#b91c1c', bg: '#fef2f2', bd: '#fecaca', lbl: '반려' },
+      draft:        { fg: '#475569', bg: '#f1f5f9', bd: '#e2e8f0', lbl: '임시저장' },
     };
-    const [clr, lbl] = map[s] || ['var(--text-muted)', s||'-'];
-    return `<span style="display:inline-block;font-size:10px;font-weight:600;color:${clr};
-      background:${clr}18;padding:2px 5px;border-radius:4px;white-space:nowrap;line-height:1.5;">${lbl}</span>`;
+    const row = map[s];
+    if (!row) {
+      const lbl = s || '-';
+      return `<span class="dash-status-pill" style="color:#64748b;background:#f8fafc;border-color:#e2e8f0">${lbl}</span>`;
+    }
+    return `<span class="dash-status-pill" style="color:${row.fg};background:${row.bg};border-color:${row.bd}">${row.lbl}</span>`;
   };
 
   const recentRows = recentMine.length === 0
     ? `<tr><td colspan="5" class="table-empty">
         <i class="fas fa-inbox" style="font-size:18px;opacity:0.3;display:block;margin-bottom:6px"></i>
-        <p style="margin:0;font-size:12px;color:var(--text-muted)">이번 달 기록이 없습니다.</p>
+        <p style="margin:0;font-size:12px;color:var(--text-muted)">이번 달 표시할 항목이 없습니다.<br/>
+        <span style="font-size:11px;opacity:0.9">승인 완료 건은 이 목록에서 제외됩니다.</span></p>
        </td></tr>`
     : recentMine.map(e => `
         <tr>
@@ -598,21 +760,21 @@ async function _renderStaffBottomSection(container, { cliMap, myEntries, approve
           <td style="font-size:11px;padding:7px 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${e.client_name||''}">${e.client_name || '<span style="color:var(--text-muted)">내부</span>'}</td>
           <td style="font-size:11px;padding:7px 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${e.work_subcategory_name||e.work_category_name||''}">${e.work_subcategory_name||e.work_category_name||'-'}</td>
           <td style="font-size:11px;text-align:right;font-weight:700;color:#1a2b45;padding:7px 8px;white-space:nowrap;">${((e.duration_minutes||0)/60).toFixed(1)}<span style="font-size:9px;font-weight:500;color:#9aa4b2;margin-left:1px">h</span></td>
-          <td style="text-align:center;padding:7px 6px;">${statusBadge(e.status)}</td>
+          <td class="dash-recent-status-cell" style="text-align:center;padding:7px 8px;white-space:nowrap;vertical-align:middle;">${statusBadge(e.status)}</td>
         </tr>`).join('');
 
   container.innerHTML = `
     <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-top:10px;">
-      <!-- 내 고객사별 투입시간 -->
+      <!-- 자문유형별 평균 소요시간 (본인) -->
       <div class="card">
         <div class="card-header" style="padding:12px 16px 10px">
-          <h2><i class="fas fa-building" style="color:var(--primary)"></i> &nbsp;고객사별 투입시간</h2>
+          <h2><i class="fas fa-bars" style="color:var(--primary)"></i> &nbsp;자문유형별 평균 소요시간</h2>
           <span style="font-size:11px;font-weight:400;color:var(--text-muted)">
-            ${month} · 본인 승인 완료 기준
+            ${month} · 본인 · 업무 소분류 · 승인 완료 · 막대는 최장 평균 대비
           </span>
         </div>
         <div class="card-body" style="padding:10px 14px;max-height:460px;overflow-y:auto;">
-          ${cliHTML}
+          ${subcatHTML}
         </div>
       </div>
       <!-- 내 최근 업무 기록 -->
@@ -620,24 +782,24 @@ async function _renderStaffBottomSection(container, { cliMap, myEntries, approve
         <div class="card-header" style="padding:12px 16px 10px">
           <h2><i class="fas fa-list-alt" style="color:var(--primary)"></i> &nbsp;내 업무 기록</h2>
           <span style="font-size:11px;font-weight:400;color:var(--text-muted)">
-            ${month} · 최근 10건
+            ${month} · 승인완료 제외 · 최근 10건
           </span>
         </div>
-        <div class="card-body" style="padding:0;max-height:420px;overflow-y:auto;">
-          <table class="data-table" style="table-layout:fixed;width:100%;border-collapse:collapse;">
+        <div class="card-body dash-recent-entries-scroll" style="max-height:420px;overflow-y:auto;overflow-x:hidden;">
+          <table class="data-table dash-recent-entries-table">
             <colgroup>
-              <col style="width:82px">
-              <col style="width:22%">
-              <col style="width:auto">
-              <col style="width:46px">
-              <col style="width:58px">
+              <col class="dash-recent-col-date">
+              <col class="dash-recent-col-client">
+              <col class="dash-recent-col-work">
+              <col class="dash-recent-col-time">
+              <col class="dash-recent-col-status">
             </colgroup>
             <thead><tr>
               <th style="padding:8px 8px;font-size:11px;">날짜</th>
               <th style="padding:8px 8px;font-size:11px;">고객사</th>
               <th style="padding:8px 8px;font-size:11px;">업무내용</th>
               <th style="padding:8px 8px;font-size:11px;text-align:right;">시간</th>
-              <th style="padding:8px 6px;font-size:11px;text-align:center;">상태</th>
+              <th style="padding:8px 8px;font-size:11px;text-align:center;">상태</th>
             </tr></thead>
             <tbody>${recentRows}</tbody>
           </table>
@@ -665,248 +827,138 @@ async function _renderStaffBottomSection(container, { cliMap, myEntries, approve
 // ══════════════════════════════════════════════
 async function renderManagerDashboard(session) {
   try {
-    // ★ 성능 개선: Master 캐시 사용
-    const [allEntries, allUsers] = await Promise.all([
-      _getCachedEntries(),
-      Master.users()
-    ]);
-
-    // ★ ID 비교 시 타입 불일치 방지 (DB→문자열, session→혼합)
-    const sid = String(session.id);
-
-    // 내 팀원: approver_id가 본인인 Staff (타임시트 대상 + 승인자 지정 필수)
-    const myStaff = allUsers.filter(u =>
-      String(u.approver_id) === sid &&
-      u.role === 'staff' &&
-      u.is_active !== false &&
-      u.is_timesheet_target !== false &&
-      u.approver_id && String(u.approver_id).trim() !== ''
-    );
-    // 내 팀 타임시트: approver_id가 본인인 항목 (String 비교)
-    const myEntries = allEntries.filter(e => String(e.approver_id) === sid);
-    // ★ 진단: myEntries 샘플 출력
-
+    const [allEntriesRaw, allUsers] = await Promise.all([_getCachedEntries(), Master.users()]);
 
     const month = thisMonthStr();
-    const monthEntries    = myEntries.filter(e => entryMonth(e) === month);
-    const approvedMonth   = monthEntries.filter(e => e.status === 'approved');
+    const prevMonth = prevMonthStr();
 
-    console.log('[Dashboard-Manager] myEntries:', myEntries.length, '| month:', month, '| monthEntries:', monthEntries.length, '| approvedMonth:', approvedMonth.length);
-    // 샘플 로그: 첫 번째 entry의 work_start_at 형식 확인
-    if (allEntries.length > 0) console.log('[Dashboard] work_start_at sample:', allEntries[0].work_start_at, typeof allEntries[0].work_start_at);
-    const pendingEntries  = myEntries.filter(e => e.status === 'submitted');
+    const visibleUserIds = _getVisibleUserIdSetForDashboard(session, allUsers);
+    let scopedEntries = allEntriesRaw;
+    if (visibleUserIds) {
+      scopedEntries = allEntriesRaw.filter(e => visibleUserIds.has(String(e.user_id)));
+    }
 
-    const totalMin   = approvedMonth.reduce((s, e) => s + (e.duration_minutes||0), 0);
-    const clientMin  = approvedMonth.filter(e => e.time_category==='client').reduce((s,e)=>s+(e.duration_minutes||0),0);
-    const clientRatio = totalMin > 0 ? Math.round(clientMin/totalMin*100) : 0;
+    const curEntriesAll  = scopedEntries.filter(e => entryMonth(e) === month);
+    const prevEntriesAll = scopedEntries.filter(e => entryMonth(e) === prevMonth);
+    const approvedCur  = curEntriesAll.filter(e => e.status === 'approved');
+    const approvedPrev = prevEntriesAll.filter(e => e.status === 'approved');
+    const pendingCur   = curEntriesAll.filter(e => e.status === 'submitted');
+
+    const stats = _buildLeaderMonthlyStats(approvedCur, approvedPrev);
+    const clientRadar = _buildClientRadar(approvedCur, approvedPrev);
+
+    const totalMinCur = approvedCur.reduce((s,e)=>s+(e.duration_minutes||0),0);
+    const consultMinCur = approvedCur.filter(e=>e.time_category==='client').reduce((s,e)=>s+(e.duration_minutes||0),0);
+    const consultCntCur = approvedCur.filter(e=>e.time_category==='client').length;
+    const totalMinPrev = approvedPrev.reduce((s,e)=>s+(e.duration_minutes||0),0);
+    const consultCntPrev = approvedPrev.filter(e=>e.time_category==='client').length;
+
+    const dTotal = _fmtPctDelta(totalMinCur, totalMinPrev);
+    const dCnt = _fmtPctDelta(consultCntCur, consultCntPrev);
 
     document.getElementById('kpi-grid').innerHTML =
-      kpiCard('fa-users',         '', '', '담당 팀원',    myStaff.length,               '명', '승인자 Staff',   '',                                           '#1a2b45') +
-      kpiCard('fa-clock',         '', '', '팀 투입시간',  (totalMin/60).toFixed(1),     'h',  `고객 ${clientRatio}%`, '',                                  '#2d6bb5') +
-      kpiCard('fa-hourglass-half','', '', '승인 대기',    pendingEntries.length,        '건',
-        pendingEntries.length > 0 ? 'Approval 처리' : '대기 없음',
-        pendingEntries.length > 0 ? 'approval' : '',
-        pendingEntries.length > 0 ? '#d97706' : '#4a7fc4') +
-      kpiCard('fa-briefcase',     '', '', '고객 업무',    (clientMin/60).toFixed(1),    'h',  '승인 완료',      '',                                           '#6b95ce');
+      kpiCard('fa-clock', '', '', '당월 총 투입', (totalMinCur/60).toFixed(1), 'h', `전월 ${dTotal.label}`, '', '#1a2b45') +
+      kpiCard('fa-briefcase','', '', '당월 자문(고객)', (consultMinCur/60).toFixed(1), 'h', `건수 ${consultCntCur}건 · 전월 ${dCnt.label}`, '', '#2d6bb5') +
+      kpiCard('fa-hourglass-half','', '', '승인 대기', pendingCur.length, '건', pendingCur.length>0?'Approval로 처리':'대기 없음', pendingCur.length>0?'approval':'', pendingCur.length>0?'#d97706':'#4a7fc4') +
+      kpiCard('fa-users','', '', '대상 직원', visibleUserIds ? visibleUserIds.size : 0, '명', '승인자 기준', '', '#6b95ce');
 
-    // ── 데이터 집계 ──────────────────────────────────────────
-    // 대분류별 투입시간
-    const majorMap = {};
-    approvedMonth.forEach(e => {
-      const k = e.work_category_name || '미분류';
-      majorMap[k] = (majorMap[k]||0) + (e.duration_minutes||0);
-    });
+    const sortedByMin = stats.slice().sort((a,b)=> (b.curMin||0)-(a.curMin||0));
+    const top5 = sortedByMin.slice(0,5);
+    const bottom5 = sortedByMin.slice(-5).reverse();
 
-    // 소분류별 투입시간
-    const subMap = {};
-    approvedMonth.forEach(e => {
-      const k = e.work_subcategory_name || e.work_category_name || '미분류';
-      subMap[k] = (subMap[k]||0) + (e.duration_minutes||0);
-    });
+    const topHtml = top5.map(r=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #f4f6f9">
+      <div style="font-weight:700;font-size:12px;color:#1a2b45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${Utils.escHtml(r.user_name)}</div>
+      <div style="text-align:right;white-space:nowrap"><span style="font-weight:800">${(r.curMin/60).toFixed(1)}h</span><span style="color:#94a3b8;font-size:11px"> · ${r.curConsultCnt}건</span></div>
+    </div>`).join('') || `<div style="padding:18px;text-align:center;color:#94a3b8;font-size:12px">데이터 없음</div>`;
+    const bottomHtml = bottom5.map(r=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #f4f6f9">
+      <div style="font-weight:700;font-size:12px;color:#1a2b45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${Utils.escHtml(r.user_name)}</div>
+      <div style="text-align:right;white-space:nowrap"><span style="font-weight:800">${(r.curMin/60).toFixed(1)}h</span><span style="color:#94a3b8;font-size:11px"> · ${r.curConsultCnt}건</span></div>
+    </div>`).join('') || `<div style="padding:18px;text-align:center;color:#94a3b8;font-size:12px">데이터 없음</div>`;
 
-    // 고객사별 투입시간
-    const cliMap = {};
-    approvedMonth.filter(e=>e.time_category==='client').forEach(e => {
-      const k = e.client_name || '미지정';
-      cliMap[k] = (cliMap[k]||0) + (e.duration_minutes||0);
-    });
+    const spikeRows = stats
+      .map(r => ({ ...r, dH:_fmtPctDelta(r.curMin,r.prevMin), dC:_fmtPctDelta(r.curConsultCnt,r.prevConsultCnt) }))
+      .filter(r => (Math.abs(r.dH.pct) >= 30 || Math.abs(r.dC.pct) >= 30) && (r.prevMin >= 60 || r.prevConsultCnt >= 2))
+      .sort((a,b)=> (Math.max(Math.abs(b.dH.pct),Math.abs(b.dC.pct)) - Math.max(Math.abs(a.dH.pct),Math.abs(a.dC.pct))))
+      .slice(0,10);
+    const spikeHtml = spikeRows.map(r=> {
+      const hClr = r.dH.cls==='up' ? '#dc2626' : '#2563eb';
+      const cClr = r.dC.cls==='up' ? '#dc2626' : '#2563eb';
+      return `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #f4f6f9">
+        <div style="min-width:90px;max-width:140px;font-weight:700;font-size:12px;color:#1a2b45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${Utils.escHtml(r.user_name)}</div>
+        <div style="text-align:right;white-space:nowrap">
+          <span style="font-size:11px;color:${hClr};font-weight:800">시간 ${r.dH.label}</span>
+          <span style="color:#cbd5e1;margin:0 4px">|</span>
+          <span style="font-size:11px;color:${cClr};font-weight:800">건수 ${r.dC.label}</span>
+        </div>
+      </div>`;
+    }).join('') || `<div style="padding:18px;text-align:center;color:#94a3b8;font-size:12px">급변(±30%) 데이터 없음</div>`;
 
-    // ── 차트 섹션: 대분류(좌) + 소분류(우) ──────────────────
+    const clientRows = clientRadar
+      .map(c => ({ ...c, dH:_fmtPctDelta(c.curMin,c.prevMin), dC:_fmtPctDelta(c.curCnt,c.prevCnt) }))
+      .filter(c => (c.dH.pct >= 30 || c.dC.pct >= 30) && (c.prevMin >= 60 || c.prevCnt >= 2))
+      .sort((a,b)=> (Math.max(b.dH.pct,b.dC.pct) - Math.max(a.dH.pct,a.dC.pct)))
+      .slice(0,10);
+    const clientHtml = clientRows.map(c => {
+      return `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #f4f6f9">
+        <div style="min-width:100px;max-width:160px;font-weight:700;font-size:12px;color:#1a2b45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${Utils.escHtml(c.client_name)}">${Utils.escHtml(c.client_name)}</div>
+        <div style="text-align:right;white-space:nowrap">
+          <span style="font-size:11px;color:#dc2626;font-weight:800">시간 ${c.dH.label}</span>
+          <span style="color:#cbd5e1;margin:0 4px">|</span>
+          <span style="font-size:11px;color:#dc2626;font-weight:800">건수 ${c.dC.label}</span>
+        </div>
+      </div>`;
+    }).join('') || `<div style="padding:18px;text-align:center;color:#94a3b8;font-size:12px">급증 고객 없음</div>`;
+
     const chartSection = document.getElementById('chart-row-1');
     if (chartSection) {
-      chartSection.style.gridTemplateColumns = '1fr 1fr';
+      chartSection.style.gridTemplateColumns = 'minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)';
       chartSection.innerHTML = `
         <div class="card">
           <div class="card-header" style="padding:12px 16px 10px">
-            <h2><i class="fas fa-layer-group" style="color:var(--primary)"></i> &nbsp;업무별 투입시간</h2>
-            <span style="font-size:11px;font-weight:400;color:var(--text-muted)">대분류 기준</span>
+            <h2><i class="fas fa-balance-scale" style="color:var(--primary)"></i> &nbsp;${_overloadWorkloadCardTitle(session)}</h2>
+            <span style="font-size:11px;font-weight:400;color:var(--text-muted)">${month} 누적 · 시간(h) + 자문건수</span>
           </div>
-          <div class="card-body" style="min-height:200px;position:relative;padding:10px 12px">
-            <canvas id="chart-type"></canvas>
+          <div class="card-body" style="padding:10px 14px;max-height:260px;overflow:auto">
+            <div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:6px">Top 5</div>
+            ${topHtml}
+            <div style="height:10px"></div>
+            <div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:6px">Bottom 5</div>
+            ${bottomHtml}
           </div>
         </div>
         <div class="card">
           <div class="card-header" style="padding:12px 16px 10px">
-            <h2><i class="fas fa-bars" style="color:var(--primary)"></i> &nbsp;상세업무별 투입시간</h2>
-            <span style="font-size:11px;font-weight:400;color:var(--text-muted)">소분류 기준 · 상위 5+기타</span>
+            <h2><i class="fas fa-bolt" style="color:#dc2626"></i> &nbsp;전월 대비 급변(±30%)</h2>
+            <span style="font-size:11px;font-weight:400;color:var(--text-muted)">${prevMonth} → ${month} · 시간/건수</span>
           </div>
-          <div class="card-body" style="min-height:200px;position:relative;padding:10px 12px">
-            <canvas id="chart-sub"></canvas>
+          <div class="card-body" style="padding:10px 14px;max-height:260px;overflow:auto">
+            ${spikeHtml}
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header" style="padding:12px 16px 10px">
+            <h2><i class="fas fa-building" style="color:var(--primary)"></i> &nbsp;고객 이슈 레이더</h2>
+            <span style="font-size:11px;font-weight:400;color:var(--text-muted)">${prevMonth} → ${month} · 자문 급증 고객</span>
+          </div>
+          <div class="card-body" style="padding:10px 14px;max-height:260px;overflow:auto">
+            ${clientHtml}
           </div>
         </div>`;
-
-      renderBarChart('chart-type', collapseToTopN(majorMap, 8));
-      renderBarChart('chart-sub',  collapseToTopN(subMap,   5));
     }
 
-    // ── 승인 대기 현황 (조회 전용 — 승인 처리는 Approval 메뉴에서) ──
-    const recentSection = document.getElementById('recent-entries-section');
-    if (recentSection) {
-      const pendingCount = pendingEntries.length;
-      recentSection.innerHTML = `
+    const bottom = document.getElementById('recent-entries-section');
+    if (bottom) {
+      bottom.innerHTML = `
         <div class="card" style="margin-top:10px">
           <div class="card-header" style="padding:10px 16px 8px">
-            <h2>
-              <i class="fas fa-hourglass-half" style="color:${pendingCount > 0 ? 'var(--danger)' : 'var(--success)'}"></i>
-              &nbsp;승인 대기 현황
-              ${pendingCount > 0
-                ? `<span class="badge badge-red" style="margin-left:8px;font-size:12px;vertical-align:middle">${pendingCount}건 대기</span>`
-                : `<span style="margin-left:8px;font-size:11px;color:var(--text-muted);font-weight:400;vertical-align:middle">모두 처리완료</span>`}
-            </h2>
-            <div class="card-actions"></div>
+            <h2><i class="fas fa-arrow-right" style="color:var(--primary)"></i> &nbsp;바로가기</h2>
+            <span style="font-size:11px;font-weight:400;color:var(--text-muted)">분석 화면에서 필터로 상세 확인</span>
           </div>
-          ${pendingCount > 0
-            ? `<div style="background:#fff7ed;border-bottom:1px solid #fed7aa;padding:10px 16px;
-                           font-size:12px;color:#9a3412;display:flex;align-items:center;
-                           justify-content:space-between;gap:8px;flex-wrap:wrap">
-                <span>
-                  <i class="fas fa-info-circle"></i>&nbsp;
-                  팀원이 제출한 타임시트 <strong>${pendingCount}건</strong>이 승인을 기다리고 있습니다.
-                </span>
-                <button class="btn btn-sm btn-primary" onclick="navigateTo('approval')"
-                  style="white-space:nowrap;font-size:11px">
-                  <i class="fas fa-check-double"></i> Approval에서 승인 처리
-                </button>
-               </div>`
-            : ''}
-          <div class="card-body" style="padding:0">
-            <div class="table-wrapper" style="border:none;border-radius:0">
-              <table class="data-table" style="table-layout:fixed;width:100%">
-                <colgroup>
-                  <col style="width:82px">   <!-- 날짜 고정 -->
-                  <col style="width:58px">   <!-- Staff 고정 -->
-                  <col style="width:66px">   <!-- 승인자 고정 -->
-                  <col style="width:70px">   <!-- 팀명 고정 -->
-                  <col>                      <!-- 고객사 (auto) -->
-                  <col>                      <!-- 업무내용 (auto) -->
-                  <col style="width:52px">   <!-- 경과 고정 -->
-                </colgroup>
-                <thead><tr>
-                  <th>날짜</th><th>Staff</th><th>승인자</th><th>팀명</th><th>고객사</th>
-                  <th>업무내용</th>
-                  <th style="text-align:center">경과</th>
-                </tr></thead>
-                <tbody id="manager-pending-tbody"></tbody>
-              </table>
-            </div>
+          <div class="card-body" style="padding:10px 16px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-sm btn-primary" onclick="navigateTo('analysis')"><i class="fas fa-chart-bar"></i> Analysis 열기</button>
+            <button class="btn btn-sm btn-ghost" onclick="navigateTo('approval')"><i class="fas fa-check-double"></i> Approval</button>
           </div>
-          ${pendingCount > 0 ? `
-          <div style="background:#f8fafc;border-top:1px solid var(--border-light);
-                      padding:10px 16px;text-align:center">
-            <span style="font-size:12px;color:var(--text-muted)">
-              <i class="fas fa-info-circle"></i>
-              &nbsp;승인·반려 처리 및 자문자료 저장은 좌측 메뉴의
-              <strong style="color:var(--primary);cursor:pointer"
-                onclick="navigateTo('approval')"> Approval</strong>
-              에서 하실 수 있습니다.
-            </span>
-          </div>` : ''}
         </div>`;
-
-      const ptbody = document.getElementById('manager-pending-tbody');
-      // 제출일 오래된 순 정렬 (가장 급한 건 상단)
-      const recent5 = [...pendingEntries]
-        .sort((a,b) => Number(a.work_start_at||0) - Number(b.work_start_at||0))
-        .slice(0, 5);
-
-      if (recent5.length === 0) {
-        ptbody.innerHTML = `<tr><td colspan="7" class="table-empty">
-          <i class="fas fa-check-circle" style="color:var(--success)"></i>
-          <p>승인 대기 항목이 없습니다.<br>
-          <span style="font-size:12px;color:var(--text-muted)">모든 팀원의 타임시트가 처리되었습니다.</span></p>
-        </td></tr>`;
-      } else {
-        const now = Date.now();
-        ptbody.innerHTML = recent5.map(e => {
-          // 제출 경과 시간 (updated_at 기준)
-          const submittedAt = Number(e.updated_at || e.created_at || 0);
-          const waitDays = submittedAt > 0 ? Math.floor((now - submittedAt) / 86400000) : 0;
-          const waitLabel = waitDays === 0 ? '오늘'
-            : waitDays === 1 ? '어제'
-            : `${waitDays}일 전`;
-          const urgentColor = waitDays >= 3 ? 'var(--danger)'
-            : waitDays >= 1 ? 'var(--warning)'
-            : 'var(--text-muted)';
-          return `<tr>
-            <td>${Utils.formatDate(e.work_start_at)}</td>
-            <td title="${e.user_name||''}"><strong>${e.user_name||'-'}</strong></td>
-            <td title="${e.approver_name||''}" style="font-size:11px;color:var(--text-muted)">${e.approver_name||'-'}</td>
-            <td title="${e.team_name||''}" style="font-size:11px;color:var(--text-muted)">${e.team_name||'-'}</td>
-            <td title="${e.client_name||''}">${e.client_name||'<span style="color:var(--text-muted)">내부</span>'}</td>
-            <td class="td-subcategory" title="${e.work_subcategory_name||''}">${e.work_subcategory_name||'-'}</td>
-            <td class="td-badge" style="text-align:center">
-              <span style="font-size:11px;font-weight:600;color:${urgentColor};white-space:nowrap">
-                <i class="fas fa-clock" style="font-size:9px"></i> ${waitLabel}
-              </span>
-            </td>
-          </tr>`;
-        }).join('')
-        + (pendingEntries.length > 5
-            ? `<tr><td colspan="7" style="text-align:center;padding:12px;background:#f8fafc">
-                 <span style="font-size:12px;color:var(--text-muted)">
-                   외 ${pendingEntries.length - 5}건 더 있습니다.
-                 </span>
-                 <button class="btn btn-xs btn-outline" style="margin-left:10px"
-                   onclick="navigateTo('approval')">
-                   <i class="fas fa-list"></i> Approval에서 전체 보기
-                 </button>
-               </td></tr>`
-            : '');
-      }
-
-      // ── 하단: 고객사별(좌) + 직원별 통계(우) ──────────────
-      // Manager: 소속 팀원 기준 (전체 직원 최다 대비)
-      // ★ 이미 로드된 allUsers 재사용 (중복 API 호출 제거)
-      const allActiveStaff = allUsers.filter(u =>
-        u.role === 'staff' &&
-        u.is_active !== false &&
-        u.is_timesheet_target !== false &&
-        u.approver_id && String(u.approver_id).trim() !== ''
-      );
-      // ★ 이미 로드된 allEntries 재사용
-      const approvedAll2 = allEntries.filter(e => {
-        const m = entryMonth(e);
-        return m === month && e.status === 'approved';
-      });
-      const maxRefUser = allActiveStaff.reduce((best, u) => {
-        const uMin = approvedAll2.filter(e => e.user_id === u.id)
-                       .reduce((s,e) => s + (e.duration_minutes||0), 0);
-        const bMin = best ? approvedAll2.filter(e => e.user_id === best.id)
-                              .reduce((s,e) => s + (e.duration_minutes||0), 0) : 0;
-        return uMin > bMin ? u : best;
-      }, null);
-
-      const bottomSection = document.createElement('div');
-      recentSection.appendChild(bottomSection);
-      renderBottomSection(bottomSection, {
-        cliMap,
-        allEntries,
-        approvedEntries: approvedMonth,
-        staffList: myStaff,
-        maxRefStaff: maxRefUser,
-        month,
-        mode: 'manager'
-      });
     }
 
   } catch (err) { console.error('Manager Dashboard error:', err); }
@@ -918,129 +970,148 @@ async function renderManagerDashboard(session) {
 // ══════════════════════════════════════════════
 async function renderDirectorDashboard(session) {
   try {
-    // ★ 성능 개선: Master 캐시 사용
     const [allEntriesRaw, allUsers, allTeams] = await Promise.all([
       _getCachedEntries(),
       Master.users(),
       Master.teams(),
     ]);
 
-    // ★ Director: 소속 사업부/본부/고객지원팀 범위 직원의 데이터만 표시
-    // Admin: 전체 데이터 표시
-    let allEntries = allEntriesRaw;
-    if (Auth.isDirector(session)) {
-      // ★ String 비교로 타입 불일치 방지
-      const scopeIds = new Set(allUsers.filter(u => Auth.scopeMatch(session, u)).map(u => String(u.id)));
-      allEntries = allEntriesRaw.filter(e => scopeIds.has(String(e.user_id)));
+    const month = thisMonthStr();
+    const prevMonth = prevMonthStr();
+
+    const visibleUserIds = _getVisibleUserIdSetForDashboard(session, allUsers);
+    let scopedEntries = allEntriesRaw;
+    if (visibleUserIds) {
+      scopedEntries = allEntriesRaw.filter(e => visibleUserIds.has(String(e.user_id)));
     }
 
-    const month         = thisMonthStr();
-    const monthEntries  = allEntries.filter(e => entryMonth(e) === month);
-    const approvedMonth = monthEntries.filter(e => e.status === 'approved');
-    const pendingAll    = allEntries.filter(e => e.status === 'submitted');
+    const curEntriesAll  = scopedEntries.filter(e => entryMonth(e) === month);
+    const prevEntriesAll = scopedEntries.filter(e => entryMonth(e) === prevMonth);
+    const approvedCur  = curEntriesAll.filter(e => e.status === 'approved');
+    const approvedPrev = prevEntriesAll.filter(e => e.status === 'approved');
+    const pendingCur   = curEntriesAll.filter(e => e.status === 'submitted');
 
-    console.log('[Dashboard-Director] total:', allEntries.length, '| month:', month, '| monthEntries:', monthEntries.length, '| approvedMonth:', approvedMonth.length);
-    if (allEntries.length > 0) console.log('[Dashboard-Director] sample work_start_at:', allEntries[0].work_start_at, '| entryMonth result:', entryMonth(allEntries[0]));
+    const stats = _buildLeaderMonthlyStats(approvedCur, approvedPrev);
+    const clientRadar = _buildClientRadar(approvedCur, approvedPrev);
 
-    // 표시 대상 staff + manager(타임시트 대상) 목록 (director: 소속 범위, admin: 전체)
-    const activeStaffAll = allUsers.filter(u =>
-      (u.role === 'staff' || (u.role === 'manager' && u.is_timesheet_target !== false)) &&
-      u.is_active !== false &&
-      u.is_timesheet_target !== false &&
-      (u.role === 'manager' || (u.approver_id && String(u.approver_id).trim() !== ''))
-    );
-    const scopeStaff = Auth.isDirector(session)
-      ? activeStaffAll.filter(u => Auth.scopeMatch(session, u))
-      : activeStaffAll;
+    const totalMinCur = approvedCur.reduce((s,e)=>s+(e.duration_minutes||0),0);
+    const consultMinCur = approvedCur.filter(e=>e.time_category==='client').reduce((s,e)=>s+(e.duration_minutes||0),0);
+    const consultCntCur = approvedCur.filter(e=>e.time_category==='client').length;
+    const totalMinPrev = approvedPrev.reduce((s,e)=>s+(e.duration_minutes||0),0);
+    const consultCntPrev = approvedPrev.filter(e=>e.time_category==='client').length;
 
-    const totalMin   = approvedMonth.reduce((s,e)=>s+(e.duration_minutes||0),0);
-    const clientMin  = approvedMonth.filter(e=>e.time_category==='client').reduce((s,e)=>s+(e.duration_minutes||0),0);
-    const clientRatio = totalMin>0 ? Math.round(clientMin/totalMin*100) : 0;
-    const staffCount = scopeStaff.length;
+    const dTotal = _fmtPctDelta(totalMinCur, totalMinPrev);
+    const dCnt = _fmtPctDelta(consultCntCur, consultCntPrev);
 
-    // Admin: 시스템 현황 추가 KPI
+    // 대상 직원 수
+    const staffCount = (visibleUserIds ? visibleUserIds.size : allUsers.filter(u => u.role === 'staff').length);
     const extraKpi = Auth.isAdmin(session)
-      ? kpiCard('fa-cog',   '', '', '등록 직원',  allUsers.filter(u=>u.is_active!==false).length, '명', `팀 ${allTeams.length}개`, '', '#6b95ce')
-      : kpiCard('fa-users', '', '', '전체 Staff', staffCount,                                    '명', '활성 계정 기준',         '', '#6b95ce');
+      ? kpiCard('fa-cog', '', '', '등록 직원', allUsers.filter(u=>u.is_active!==false).length, '명', `팀 ${allTeams.length}개`, '', '#6b95ce')
+      : kpiCard('fa-users','', '', '대상 직원', staffCount, '명', '범위 기준', '', '#6b95ce');
 
     document.getElementById('kpi-grid').innerHTML =
-      kpiCard('fa-clock',         '', '', '전체 투입',  (totalMin/60).toFixed(1),   'h',  '승인 완료 기준', '', '#1a2b45') +
-      kpiCard('fa-briefcase',     '', '', '고객 업무',  (clientMin/60).toFixed(1),  'h',  `비율 ${clientRatio}%`,  '', '#2d6bb5') +
-      kpiCard('fa-hourglass-half','', '', '승인 대기',  pendingAll.length,          '건', '전체 팀',        pendingAll.length > 0 ? 'approval' : '', pendingAll.length > 0 ? '#d97706' : '#4a7fc4') +
+      kpiCard('fa-clock', '', '', '당월 총 투입', (totalMinCur/60).toFixed(1), 'h', `전월 ${dTotal.label}`, '', '#1a2b45') +
+      kpiCard('fa-briefcase','', '', '당월 자문(고객)', (consultMinCur/60).toFixed(1), 'h', `건수 ${consultCntCur}건 · 전월 ${dCnt.label}`, '', '#2d6bb5') +
+      kpiCard('fa-hourglass-half','', '', '승인 대기', pendingCur.length, '건', '당월 제출', pendingCur.length>0?'approval':'', pendingCur.length>0?'#d97706':'#4a7fc4') +
       extraKpi;
 
-    // ── 데이터 집계 ──────────────────────────────────────────
-    // 대분류별 투입시간
-    const majorMap = {};
-    approvedMonth.forEach(e => {
-      const k = e.work_category_name || '미분류';
-      majorMap[k] = (majorMap[k]||0) + (e.duration_minutes||0);
-    });
+    const sortedByMin = stats.slice().sort((a,b)=> (b.curMin||0)-(a.curMin||0));
+    const top5 = sortedByMin.slice(0,5);
+    const bottom5 = sortedByMin.slice(-5).reverse();
 
-    // 소분류별 투입시간
-    const subMap = {};
-    approvedMonth.forEach(e => {
-      const k = e.work_subcategory_name || e.work_category_name || '미분류';
-      subMap[k] = (subMap[k]||0) + (e.duration_minutes||0);
-    });
+    const topHtml = top5.map(r=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #f4f6f9">
+      <div style="font-weight:700;font-size:12px;color:#1a2b45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${Utils.escHtml(r.user_name)}</div>
+      <div style="text-align:right;white-space:nowrap"><span style="font-weight:800">${(r.curMin/60).toFixed(1)}h</span><span style="color:#94a3b8;font-size:11px"> · ${r.curConsultCnt}건</span></div>
+    </div>`).join('') || `<div style="padding:18px;text-align:center;color:#94a3b8;font-size:12px">데이터 없음</div>`;
+    const bottomHtml = bottom5.map(r=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #f4f6f9">
+      <div style="font-weight:700;font-size:12px;color:#1a2b45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${Utils.escHtml(r.user_name)}</div>
+      <div style="text-align:right;white-space:nowrap"><span style="font-weight:800">${(r.curMin/60).toFixed(1)}h</span><span style="color:#94a3b8;font-size:11px"> · ${r.curConsultCnt}건</span></div>
+    </div>`).join('') || `<div style="padding:18px;text-align:center;color:#94a3b8;font-size:12px">데이터 없음</div>`;
 
-    // 고객사별 투입시간
-    const cliMap = {};
-    approvedMonth.filter(e=>e.time_category==='client').forEach(e => {
-      const k = e.client_name || '미지정';
-      cliMap[k] = (cliMap[k]||0) + (e.duration_minutes||0);
-    });
+    const spikeRows = stats
+      .map(r => ({ ...r, dH:_fmtPctDelta(r.curMin,r.prevMin), dC:_fmtPctDelta(r.curConsultCnt,r.prevConsultCnt) }))
+      .filter(r => (Math.abs(r.dH.pct) >= 30 || Math.abs(r.dC.pct) >= 30) && (r.prevMin >= 60 || r.prevConsultCnt >= 2))
+      .sort((a,b)=> (Math.max(Math.abs(b.dH.pct),Math.abs(b.dC.pct)) - Math.max(Math.abs(a.dH.pct),Math.abs(a.dC.pct))))
+      .slice(0,10);
+    const spikeHtml = spikeRows.map(r=> {
+      const hClr = r.dH.cls==='up' ? '#dc2626' : '#2563eb';
+      const cClr = r.dC.cls==='up' ? '#dc2626' : '#2563eb';
+      return `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #f4f6f9">
+        <div style="min-width:90px;max-width:140px;font-weight:700;font-size:12px;color:#1a2b45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${Utils.escHtml(r.user_name)}</div>
+        <div style="text-align:right;white-space:nowrap">
+          <span style="font-size:11px;color:${hClr};font-weight:800">시간 ${r.dH.label}</span>
+          <span style="color:#cbd5e1;margin:0 4px">|</span>
+          <span style="font-size:11px;color:${cClr};font-weight:800">건수 ${r.dC.label}</span>
+        </div>
+      </div>`;
+    }).join('') || `<div style="padding:18px;text-align:center;color:#94a3b8;font-size:12px">급변(±30%) 데이터 없음</div>`;
 
-    // ── 차트 섹션: 대분류(좌) + 소분류(우) ──────────────────
+    const clientRows = clientRadar
+      .map(c => ({ ...c, dH:_fmtPctDelta(c.curMin,c.prevMin), dC:_fmtPctDelta(c.curCnt,c.prevCnt) }))
+      .filter(c => (c.dH.pct >= 30 || c.dC.pct >= 30) && (c.prevMin >= 60 || c.prevCnt >= 2))
+      .sort((a,b)=> (Math.max(b.dH.pct,b.dC.pct) - Math.max(a.dH.pct,a.dC.pct)))
+      .slice(0,10);
+    const clientHtml = clientRows.map(c => {
+      return `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #f4f6f9">
+        <div style="min-width:100px;max-width:160px;font-weight:700;font-size:12px;color:#1a2b45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${Utils.escHtml(c.client_name)}">${Utils.escHtml(c.client_name)}</div>
+        <div style="text-align:right;white-space:nowrap">
+          <span style="font-size:11px;color:#dc2626;font-weight:800">시간 ${c.dH.label}</span>
+          <span style="color:#cbd5e1;margin:0 4px">|</span>
+          <span style="font-size:11px;color:#dc2626;font-weight:800">건수 ${c.dC.label}</span>
+        </div>
+      </div>`;
+    }).join('') || `<div style="padding:18px;text-align:center;color:#94a3b8;font-size:12px">급증 고객 없음</div>`;
+
     const chartSection = document.getElementById('chart-row-1');
     if (chartSection) {
-      chartSection.style.gridTemplateColumns = '1fr 1fr';
+      chartSection.style.gridTemplateColumns = 'minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)';
       chartSection.innerHTML = `
         <div class="card">
           <div class="card-header" style="padding:12px 16px 10px">
-            <h2><i class="fas fa-layer-group" style="color:var(--primary)"></i> &nbsp;업무별 투입시간</h2>
-            <span style="font-size:11px;font-weight:400;color:var(--text-muted)">대분류 기준</span>
+            <h2><i class="fas fa-balance-scale" style="color:var(--primary)"></i> &nbsp;${_overloadWorkloadCardTitle(session)}</h2>
+            <span style="font-size:11px;font-weight:400;color:var(--text-muted)">${month} 누적 · 시간(h) + 자문건수</span>
           </div>
-          <div class="card-body" style="min-height:200px;position:relative;padding:10px 12px">
-            <canvas id="chart-type"></canvas>
+          <div class="card-body" style="padding:10px 14px;max-height:260px;overflow:auto">
+            <div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:6px">Top 5</div>
+            ${topHtml}
+            <div style="height:10px"></div>
+            <div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:6px">Bottom 5</div>
+            ${bottomHtml}
           </div>
         </div>
         <div class="card">
           <div class="card-header" style="padding:12px 16px 10px">
-            <h2><i class="fas fa-bars" style="color:var(--primary)"></i> &nbsp;상세업무별 투입시간</h2>
-            <span style="font-size:11px;font-weight:400;color:var(--text-muted)">소분류 기준 · 상위 5+기타</span>
+            <h2><i class="fas fa-bolt" style="color:#dc2626"></i> &nbsp;전월 대비 급변(±30%)</h2>
+            <span style="font-size:11px;font-weight:400;color:var(--text-muted)">${prevMonth} → ${month} · 시간/건수</span>
           </div>
-          <div class="card-body" style="min-height:200px;position:relative;padding:10px 12px">
-            <canvas id="chart-sub"></canvas>
+          <div class="card-body" style="padding:10px 14px;max-height:260px;overflow:auto">
+            ${spikeHtml}
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header" style="padding:12px 16px 10px">
+            <h2><i class="fas fa-building" style="color:var(--primary)"></i> &nbsp;고객 이슈 레이더</h2>
+            <span style="font-size:11px;font-weight:400;color:var(--text-muted)">${prevMonth} → ${month} · 자문 급증 고객</span>
+          </div>
+          <div class="card-body" style="padding:10px 14px;max-height:260px;overflow:auto">
+            ${clientHtml}
           </div>
         </div>`;
-
-      renderBarChart('chart-type', collapseToTopN(majorMap, 8));
-      renderBarChart('chart-sub',  collapseToTopN(subMap,   5));
     }
 
-    // ── 하단: 고객사별(좌) + 직원별 통계(우) ────────────────
-    const recentSection = document.getElementById('recent-entries-section');
-    if (recentSection) {
-      // Director: 소속 범위 직원 / Admin: 전체 직원 기준 최다 대비
-      const maxRefUser = scopeStaff.reduce((best, u) => {
-        const uMin = approvedMonth.filter(e => e.user_id === u.id)
-                       .reduce((s,e) => s + (e.duration_minutes||0), 0);
-        const bMin = best ? approvedMonth.filter(e => e.user_id === best.id)
-                              .reduce((s,e) => s + (e.duration_minutes||0), 0) : 0;
-        return uMin > bMin ? u : best;
-      }, null);
-
-      recentSection.innerHTML = '';
-      renderBottomSection(recentSection, {
-        cliMap,
-        allEntries,
-        approvedEntries: approvedMonth,
-        staffList: scopeStaff,
-        maxRefStaff: maxRefUser,
-        month,
-        mode: 'director'
-      });
+    const bottom = document.getElementById('recent-entries-section');
+    if (bottom) {
+      bottom.innerHTML = `
+        <div class="card" style="margin-top:10px">
+          <div class="card-header" style="padding:10px 16px 8px">
+            <h2><i class="fas fa-arrow-right" style="color:var(--primary)"></i> &nbsp;바로가기</h2>
+            <span style="font-size:11px;font-weight:400;color:var(--text-muted)">분석 화면에서 필터로 상세 확인</span>
+          </div>
+          <div class="card-body" style="padding:10px 16px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-sm btn-primary" onclick="navigateTo('analysis')"><i class="fas fa-chart-bar"></i> Analysis 열기</button>
+            <button class="btn btn-sm btn-ghost" onclick="navigateTo('approval')"><i class="fas fa-check-double"></i> Approval</button>
+          </div>
+        </div>`;
     }
 
   } catch (err) { console.error('Director Dashboard error:', err); }

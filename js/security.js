@@ -30,6 +30,10 @@
       '.arch-text-box',
       '.arch-summary-text',
       '#arch-body-text',
+      '.arch-desc-view',                // 자료실/승인모달 수행내용(조회 박스)
+      '#approval-desc-view',            // 승인모달 수행내용(조회 박스) 명시
+      '.ql-editor',                     // Quill 에디터 본문(수정 화면)
+      '.rich-edit-surface',             // 표 포함 contenteditable 편집 영역(수정 화면)
       '[data-allow-copy="true"]',
     ],
   };
@@ -231,7 +235,8 @@
       'position:fixed',
       'inset:0',
       'pointer-events:none',
-      'z-index:2147483647',
+      /* 본문·뱃지 위에 올라가 글자가 겹쳐 보이는 문제 방지: UI는 .main-content 등이 더 위 스택 */
+      'z-index:0',
       `background-image:url(${dataUrl})`,
       'background-repeat:repeat',
       'background-size:480px 240px',
@@ -370,6 +375,8 @@
     input, textarea, [contenteditable="true"],
     .arch-text-box,
     .arch-summary-text,
+    .arch-desc-view,
+    #approval-desc-view,
     [data-allow-copy="true"] {
       -webkit-user-select: text !important;
       -moz-user-select: text !important;
