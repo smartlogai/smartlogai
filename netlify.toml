@@ -1,0 +1,7 @@
+[build]
+  publish = "."
+  command = "node scripts/netlify-inject-supabase-env.cjs"
+
+# Netlify CONTEXT(Production/DeployPreview/BranchDeploy)에 따라
+# 다른 Supabase를 붙일 수 있도록 Environment variables를 사이트별로 분리해서 설정하세요.
+

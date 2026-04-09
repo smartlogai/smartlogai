@@ -11,6 +11,13 @@ const PW_EXPIRY_DAYS = 90;
 const PW_EXPIRY_MS   = PW_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
 
 window.addEventListener('DOMContentLoaded', async () => {
+  // ★ 전역 오류 캡처 설치 (콘솔 없이도 원인 확인)
+  try {
+    if (typeof GlobalErrorCapture !== 'undefined' && GlobalErrorCapture.install) {
+      GlobalErrorCapture.install();
+    }
+  } catch { /* ignore */ }
+
   // 세션 확인 — 없으면 로그인 화면으로 강제 이동
   _session = Session.require();
   if (!_session) {
@@ -61,6 +68,13 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   // ── body 표시 (세션 확인 완료 → visibility 복원) ──────────
   document.body.style.visibility = 'visible';
+
+  if (window.__SMARTLOG_DEV_CONFIG_MISSING__) {
+    var _devBar = document.createElement('div');
+    _devBar.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#b45309;color:#fff;padding:8px 14px;font-size:12px;text-align:center;z-index:100000';
+    _devBar.innerHTML = '<strong>로컬 개발</strong> — <code>js/supabase.dev.js</code>에 개발용 Supabase URL·anon 키를 넣으세요. <a href="docs/PRE_DEV_INDEX.md" style="color:#ffedd5">사전 준비 색인</a>';
+    document.body.appendChild(_devBar);
+  }
 
   // ── 3개월 비밀번호 만료 체크: 위에서 이미 가져온 freshUser 재사용 (API 중복 호출 제거) ─────────
   await checkPwExpiry(_session, freshUser ?? null);
@@ -248,6 +262,10 @@ function openModal(id) {
 }
 function closeModal(id) {
   document.getElementById(id)?.classList.remove('show');
+  // 승인 모달은 close 시 상태/버튼 핸들러 리셋 필요
+  if (id === 'approvalModal') {
+    try { window.resetApprovalModalState?.(); } catch {}
+  }
 }
 
 // ESC 키로 모달 닫기
@@ -258,7 +276,7 @@ window.addEventListener('keydown', (e) => {
       if (m.dataset.dynamic === 'true') {
         m.remove();
       } else {
-        m.classList.remove('show');
+        closeModal(m.id);
       }
     });
   }
@@ -266,8 +284,26 @@ window.addEventListener('keydown', (e) => {
 
 // 오버레이 클릭으로 모달 닫기
 document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  // 스크롤바 드래그/드래그 종료가 오버레이 click으로 오인되는 케이스 방지:
+  // "pointerdown이 오버레이에서 시작"한 진짜 바깥 클릭만 닫기 처리한다.
+  let _downOnOverlay = false;
+  let _downX = 0;
+  let _downY = 0;
+  overlay.addEventListener('pointerdown', (e) => {
+    _downOnOverlay = (e.target === overlay);
+    _downX = e.clientX || 0;
+    _downY = e.clientY || 0;
+  });
+  overlay.addEventListener('pointercancel', () => {
+    _downOnOverlay = false;
+  });
   overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.classList.remove('show');
+    // 드래그(스크롤바 이동 등)로 pointer가 움직였으면 닫지 않음
+    const dx = Math.abs((e.clientX || 0) - _downX);
+    const dy = Math.abs((e.clientY || 0) - _downY);
+    const moved = (dx + dy) > 6;
+    if (_downOnOverlay && !moved && e.target === overlay) closeModal(overlay.id);
+    _downOnOverlay = false;
   });
 });
 
@@ -340,11 +376,13 @@ const _baseNavigateTo = navigateTo;
 let _lastNavigatedPage = '';
 let _lastNavigatedAt   = 0;
 window.navigateTo = function(page) {
+  if (page === 'approval-1st' || page === 'approval-2nd') page = 'my-entries';
   _baseNavigateTo(page);
   // 타이틀 업데이트
   const title = PAGE_TITLES[page] || page;
   document.getElementById('pageTitle').textContent = title;
   document.getElementById('headerActions').innerHTML = '';
+  try { if (typeof window.renderEnvBadge === 'function') window.renderEnvBadge(); } catch (_) {}
 
   // ★ 동일 페이지 1초 내 재진입은 init 재실행 생략 (사이드바 클릭 연타 방지)
   const now = Date.now();

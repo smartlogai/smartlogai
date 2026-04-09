@@ -92,8 +92,9 @@ const Session = {
     - 자문 자료실 이용
 
   admin:
-    - 시스템 전체 관리 (등록/수정/삭제/승인/설정 모두 가능)
-    - 전체 데이터 열람 (필터 없음)
+    - 시스템 전체 관리 (등록/수정/삭제/설정)
+    - Staff 업무 기록(전체 타임시트·상태 필터)로 열람 (승인 처리는 Manager/Director 역할)
+    - Analysis 등 전체 데이터 열람
 */
 const ROLE_LABEL = {
   admin:    'Admin',       // 테이블 배지용 짧은 표기
@@ -183,10 +184,68 @@ const Auth = {
 };
 
 // ─────────────────────────────────────────────
-// Supabase 설정
+// Supabase 설정 (supabase-env.js — 로컬은 supabase.dev.js)
 // ─────────────────────────────────────────────
-const SUPABASE_URL = 'https://dvjagzcqdgolspyngtxj.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR2amFnemNxZGdvbHNweW5ndHhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNjU5MjYsImV4cCI6MjA5MDg0MTkyNn0.J3G3zHvIlCgpYaST9PCAJtd9n8OoXMZZmP5i920cfUg';
+const SUPABASE_URL = typeof window.__SMARTLOG_SB_URL__ === 'string' ? window.__SMARTLOG_SB_URL__ : '';
+const SUPABASE_KEY = typeof window.__SMARTLOG_SB_KEY__ === 'string' ? window.__SMARTLOG_SB_KEY__ : '';
+
+/** Edge Functions·외부 모듈에서 동일 프로젝트 URL/anon 키 참조용 */
+window.SmartLogSupabase = { url: SUPABASE_URL, anonKey: SUPABASE_KEY };
+
+// ─────────────────────────────────────────────
+// 운영 안정화: 배포 환경 표시 + 설정 누락 방지
+// ─────────────────────────────────────────────
+const SMARTLOG_ENV_LABEL =
+  (typeof window.__SMARTLOG_ENV_LABEL__ === 'string' && window.__SMARTLOG_ENV_LABEL__)
+    ? window.__SMARTLOG_ENV_LABEL__
+    : 'PROD';
+window.__SMARTLOG_ENV_LABEL__ = SMARTLOG_ENV_LABEL;
+
+// 기능 플래그(추후 점진 도입용)
+// - 기본값: 비활성 (운영/스테이징 모두)
+// - 임시 활성화: localStorage 'smartlog_flag_llm'= '1'
+window.SmartLogFlags = window.SmartLogFlags || {};
+try {
+  const llmLocal = localStorage.getItem('smartlog_flag_llm') === '1';
+  window.SmartLogFlags.llmProxyEnabled = !!llmLocal;
+} catch (_) {
+  window.SmartLogFlags.llmProxyEnabled = false;
+}
+
+function renderEnvBadge() {
+  const wrap = document.getElementById('headerActions');
+  if (!wrap) return;
+  if (wrap.querySelector('[data-smartlog-env-badge="1"]')) return;
+  const badge = document.createElement('span');
+  badge.dataset.smartlogEnvBadge = '1';
+  badge.style.cssText =
+    'display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;' +
+    'font-size:12px;font-weight:800;letter-spacing:-0.2px;border:1px solid var(--border-light);' +
+    (SMARTLOG_ENV_LABEL === 'PROD'
+      ? 'background:#fef2f2;color:#991b1b;border-color:#fecaca'
+      : 'background:#eff6ff;color:#1e40af;border-color:#bfdbfe');
+  badge.title = '현재 접속 환경';
+  badge.innerHTML =
+    `<span style="width:7px;height:7px;border-radius:50%;background:${SMARTLOG_ENV_LABEL === 'PROD' ? '#ef4444' : '#3b82f6'}"></span>` +
+    `ENV: ${Utils.escHtml(String(SMARTLOG_ENV_LABEL))}`;
+  wrap.appendChild(badge);
+}
+window.renderEnvBadge = renderEnvBadge;
+
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  // 설정 미주입/누락이면 운영에서 잘못된 DB 연결을 방지하기 위해 즉시 중단
+  try {
+    const hint = (window.__SMARTLOG_REMOTE_CONFIG_MISSING__ || window.__SMARTLOG_DEV_CONFIG_MISSING__)
+      ? 'Supabase 설정이 주입되지 않았습니다.'
+      : 'Supabase 설정이 비어 있습니다.';
+    alert(
+      `Smartlog 설정 오류: ${hint}\n\n` +
+      `- Netlify 환경변수(SUPABASE_URL, SUPABASE_ANON_KEY)를 확인하세요.\n` +
+      `- 로컬 개발이면 js/supabase.dev.js 설정을 확인하세요.`
+    );
+  } catch (_) {}
+  throw new Error('Smartlog Supabase config missing');
+}
 
 // ─────────────────────────────────────────────
 // API 헬퍼 (Supabase 호환 레이어)
@@ -219,6 +278,13 @@ const API = {
     return res.json().catch(() => null);
   },
 
+  /** PostgREST INSERT/PATCH/UPDATE 응답: 배열이면 첫 행. 빈 배열([])은 RLS 등으로 반환 행 없음 → null */
+  _singleRowResult(result) {
+    if (Array.isArray(result) && result.length > 0) return result[0];
+    if (Array.isArray(result) && result.length === 0) return null;
+    return result;
+  },
+
   // 목록 조회 (GET) — Genspark: { data:[], total:N } 형식으로 변환
   async list(table, params = {}) {
     const limit  = params.limit  || 200;
@@ -227,6 +293,11 @@ const API = {
     const search = params.search || '';
 
     let url = `${SUPABASE_URL}/rest/v1/${table}?select=*&limit=${limit}&offset=${offset}`;
+
+    // PostgREST 추가 조건 (내부 전용) — 예: status=eq.submitted, or=(status.eq.a,status.eq.b)
+    if (params.filter && typeof params.filter === 'string') {
+      url += `&${params.filter}`;
+    }
 
     // 검색어 처리 (간단 텍스트 검색)
     if (search) {
@@ -265,6 +336,39 @@ const API = {
     };
   },
 
+  /**
+   * 목록을 페이지 순회해 병합 (created_at 최신 N건만 보면 오래된 행·특정 status 누락 방지)
+   * @param {string} table
+   * @param {{ filter?: string, sort?: string, limit?: number, maxPages?: number }} [params]
+   */
+  async listAllPages(table, params = {}) {
+    const limit = params.limit != null ? params.limit : 500;
+    const maxPages = params.maxPages != null ? params.maxPages : 120;
+    const sort = params.sort != null ? params.sort : 'updated_at';
+    const filter = params.filter || '';
+    const out = [];
+    for (let page = 1; page <= maxPages; page++) {
+      const listParams = { limit, page, sort };
+      if (filter) listParams.filter = filter;
+      const r = await this.list(table, listParams);
+      const chunk = (r && r.data) ? r.data : [];
+      out.push(...chunk);
+      if (chunk.length === 0 || chunk.length < limit) break;
+    }
+    return out;
+  },
+
+  /** 대시보드·분석 공통: time_entries 전량(페이지 순회). 최신 N건만 보면 상태·기간 필터가 틀어짐. */
+  async fetchAllTimeEntriesForDash() {
+    try {
+      return await this.listAllPages('time_entries', { limit: 500, maxPages: 120, sort: 'updated_at' });
+    } catch (e) {
+      console.warn('[API] fetchAllTimeEntriesForDash listAllPages 실패, 폴백', e);
+      const r = await this.list('time_entries', { limit: 2000, sort: 'updated_at' });
+      return (r && r.data) ? r.data : [];
+    }
+  },
+
   // 단건 조회 (GET)
   async get(table, id) {
     const url  = `${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}&limit=1`;
@@ -287,14 +391,7 @@ const API = {
       method: 'POST',
       body:   JSON.stringify(payload),
     });
-        // 배열로 반환되면 첫 번째 항목
-    if (Array.isArray(result) && result.length > 0) return result[0];
-    // RLS 또는 return=representation 미지원 시 빈 배열 반환 → null 처리
-    if (Array.isArray(result) && result.length === 0) {
-      console.warn(`[API.create] ${table}: 응답 빈 배열 (RLS 또는 Prefer 미지원). null 반환.`);
-      return null;
-    }
-    return result;
+    return this._singleRowResult(result);
   },
 
 
@@ -306,8 +403,7 @@ const API = {
       method: 'PATCH',
       body:   JSON.stringify(payload),
     });
-    if (Array.isArray(result)) return result[0];
-    return result;
+    return this._singleRowResult(result);
   },
 
   // 부분 수정 (PATCH)
@@ -318,8 +414,7 @@ const API = {
       method: 'PATCH',
       body:   JSON.stringify(payload),
     });
-    if (Array.isArray(result)) return result[0];
-    return result;
+    return this._singleRowResult(result);
   },
 
   // 삭제 (Hard Delete)
@@ -382,6 +477,140 @@ const Toast = {
   warning: (m, d) => Toast.show(m, 'warning', d),
   info:    (m, d) => Toast.show(m, 'info', d),
 };
+
+// ─────────────────────────────────────────────
+// ★ 전역 오류 캡처 (콘솔을 몰라도 원인 확인 가능)
+// - 런타임 에러(window.onerror), Promise reject(unhandledrejection) 수집
+// - 최근 오류 30개를 sessionStorage에 저장
+// - 화면 우하단 "오류 로그" 버튼으로 확인
+// ─────────────────────────────────────────────
+const GlobalErrorCapture = (() => {
+  const KEY = '__smartlog_errors__';
+  const MAX = 30;
+  let installed = false;
+
+  function _load() {
+    try { return JSON.parse(sessionStorage.getItem(KEY) || '[]'); }
+    catch { return []; }
+  }
+  function _save(list) {
+    try { sessionStorage.setItem(KEY, JSON.stringify(list.slice(-MAX))); }
+    catch { /* ignore */ }
+  }
+  function _push(item) {
+    const list = _load();
+    list.push(item);
+    _save(list);
+    _ensureButton();
+  }
+  function _fmtTime(ts) {
+    const d = new Date(ts);
+    return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+  }
+  function _ensureButton() {
+    if (document.getElementById('btn-error-log')) return;
+    const btn = document.createElement('button');
+    btn.id = 'btn-error-log';
+    btn.className = 'btn btn-ghost';
+    btn.type = 'button';
+    btn.style.cssText = 'position:fixed;right:14px;bottom:14px;z-index:99999;background:#fff;border:1px solid #e2e8f0;box-shadow:0 6px 20px rgba(0,0,0,0.12);padding:8px 10px;border-radius:10px;font-size:12px;color:#1a2b45';
+    btn.innerHTML = '<i class="fas fa-bug" style="margin-right:6px"></i>오류 로그';
+    btn.onclick = () => show();
+    document.body.appendChild(btn);
+  }
+  function show() {
+    const list = _load().slice().reverse();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay show';
+    overlay.dataset.dynamic = 'true';
+    const items = list.length
+      ? list.map(e => `
+          <div style="padding:10px 12px;border:1px solid #eef2f7;border-radius:10px;margin-bottom:10px;background:#fff">
+            <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+              <div style="font-size:12px;font-weight:700;color:#1a2b45;word-break:break-word">${Utils.escHtml(e.message || 'Unknown error')}</div>
+              <div style="font-size:11px;color:#94a3b8;white-space:nowrap">${_fmtTime(e.ts)}</div>
+            </div>
+            <div style="margin-top:6px;font-size:11.5px;color:#475569;word-break:break-word">
+              <div><b>종류</b>: ${Utils.escHtml(e.type || '-')}</div>
+              ${e.source ? `<div><b>위치</b>: ${Utils.escHtml(e.source)}${e.lineno ? `:${e.lineno}` : ''}${e.colno ? `:${e.colno}` : ''}</div>` : ''}
+              ${e.stack  ? `<div style="margin-top:6px;white-space:pre-wrap;background:#0b1220;color:#e2e8f0;border-radius:8px;padding:10px;font-size:10.5px;line-height:1.35">${Utils.escHtml(e.stack)}</div>` : ''}
+            </div>
+          </div>
+        `).join('')
+      : `<div style="padding:18px;text-align:center;color:#64748b;font-size:13px">수집된 오류가 없습니다.</div>`;
+
+    overlay.innerHTML = `
+      <div style="width:min(860px,92vw);max-height:min(80vh,720px);overflow:auto;background:#f8fafc;border-radius:14px;border:1px solid #e2e8f0;padding:14px 14px 10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div style="font-size:14px;font-weight:800;color:#1a2b45"><i class="fas fa-bug" style="margin-right:8px;color:#ef4444"></i>오류 로그</div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" id="errCopy">복사</button>
+            <button class="btn btn-ghost" id="errClear">초기화</button>
+            <button class="btn btn-primary" id="errClose">닫기</button>
+          </div>
+        </div>
+        <div>${items}</div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    overlay.querySelector('#errClose').onclick = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    overlay.querySelector('#errClear').onclick = () => {
+      sessionStorage.removeItem(KEY);
+      overlay.remove();
+      Toast.success('오류 로그를 초기화했습니다.');
+    };
+    overlay.querySelector('#errCopy').onclick = async () => {
+      try {
+        const raw = JSON.stringify(_load(), null, 2);
+        await navigator.clipboard.writeText(raw);
+        Toast.success('오류 로그를 복사했습니다. (붙여넣기 가능)');
+      } catch {
+        Toast.warning('복사에 실패했습니다. (브라우저 권한 제한)');
+      }
+    };
+  }
+
+  function install() {
+    if (installed) return;
+    installed = true;
+
+    window.addEventListener('error', (ev) => {
+      try {
+        _push({
+          ts: Date.now(),
+          type: 'error',
+          message: ev?.message || String(ev?.error?.message || 'Unknown error'),
+          source: ev?.filename || '',
+          lineno: ev?.lineno || 0,
+          colno: ev?.colno || 0,
+          stack: ev?.error?.stack ? String(ev.error.stack).slice(0, 5000) : '',
+        });
+        Toast.error('화면 오류가 발생했습니다. 우하단 "오류 로그"를 확인하세요.', 6000);
+      } catch { /* ignore */ }
+    });
+
+    window.addEventListener('unhandledrejection', (ev) => {
+      try {
+        const reason = ev?.reason;
+        const msg = (reason && reason.message) ? reason.message : String(reason || 'Unhandled rejection');
+        _push({
+          ts: Date.now(),
+          type: 'unhandledrejection',
+          message: msg,
+          source: '',
+          lineno: 0,
+          colno: 0,
+          stack: reason?.stack ? String(reason.stack).slice(0, 5000) : '',
+        });
+        Toast.error('처리되지 않은 오류가 발생했습니다. 우하단 "오류 로그"를 확인하세요.', 6000);
+      } catch { /* ignore */ }
+    });
+  }
+
+  return { install, show };
+})();
 
 // ─────────────────────────────────────────────
 // 확인 다이얼로그
@@ -505,7 +734,7 @@ const Utils = {
     const map = {
       draft:        { label: '임시저장',    cls: 'badge-gray'   },
       submitted:    { label: '1차검토중',   cls: 'badge-yellow' },
-      pre_approved: { label: '2차검토중',   cls: 'badge-blue'   },
+      pre_approved: { label: '승인대기중',  cls: 'badge-blue'   },
       rejected:     { label: '반려',        cls: 'badge-red'    },
       active:       { label: '진행중',      cls: 'badge-blue'   },
       hold:         { label: '보류',        cls: 'badge-yellow' },
@@ -622,6 +851,19 @@ const Utils = {
       .replace(/>/g,'&gt;')
       .replace(/"/g,'&quot;')
       .replace(/'/g,'&#39;');
+  },
+
+  // 문서번호 표시용 단축 포맷
+  // 저장값: IDYYMMDD####  → 표시값: IDMMDD## (예: ID2604080001 → ID040801)
+  formatDocNoShort(docNo) {
+    const s = String(docNo || '').trim();
+    if (!s) return '';
+    const m = s.match(/^ID(\d{2})(\d{2})(\d{2})(\d{4})$/);
+    if (!m) return s;
+    const mm = m[2];
+    const dd = m[3];
+    const seq = String(parseInt(m[4], 10) || 0).padStart(2, '0'); // 0001 → 01
+    return `ID${mm}${dd}${seq}`;
   },
 
   // 오늘 날짜 문자열 (YYYY-MM-DD)
@@ -939,6 +1181,189 @@ const ClientSearchSelect = (() => {
 })();
 
 // ─────────────────────────────────────────────
+// ★ 담당자(Staff) 검색형 선택 컴포넌트 (UserSearchSelect)
+// - ClientSearchSelect와 동일한 UX
+// - 표시/검색: 이름만
+// ─────────────────────────────────────────────
+const UserSearchSelect = (() => {
+  const _state = {}; // wrapperId → { users, selected, onSelect }
+
+  function _render(wid) {
+    const wrap = document.getElementById(wid);
+    if (!wrap) return;
+    const s   = _state[wid];
+    const val = s.selected;
+
+    wrap.innerHTML = `
+      <div class="cs-root" style="position:relative">
+        ${val.id
+          ? `<div class="cs-selected-box form-control"
+                style="display:flex;align-items:center;justify-content:space-between;
+                       cursor:pointer;padding:6px 10px;min-height:38px;user-select:none"
+                onclick="UserSearchSelect._openSearch('${wid}')">
+              <span style="font-size:13px;font-weight:500">${Utils.escHtml(val.name)}</span>
+              <span style="display:flex;gap:6px;align-items:center">
+                <i class="fas fa-exchange-alt" style="color:var(--text-muted);font-size:11px" title="변경"></i>
+                <i class="fas fa-times" style="color:var(--text-muted);font-size:12px"
+                   onclick="event.stopPropagation();UserSearchSelect.clear('${wid}')" title="초기화"></i>
+              </span>
+            </div>`
+          : `<div class="cs-search-box" style="position:relative">
+              <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);
+                 color:var(--text-muted);font-size:12px;pointer-events:none"></i>
+              <input type="text" class="form-control cs-input-${wid}" id="us-input-${wid}"
+                     style="padding-left:30px;font-size:13px"
+                     placeholder="${s.placeholder || '담당자 검색/선택'}"
+                     oninput="UserSearchSelect._onInput('${wid}', this.value)"
+                     onkeydown="UserSearchSelect._onKey(event,'${wid}')"
+                     onfocus="UserSearchSelect._showDropdown('${wid}', this.value)"
+                     autocomplete="off" />
+              <div id="us-dropdown-${wid}" class="cs-dropdown"
+                   style="display:none;position:absolute;top:calc(100% + 2px);left:0;right:0;
+                          background:#fff;border:1px solid var(--border-light);border-radius:8px;
+                          box-shadow:0 4px 20px rgba(0,0,0,0.12);z-index:3000;
+                          max-height:220px;overflow-y:auto"></div>
+            </div>`
+        }
+      </div>`;
+  }
+
+  function _showDropdown(wid, query) {
+    const s = _state[wid];
+    if (!s) return;
+    const ddEl = document.getElementById(`us-dropdown-${wid}`);
+    if (!ddEl) return;
+    const q = (query || '').trim().toLowerCase();
+    const filtered = q
+      ? s.users.filter(u => (u.name || '').toLowerCase().includes(q))
+      : s.users;
+
+    if (filtered.length === 0) {
+      ddEl.innerHTML = `<div style="padding:10px 14px;color:var(--text-muted);font-size:13px">검색 결과 없음</div>`;
+    } else {
+      ddEl.innerHTML = filtered.slice(0, 50).map(u => {
+        const lbl = u.name || '';
+        const hi  = q ? lbl.replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi'),
+                         '<mark style="background:#fef9c3;border-radius:2px;padding:0 1px">$1</mark>') : lbl;
+        return `<div class="cs-item" data-id="${u.id}" data-name="${Utils.escHtml(lbl)}"
+                     style="padding:9px 14px;cursor:pointer;font-size:13px;
+                            border-bottom:1px solid #f1f5f9;transition:background .1s"
+                     onmouseover="this.style.background='#f0f7ff'"
+                     onmouseout="this.style.background=''"
+                     onclick="UserSearchSelect._pick('${wid}','${u.id}','${lbl.replace(/'/g,"\\'")}')">
+                  ${hi}
+                </div>`;
+      }).join('');
+    }
+    ddEl.style.display = '';
+    if (!s._outsideHandler) {
+      s._outsideHandler = (e) => {
+        const root = document.getElementById(`us-dropdown-${wid}`);
+        const inp  = document.getElementById(`us-input-${wid}`);
+        if (root && !root.contains(e.target) && e.target !== inp) {
+          root.style.display = 'none';
+        }
+      };
+      document.addEventListener('click', s._outsideHandler, true);
+    }
+  }
+
+  function _onInput(wid, val) { _showDropdown(wid, val); }
+
+  function _onKey(e, wid) {
+    const ddEl = document.getElementById(`us-dropdown-${wid}`);
+    if (!ddEl || ddEl.style.display === 'none') return;
+    const items = ddEl.querySelectorAll('.cs-item');
+    let cur = Array.from(items).findIndex(i => i.classList.contains('cs-focused'));
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (cur >= 0) items[cur].classList.remove('cs-focused');
+      cur = (cur + 1) % items.length;
+      items[cur].classList.add('cs-focused');
+      items[cur].style.background = '#f0f7ff';
+      items[cur].scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (cur >= 0) items[cur].classList.remove('cs-focused');
+      cur = (cur - 1 + items.length) % items.length;
+      items[cur].classList.add('cs-focused');
+      items[cur].style.background = '#f0f7ff';
+      items[cur].scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (cur >= 0) {
+        const item = items[cur];
+        _pick(wid, item.dataset.id, item.dataset.name);
+      }
+    } else if (e.key === 'Escape') {
+      ddEl.style.display = 'none';
+    }
+  }
+
+  function _openSearch(wid) {
+    const s = _state[wid];
+    if (!s) return;
+    s.selected = { id: '', name: '' };
+    _render(wid);
+    setTimeout(() => {
+      const inp = document.getElementById(`us-input-${wid}`);
+      if (inp) { inp.focus(); _showDropdown(wid, ''); }
+    }, 50);
+  }
+
+  function _pick(wid, id, name) {
+    const s = _state[wid];
+    if (!s) return;
+    s.selected = { id, name };
+    if (s._outsideHandler) {
+      document.removeEventListener('click', s._outsideHandler, true);
+      s._outsideHandler = null;
+    }
+    _render(wid);
+    if (typeof s.onSelect === 'function') s.onSelect(id, name);
+  }
+
+  return {
+    init(wid, users, opts = {}) {
+      if (_state[wid] && _state[wid]._outsideHandler) {
+        document.removeEventListener('click', _state[wid]._outsideHandler, true);
+      }
+      _state[wid] = {
+        users: users || [],
+        selected: { id: '', name: '' },
+        placeholder: opts.placeholder || '담당자 검색/선택',
+        onSelect: opts.onSelect || null,
+        _outsideHandler: null,
+      };
+      _render(wid);
+    },
+    setValue(wid, id, name) {
+      if (!_state[wid]) return;
+      _state[wid].selected = { id: id || '', name: name || '' };
+      _render(wid);
+    },
+    getValue(wid) {
+      return _state[wid] ? { ..._state[wid].selected } : { id: '', name: '' };
+    },
+    clear(wid) {
+      if (!_state[wid]) return;
+      if (_state[wid]._outsideHandler) {
+        document.removeEventListener('click', _state[wid]._outsideHandler, true);
+        _state[wid]._outsideHandler = null;
+      }
+      _state[wid].selected = { id: '', name: '' };
+      _render(wid);
+      if (typeof _state[wid].onSelect === 'function') _state[wid].onSelect('', '');
+    },
+    _openSearch,
+    _onInput,
+    _onKey,
+    _showDropdown,
+    _pick,
+  };
+})();
+
+// ─────────────────────────────────────────────
 // 사이드바 내비게이션
 // ─────────────────────────────────────────────
 function navigateTo(page) {
@@ -947,7 +1372,6 @@ function navigateTo(page) {
   // 해당 섹션 표시
   const section = document.getElementById(`page-${page}`);
   if (section) section.classList.add('active');
-  // 네비 활성 업데이트
   document.querySelectorAll('.nav-item').forEach(item => {
     item.classList.toggle('active', item.dataset.page === page);
   });
@@ -966,17 +1390,18 @@ function toggleSidebar() {
 // ─────────────────────────────────────────────
 /*
   메뉴 노출 기준:
-  ┌───────────────┬───────┬─────────┬──────────┬───────┐
-  │ 메뉴          │ Staff │ Manager │ Director │ Admin │
-  ├───────────────┼───────┼─────────┼──────────┼───────┤
-  │ Dashboard     │   ✅   │    ✅   │    ✅    │   ✅   │
-  │ New Entry     │   ✅   │    ❌   │    ❌    │   ❌   │
-  │ My Time Sheet │   ✅   │    ❌   │    ❌    │   ❌   │
-  │ Approval      │   ❌   │    ✅   │    ✅    │   ✅   │
-  │ Analysis      │   ❌   │    ✅   │    ✅    │   ✅   │
-  │ Settings      │   ❌   │    ❌   │    ❌    │   ✅   │
-  └───────────────┴───────┴─────────┴──────────┴───────┘
-  
+  ┌─────────────────────┬───────┬─────────┬──────────┬───────┐
+  │ 메뉴                │ Staff │ Manager │ Director │ Admin │
+  ├─────────────────────┼───────┼─────────┼──────────┼───────┤
+  │ Dashboard           │   ✅   │    ✅   │    ✅    │   ✅   │
+  │ New Entry           │   ✅   │    ❌   │    ❌    │   ❌   │
+  │ My Time Sheet       │   ✅   │    ✅*  │    ❌    │   ❌   │
+  │ Staff 업무 기록     │   ❌   │    ❌   │    ❌    │   ✅   │
+  │ Approval(통합)      │   ❌   │    ✅   │    ✅    │   ❌   │
+  │ Analysis            │   ❌   │    ✅   │    ✅    │   ✅   │
+  │ Settings            │   ❌   │    ❌   │    ❌    │   ✅   │
+  └─────────────────────┴───────┴─────────┴──────────┴───────┘
+  * Manager 중 타임시트 대상자만 My Time Sheet · New Entry 노출
   팀 소속 기준:
   - Manager가 승인자(approver_id)로 지정된 Staff들이 해당 Manager의 팀원
   - Staff 등록 시 승인자로 지정된 Manager의 팀이 곧 해당 Staff의 소속팀
@@ -1008,9 +1433,13 @@ function setupMenuByRole(session) {
   const showMgmt = canApprove || canViewDeptScope;
   if (mgmtSection) mgmtSection.style.display = showMgmt ? '' : 'none';
 
-  // ── Approval: manager(승인/반려) + director/admin(열람) ────
+  // ── Approval: manager + director / Admin은 Staff 업무 기록으로 조회 ────
   const approvalMenu = document.getElementById('menu-approval');
-  if (approvalMenu) approvalMenu.style.display = (canApprove || canViewDeptScope) ? '' : 'none';
+  if (approvalMenu) {
+    approvalMenu.style.display = (canApprove || canViewDeptScope) && !canViewAll ? '' : 'none';
+  }
+  const adminAllEntries = document.getElementById('menu-admin-all-entries');
+  if (adminAllEntries) adminAllEntries.style.display = canViewAll ? '' : 'none';
 
   // ── Analysis: manager + director + admin ──────────────────
   const analysisMenu = document.getElementById('menu-analysis');
@@ -1080,34 +1509,69 @@ function getInitial(name) {
 // ─────────────────────────────────────────────
 let _badgeLastUpdated = 0;
 async function updateApprovalBadge(session, force = false) {
-  // manager 또는 director만 배지 표시
+  // admin: 전사 1차(submitted)·2차(pre_approved) 건수 — 별도 배지
+  if (Auth.isAdmin(session)) {
+    const now = Date.now();
+    if (!force && now - _badgeLastUpdated < 30000) return;
+    _badgeLastUpdated = now;
+    try {
+      const [submittedRows, preRows] = await Promise.all([
+        Cache.get('time_entries_badge_admin_sub', async () => API.listAllPages('time_entries', { filter: 'status=eq.submitted', limit: 300, maxPages: 40 }), 120000),
+        Cache.get('time_entries_badge_admin_pre', async () => API.listAllPages('time_entries', { filter: 'status=eq.pre_approved', limit: 300, maxPages: 40 }), 120000),
+      ]);
+      const c1 = (submittedRows || []).length;
+      const c2 = (preRows || []).filter(e => e.time_category === 'client').length;
+      const b1 = document.getElementById('approval-badge-1st');
+      const b2 = document.getElementById('approval-badge-2nd');
+      if (b1) {
+        b1.textContent = c1;
+        b1.style.display = c1 > 0 ? '' : 'none';
+      }
+      if (b2) {
+        b2.textContent = c2;
+        b2.style.display = c2 > 0 ? '' : 'none';
+      }
+    } catch {}
+    return;
+  }
+
+  // manager 또는 director만 (통합 Approval 배지)
   if (!Auth.canApprove1st(session) && !Auth.canApprove2nd(session)) return;
-  // ★ 30초 이내 재호출 방지 (force=true 시 무시)
   const now = Date.now();
   if (!force && now - _badgeLastUpdated < 30000) return;
   _badgeLastUpdated = now;
   try {
+    const sid = encodeURIComponent(String(session.id));
     const r = await Cache.get('time_entries_badge_' + session.id, async () => {
-      return API.list('time_entries', { limit: 500 });
+      if (Auth.canApprove1st(session)) {
+        try {
+          const rows = await API.listAllPages('time_entries', {
+            filter: `or=(approver_id.eq.${sid},pre_approver_id.eq.${sid})`,
+            limit: 400,
+            maxPages: 50,
+          });
+          return { data: rows };
+        } catch (e) {
+          console.warn('[badge] approver or 필터 실패, 폴백', e);
+          return API.list('time_entries', { limit: 2000, sort: 'updated_at' });
+        }
+      }
+      return { data: await API.listAllPages('time_entries', { limit: 400, maxPages: 60, sort: 'updated_at' }) };
     }, 120000);
     if (r && r.data) {
       let count = 0;
       if (Auth.canApprove1st(session)) {
-        // manager: 본인이 approver_id인 submitted 건 (1차 대기)
         count = r.data.filter(e =>
           e.status === 'submitted' && String(e.approver_id) === String(session.id)
         ).length;
       } else if (Auth.canApprove2nd(session)) {
-        // director: pre_approved 건 중 본인 소속 범위 + manager 본인 건 submitted
         const allUsers = await Master.users();
         const scopeIds = new Set(allUsers.filter(u => Auth.scopeMatch(session, u)).map(u => String(u.id)));
-        // 2차 대기: pre_approved 상태인 소속 범위 직원 건
         const preApproved = r.data.filter(e =>
-          e.status === 'pre_approved' && scopeIds.has(String(e.user_id))
+          e.status === 'pre_approved' && scopeIds.has(String(e.user_id)) && e.time_category === 'client'
         ).length;
-        // manager 본인 건: submitted 상태이고 approver_id가 director 본인인 건
         const managerDirect = r.data.filter(e =>
-          e.status === 'submitted' && String(e.approver_id) === String(session.id)
+          e.status === 'submitted' && String(e.approver_id) === String(session.id) && e.time_category === 'client'
         ).length;
         count = preApproved + managerDirect;
       }
@@ -1168,6 +1632,60 @@ const BtnLoading = {
     return () => btns.forEach(b => { if (b) { b.disabled = false; b.style.opacity = ''; b.style.cursor = ''; } });
   },
 };
+
+// ─────────────────────────────────────────────
+// ★ GlobalBusy — 전 화면 “작업 중” 오버레이 유틸
+// ─────────────────────────────────────────────
+/*
+  사용법:
+    const done = GlobalBusy.show('저장 중...');
+    try { await doWork(); } finally { done(); }
+
+  또는:
+    await GlobalBusy.run(() => doWork(), '삭제 중...');
+*/
+const GlobalBusy = (() => {
+  let depth = 0;
+  let overlayEl = null;
+  let textEl = null;
+
+  function _getEls() {
+    if (!overlayEl) overlayEl = document.getElementById('globalBusyOverlay');
+    if (!textEl) textEl = document.getElementById('globalBusyText');
+    return { overlayEl, textEl };
+  }
+
+  function show(message = '처리 중...') {
+    const els = _getEls();
+    depth += 1;
+    if (!els.overlayEl) return () => hide();
+
+    if (els.textEl) els.textEl.textContent = String(message || '처리 중...');
+    els.overlayEl.classList.add('show');
+    els.overlayEl.setAttribute('aria-hidden', 'false');
+    document.body.setAttribute('aria-busy', 'true');
+
+    return function done() { hide(); };
+  }
+
+  function hide() {
+    const els = _getEls();
+    depth = Math.max(0, depth - 1);
+    if (depth > 0) return;
+    if (!els.overlayEl) return;
+
+    els.overlayEl.classList.remove('show');
+    els.overlayEl.setAttribute('aria-hidden', 'true');
+    document.body.removeAttribute('aria-busy');
+  }
+
+  async function run(fn, message = '처리 중...') {
+    const done = show(message);
+    try { return await fn(); } finally { done(); }
+  }
+
+  return { show, hide, run };
+})();
 
 // ─────────────────────────────────────────────
 // ★ 1회성 마이그레이션: 하두식/박주경/안만복 role → admin

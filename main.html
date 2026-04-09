@@ -26,13 +26,16 @@
   <script src="https://cdn.jsdelivr.net/npm/turndown/dist/turndown.js" defer></script>
   <!-- turndown-plugin-gfm: 테이블 등 GFM 확장 지원 -->
   <script src="https://cdn.jsdelivr.net/npm/turndown-plugin-gfm/dist/turndown-plugin-gfm.js" defer></script>
-  <link rel="stylesheet" href="css/style.css?v=20260331b" />
+  <link rel="stylesheet" href="css/style.css?v=20260409g" />
   <!-- Chart.js: 대시보드/분석에서 사용 → defer로 DOM 파싱 차단 방지 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
   <!-- ★ 무거운 라이브러리는 필요한 시점에 동적으로 로드 (초기 blocking 제거) -->
   <!-- xlsx(882KB), mammoth, pdf.js 는 lazyLoadLibs()로 지연 로드 -->
-  <!-- 보안 모듈: 가장 먼저 로드 -->
-  <script src="js/security.js"></script>
+  <!-- 로컬 개발용 Supabase (없으면 404) -->
+  <script src="js/supabase.dev.js"></script>
+  <script src="js/supabase-env.js"></script>
+  <!-- 보안 모듈 -->
+  <script src="js/security.js?v=20260409e"></script>
   <!-- ★ 라이브러리 지연 로더 -->
   <script>
   // ─────────────────────────────────────────────
@@ -131,6 +134,10 @@
       <div class="nav-item active" data-page="dashboard" onclick="navigateTo('dashboard')">
         <i class="fas fa-chart-pie nav-icon"></i> Dashboard
       </div>
+      <!-- ── 자문 자료실: Main (Dashboard 다음) · 전 역할 공통 ── -->
+      <div class="nav-item" id="menu-archive" data-page="archive" onclick="navigateTo('archive')">
+        <i class="fas fa-archive nav-icon"></i> 자문 자료실
+      </div>
 
       <!-- ── Time Sheet (Staff 전용) ───────────────── -->
       <div class="nav-section-title" id="menu-timesheet-section">Time Sheet</div>
@@ -141,11 +148,6 @@
         <i class="fas fa-list-alt nav-icon"></i> My Time Sheet
       </div>
 
-      <!-- ── 자문 자료실: 모든 역할 항상 표시 ─────────────── -->
-      <div class="nav-item" id="menu-archive" data-page="archive" onclick="navigateTo('archive')">
-        <i class="fas fa-archive nav-icon"></i> 자문 자료실
-      </div>
-
       <!-- ── Management (Manager / Director / Admin) ── -->
       <div class="nav-section-title" id="menu-management-section" style="display:none">Management</div>
       <div class="nav-item" id="menu-approval" data-page="approval" onclick="navigateTo('approval')" style="display:none">
@@ -154,6 +156,10 @@
       </div>
       <div class="nav-item" id="menu-analysis" data-page="analysis" onclick="navigateTo('analysis')" style="display:none">
         <i class="fas fa-chart-bar nav-icon"></i> Analysis
+      </div>
+      <!-- Admin 전용: Staff 전체 업무 기록 (상태 필터로 1·2차 대기 조회) -->
+      <div class="nav-item" id="menu-admin-all-entries" data-page="my-entries" onclick="navigateTo('my-entries')" style="display:none">
+        <i class="fas fa-table nav-icon"></i> Staff 업무 기록
       </div>
 
       <!-- ── Settings (Admin 전용 + 기준정보는 manager·director도) ── -->
@@ -330,7 +336,7 @@
                   </div>
 
                   <!-- 수행 팀명 · Staff -->
-                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end">
+                  <div id="entry-team-row" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end">
                     <div>
                       <label class="ep-label">수행 팀명 <span class="required">*</span></label>
                       <select class="ep-ctrl" id="entry-team" required>
@@ -430,11 +436,32 @@
                   <!-- 상단 안내 -->
                   <div style="background:#eff6ff;border-bottom:1px solid #bfdbfe;padding:7px 14px;font-size:11px;color:#1d4ed8;display:flex;align-items:center;gap:6px;flex-shrink:0">
                     <i class="fas fa-paste" style="font-size:12px;flex-shrink:0"></i>
-                    <span>고객 질의내용과 답변내용이 포함된 메일 본문 또는 의견서를 <strong>그대로 붙여넣기(Ctrl+C, Ctrl+V)</strong> 하세요</span>
+                    <span style="flex:1">고객 질의내용과 답변내용이 포함된 메일 본문 또는 의견서를 <strong>그대로 붙여넣기(Ctrl+C, Ctrl+V)</strong> 하세요</span>
+                    <button type="button" class="btn btn-secondary" style="height:28px;padding:0 10px;white-space:nowrap"
+                            onclick="openEntryTablePasteHelper()">
+                      <i class="fas fa-table"></i> 표 붙여넣기 도우미
+                    </button>
                   </div>
 
                   <!-- Quill 에디터 — flex:1 로 남은 공간 채움 -->
                   <div id="quill-editor" style="font-family:'Noto Sans KR',sans-serif;flex:1;min-height:200px;display:flex;flex-direction:column;"></div>
+                  <!-- 표 전용 contenteditable (엑셀/Word 표 보존용) -->
+                  <div id="entry-rich-editor"
+                       contenteditable="true"
+                       class="rich-edit-surface"
+                       style="display:none;font-family:'Noto Sans KR',sans-serif;flex:1;min-height:200px;max-height:60vh;
+                              border-top:1px solid #e5e7eb;
+                              padding:10px 12px;font-size:13px;line-height:1.7;color:#1e293b;
+                              background:#fff;outline:none;word-break:break-word;"
+                       placeholder="메일 본문을 그대로 붙여넣기 하세요 (엑셀 표 포함 가능)"></div>
+                  <div id="entry-editor-mode-badge" style="display:none;margin:6px 14px 0;font-size:11px;
+                       color:#7c3aed;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;
+                       padding:4px 10px;align-items:center;gap:5px">
+                    <i class="fas fa-table"></i>
+                    <span>표 포함 모드 · 표 구조가 그대로 보존됩니다</span>
+                    <button onclick="entrySwitchToQuill()" style="margin-left:auto;background:none;border:none;
+                            cursor:pointer;font-size:11px;color:#6b7280;text-decoration:underline">표 제거 후 일반 모드로</button>
+                  </div>
 
                   <!-- 하단 안내 -->
                   <div style="background:#fefce8;border-top:1px solid #fde68a;padding:7px 14px;font-size:11px;color:#92400e;display:flex;flex-direction:column;gap:3px;flex-shrink:0">
@@ -465,8 +492,11 @@
                       <span style="font-size:8px;color:#7c3aed">📌</span>
                       <label class="ep-label" style="margin:0;font-size:12px;font-weight:700">핵심키워드 <span class="required">*</span></label>
                     </div>
-                    <div style="font-size:11px;color:#6b7280;margin-bottom:3px">고객 질의의 핵심을 <strong>'대상+쟁점'</strong> 형태로 입력. Enter로 추가, ✕로 삭제.</div>
-                    <div id="kw-query-example" style="font-size:11px;color:#9ca3af;font-style:italic;margin-bottom:5px"></div>
+                    <div style="font-size:11px;color:#6b7280;margin-bottom:3px">고객 질의의 핵심을 <strong>'대상+쟁점'</strong> 형태로 입력. Enter로 추가, ✕로 삭제. 아래 예시를 눌러 빠르게 추가할 수 있습니다.</div>
+                    <div class="arch-example-area" id="entry-kw-example-area" style="display:none;margin-bottom:8px">
+                      <span class="arch-example-hint">이런 키워드:</span>
+                      <div class="arch-example-tags" id="entry-kw-examples"></div>
+                    </div>
                     <div style="display:flex;gap:6px;align-items:center">
                       <div class="tag-input-wrap" id="kw-query-wrap"
                         style="flex:1;min-height:36px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;background:#fff;border:1px solid #d1d5db;border-radius:7px;padding:5px 8px;cursor:text"
@@ -514,8 +544,11 @@
                       <span style="font-size:8px;color:#7c3aed">📌</span>
                       <label class="ep-label" style="margin:0;font-size:12px;font-weight:700">판단사유 <span class="optional">(선택)</span></label>
                     </div>
-                    <div style="font-size:11px;color:#6b7280;margin-bottom:3px">판단의 핵심 근거를 짧은 명사구로 입력. Enter로 추가, ✕로 삭제.</div>
-                    <div id="kw-reason-example" style="font-size:11px;color:#9ca3af;font-style:italic;margin-bottom:5px"></div>
+                    <div style="font-size:11px;color:#6b7280;margin-bottom:3px">판단의 핵심 근거를 짧은 명사구로 입력. Enter로 추가, ✕로 삭제. 아래 예시를 눌러 빠르게 추가할 수 있습니다.</div>
+                    <div class="arch-example-area" id="entry-reason-example-area" style="display:none;margin-bottom:8px">
+                      <span class="arch-example-hint">판단사유 예시:</span>
+                      <div class="arch-example-tags" id="entry-reason-examples"></div>
+                    </div>
                     <div style="display:flex;gap:6px;align-items:center">
                       <div class="tag-input-wrap" id="kw-reason-wrap"
                         style="flex:1;min-height:36px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;background:#fff;border:1px solid #d1d5db;border-radius:7px;padding:5px 8px;cursor:text"
@@ -621,9 +654,7 @@
           </div>
           <div class="filter-group">
             <span class="filter-label">고객사</span>
-            <select class="filter-control" id="filter-entry-client" style="width:120px">
-              <option value="">전체</option>
-            </select>
+            <div id="filter-entry-client-wrap" class="cs-wrap" style="min-height:30px;width:220px"></div>
           </div>
           <div class="filter-group">
             <span class="filter-label">대분류</span>
@@ -639,7 +670,7 @@
           </div>
           <div class="filter-group">
             <span class="filter-label">상태</span>
-            <select class="filter-control" id="filter-entry-status" style="width:100px">
+            <select class="filter-control" id="filter-entry-status" style="width:100px" onchange="loadMyEntries()">
               <option value="">전체</option>
               <option value="draft">임시저장</option>
               <option value="submitted">1차 검토중</option>
@@ -669,10 +700,11 @@
               <table class="data-table approval-table" id="my-entries-table" style="width:100%;table-layout:fixed">
                 <colgroup>
                   <col style="width:40px">   <!-- No -->
+                  <col class="my-entries-col-author" style="width:88px">  <!-- Staff (admin만 표시) -->
                   <col style="width:94px">   <!-- 작성일자 -->
                   <col style="width:150px">  <!-- 고객사 -->
-                  <col style="width:110px">  <!-- 업무팀 -->
-                  <col>                      <!-- 소분류 (flex) -->
+                  <col class="my-entries-col-team" style="width:110px">  <!-- 업무팀 -->
+                  <col style="width:220px">  <!-- 소분류 (너무 넓어지는 문제 방지) -->
                   <col style="width:110px">  <!-- 시작일시 -->
                   <col style="width:110px">  <!-- 종료일시 -->
                   <col style="width:68px">   <!-- 업무시간 -->
@@ -681,20 +713,21 @@
                 </colgroup>
                 <thead>
                   <tr>
-                    <th style="text-align:center">No</th>
-                    <th>작성일자</th>
-                    <th>고객사</th>
-                    <th>업무팀</th>
-                    <th>소분류</th>
-                    <th style="text-align:center">시작일시</th>
-                    <th style="text-align:center">종료일시</th>
-                    <th style="text-align:center">업무시간</th>
-                    <th style="text-align:center">상태</th>
-                    <th style="text-align:center">관리</th>
+                    <th class="th-no" style="text-align:center">No</th>
+                    <th class="my-entries-col-author th-author">Staff</th>
+                    <th class="th-written">작성일자</th>
+                    <th class="th-client">고객사</th>
+                    <th class="my-entries-col-team th-team">업무팀</th>
+                    <th class="th-subcat">소분류</th>
+                    <th class="th-start" style="text-align:center">시작일시</th>
+                    <th class="th-end" style="text-align:center">종료일시</th>
+                    <th class="th-duration" style="text-align:center">업무시간</th>
+                    <th class="th-status" style="text-align:center">상태</th>
+                    <th class="th-action" style="text-align:center">관리</th>
                   </tr>
                 </thead>
                 <tbody id="my-entries-body">
-                  <tr><td colspan="9" class="table-empty"><i class="fas fa-inbox"></i><p>데이터가 없습니다.</p></td></tr>
+                  <tr><td colspan="10" class="table-empty"><i class="fas fa-inbox"></i><p>데이터가 없습니다.</p></td></tr>
                 </tbody>
               </table>
             </div>
@@ -707,6 +740,11 @@
            4. 승인 관리
       ────────────────────────── -->
       <section class="page-section" id="page-approval">
+        <!-- Admin: 메뉴(1차/2차) 진입 시 안내 -->
+        <div id="approval-admin-preset-banner" style="display:none;align-items:center;gap:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 16px;margin-bottom:12px;font-size:13px;color:#1e40af">
+          <i class="fas fa-filter" style="font-size:16px;color:#2563eb"></i>
+          <span id="approval-admin-preset-banner-text"></span>
+        </div>
         <!-- Director/Admin 읽기전용 안내 배너 -->
         <div id="approval-readonly-banner" style="display:none;align-items:center;gap:10px;background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:13px;color:#92400e">
           <i class="fas fa-eye" style="font-size:16px;color:#b45309"></i>
@@ -733,9 +771,7 @@
           </div>
           <div class="filter-group">
             <span class="filter-label">고객사</span>
-            <select class="filter-control" id="filter-approval-client" style="width:110px">
-              <option value="">전체 고객사</option>
-            </select>
+            <div id="filter-approval-client-wrap" class="cs-wrap" style="min-height:30px;width:220px"></div>
           </div>
           <div class="filter-group">
             <span class="filter-label">업무 소분류</span>
@@ -745,7 +781,7 @@
           </div>
           <div class="filter-group">
             <span class="filter-label">상태</span>
-            <select class="filter-control" id="filter-approval-status" style="width:110px">
+            <select class="filter-control" id="filter-approval-status" style="width:110px" onchange="loadApprovalList()">
               <option value="" selected>전체</option>
               <option value="submitted">1차 검토 대기</option>
               <option value="pre_approved">최종 승인 대기</option>
@@ -842,7 +878,14 @@
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 16px;align-items:end;">
               <!-- 기간 -->
               <div class="filter-group" style="grid-column:span 2">
-                <span class="filter-label">기간</span>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span class="filter-label">기간</span>
+                  <span id="analysis-period-badge"
+                        style="display:none;font-size:11px;font-weight:700;color:#1d4ed8;
+                               background:#eff6ff;border:1px solid #bfdbfe;border-radius:999px;
+                               padding:3px 10px;white-space:nowrap;line-height:1.5">
+                  </span>
+                </div>
                 <div style="display:flex;align-items:center;gap:4px">
                   <input type="date" class="filter-control" id="filter-analysis-date-from" style="width:130px" />
                   <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">~</span>
@@ -859,23 +902,27 @@
               <!-- 고객지원팀 -->
               <div class="filter-group">
                 <span class="filter-label">고객지원팀</span>
-                <select class="filter-control" id="filter-analysis-csteam" style="width:100%">
+                <select class="filter-control" id="filter-analysis-csteam" style="width:100%" onchange="onAnalysisCsTeamChange()">
                   <option value="">전체 팀</option>
                 </select>
               </div>
-              <!-- 승인자 -->
+              <!-- 담당자 (검색형 선택) -->
               <div class="filter-group">
-                <span class="filter-label">승인자</span>
-                <select class="filter-control" id="filter-analysis-approver" style="width:100%">
-                  <option value="">전체 승인자</option>
+                <span class="filter-label">담당자</span>
+                <!-- 기존 select는 호환용(숨김) -->
+                <select class="filter-control" id="filter-analysis-staff" style="width:100%;display:none">
+                  <option value="">전체 담당자</option>
                 </select>
+                <div id="filter-analysis-staff-wrap"></div>
               </div>
-              <!-- 고객사 -->
+              <!-- 고객사 (검색형 선택) -->
               <div class="filter-group">
                 <span class="filter-label">고객사</span>
-                <select class="filter-control" id="filter-analysis-client" style="width:100%">
+                <!-- 기존 select는 호환용(숨김) -->
+                <select class="filter-control" id="filter-analysis-client" style="width:100%;display:none">
                   <option value="">전체 고객사</option>
                 </select>
+                <div id="filter-analysis-client-wrap"></div>
               </div>
               <!-- 업무 대분류 -->
               <div class="filter-group">
@@ -906,20 +953,41 @@
           <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-bottom:14px;">
             <div class="card">
               <div class="card-header" style="padding:12px 16px 11px">
-                <h2><i class="fas fa-bars" style="color:var(--primary)"></i>&nbsp; 업무별 투입 비율</h2>
+                <h2><i class="fas fa-bars" style="color:var(--primary)"></i>&nbsp; 업무유형별 투입 비율</h2>
                 <div class="card-actions"><span style="font-size:11px;color:var(--text-muted)">상위 8+기타</span></div>
               </div>
-              <div class="card-body" style="height:220px;position:relative;padding:10px 12px">
+              <div class="card-body" style="height:220px;position:relative;padding:10px 12px;overflow:auto">
                 <canvas id="analysis-chart-category"></canvas>
               </div>
             </div>
             <div class="card">
               <div class="card-header" style="padding:12px 16px 11px">
-                <h2><i class="fas fa-building" style="color:var(--primary)"></i>&nbsp; 고객사별 투입 시간</h2>
+                <h2><i class="fas fa-building" style="color:var(--primary)"></i>&nbsp; 고객사별 투입 비율</h2>
                 <div class="card-actions"><span style="font-size:11px;color:var(--text-muted)">상위 8+기타</span></div>
               </div>
-              <div class="card-body" style="height:220px;position:relative;padding:10px 12px">
+              <div class="card-body" style="height:220px;position:relative;padding:10px 12px;overflow:auto">
                 <canvas id="analysis-chart-client"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-bottom:14px;">
+            <div class="card">
+              <div class="card-header" style="padding:12px 16px 11px">
+                <h2><i class="fas fa-hourglass-half" style="color:var(--primary)"></i>&nbsp; 업무유형별 평균 소요시간</h2>
+                <div class="card-actions"><span style="font-size:11px;color:var(--text-muted)">상위 10 · 평균(분)</span></div>
+              </div>
+              <div class="card-body" style="height:260px;position:relative;padding:10px 12px;overflow:auto">
+                <div id="analysis-subcategory-avg"></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header" style="padding:12px 16px 11px">
+                <h2><i class="fas fa-user-clock" style="color:var(--primary)"></i>&nbsp; 담당자별 자문건수·투입시간</h2>
+                <div class="card-actions"><span style="font-size:11px;color:var(--text-muted)">고객업무 건수 기준</span></div>
+              </div>
+              <div class="card-body" style="height:260px;position:relative;padding:10px 12px;overflow:auto">
+                <div id="analysis-staff-advisory"></div>
               </div>
             </div>
           </div>
@@ -929,6 +997,41 @@
              서브탭2: 고과 분석
         ══════════════════════════════ -->
         <div id="analysis-panel-staff" style="display:none">
+          <!-- 가중치 모달 -->
+          <div id="perf-weights-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,0.55);align-items:center;justify-content:center;padding:18px;">
+            <div style="width:min(520px, 96vw);background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.2);border:1px solid #e5e7eb;overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:#f8fafc;border-bottom:1px solid #eef2f7">
+                <div style="font-weight:800;color:#1a2b45"><i class="fas fa-sliders-h" style="margin-right:6px;color:#2d6bb5"></i>가중치 설정</div>
+                <button class="btn btn-ghost btn-sm" onclick="closePerfWeightsModal()" title="닫기"><i class="fas fa-times"></i></button>
+              </div>
+              <div style="padding:12px 14px">
+                <div id="pw-hint" style="font-size:12px;color:#64748b;margin-bottom:10px"></div>
+
+                <div style="display:grid;grid-template-columns:1fr 72px;gap:10px 10px;align-items:center">
+                  <div style="font-size:12px;font-weight:700;color:#334155">투입시간</div>
+                  <input id="pw-time" type="number" min="0" max="100" class="filter-control" style="height:32px" />
+
+                  <div style="font-size:12px;font-weight:700;color:#334155">자문건수</div>
+                  <input id="pw-advisory" type="number" min="0" max="100" class="filter-control" style="height:32px" />
+
+                  <div style="font-size:12px;font-weight:700;color:#334155">효율(유형별 평균 대비)</div>
+                  <input id="pw-efficiency" type="number" min="0" max="100" class="filter-control" style="height:32px" />
+
+                  <div style="font-size:12px;font-weight:700;color:#334155">독립수행율</div>
+                  <input id="pw-independent" type="number" min="0" max="100" class="filter-control" style="height:32px" />
+
+                  <div style="font-size:12px;font-weight:700;color:#334155">품질/전문성(별점)</div>
+                  <input id="pw-rating" type="number" min="0" max="100" class="filter-control" style="height:32px" />
+                </div>
+
+                <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+                  <button id="pw-reset" class="btn btn-ghost btn-sm" onclick="resetPerfWeights()"><i class="fas fa-undo"></i> 기본값</button>
+                  <button id="pw-apply" class="btn btn-primary btn-sm" onclick="applyPerfWeights()"><i class="fas fa-save"></i> 적용</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- 필터 바 -->
           <div style="background:#fff;border:1px solid var(--border-light);border-radius:10px;padding:12px 16px;margin-bottom:16px;">
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 16px;align-items:end;">
@@ -951,21 +1054,25 @@
               <!-- 고객지원팀 -->
               <div class="filter-group">
                 <span class="filter-label">고객지원팀</span>
-                <select class="filter-control" id="filter-staff-csteam" style="width:100%">
+                <select class="filter-control" id="filter-staff-csteam" style="width:100%" onchange="onStaffCsTeamChange()">
                   <option value="">전체 팀</option>
                 </select>
               </div>
-              <!-- 승인자 -->
+              <!-- 담당자 (검색형 선택) -->
               <div class="filter-group">
-                <span class="filter-label">승인자</span>
-                <select class="filter-control" id="filter-staff-approver" style="width:100%">
-                  <option value="">전체 승인자</option>
+                <span class="filter-label">담당자</span>
+                <!-- 기존 select는 호환용(숨김) -->
+                <select class="filter-control" id="filter-staff-staff" style="width:100%;display:none">
+                  <option value="">전체 담당자</option>
                 </select>
+                <div id="filter-staff-staff-wrap"></div>
               </div>
               <!-- 버튼 -->
               <div class="filter-actions" style="display:flex;gap:6px;align-items:flex-end;padding-top:16px">
                 <button class="btn btn-primary btn-sm" onclick="loadStaffAnalysis()"><i class="fas fa-user-chart"></i> 분석</button>
                 <button class="btn btn-ghost btn-sm" onclick="resetStaffFilter()" title="초기화"><i class="fas fa-redo"></i></button>
+                <button class="btn btn-ghost btn-sm" onclick="openPerfWeightsModal()" title="가중치"><i class="fas fa-sliders-h"></i> 가중치</button>
+                <button class="btn btn-ghost btn-sm" onclick="exportPerformanceYearlyExcel()" title="연간 리포트 다운로드"><i class="fas fa-file-excel"></i> 연간리포트</button>
               </div>
             </div>
           </div>
@@ -973,49 +1080,100 @@
           <!-- 고과 KPI -->
           <div class="kpi-grid" id="staff-analysis-kpi" style="margin-bottom:16px"></div>
 
-          <!-- 직원별 분석 테이블 -->
-          <div class="card">
-            <div class="card-header" style="padding:12px 16px 11px">
-              <h2><i class="fas fa-users" style="color:var(--primary)"></i>&nbsp; 직원별 투입시간 고과</h2>
-              <div class="card-actions">
-                <span id="staff-analysis-period-label" style="font-size:11px;color:var(--text-muted)"></span>
+          <!-- 순위/집계 검색 -->
+          <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin:-6px 0 10px;">
+            <div style="display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--border-light);border-radius:10px;padding:8px 10px;max-width:360px;width:100%;">
+              <i class="fas fa-search" style="color:#94a3b8"></i>
+              <input id="staff-rank-search" class="filter-control" style="border:none;box-shadow:none;padding:0;height:24px;width:100%;min-width:0"
+                     placeholder="이름/업무유형 검색 (전원 리스트 필터)" oninput="onStaffRankSearchInput()" />
+              <button class="btn btn-ghost btn-sm" style="height:24px;padding:0 6px" title="검색 초기화" onclick="clearStaffRankSearch()">
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- 순위 통계 -->
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-bottom:12px;">
+            <div class="card">
+              <div class="card-header" style="padding:12px 16px 11px">
+                <h2><i class="fas fa-headset" style="color:var(--primary)"></i>&nbsp; 자문시간 순위(전체)</h2>
+              </div>
+              <div class="card-body" style="height:220px;position:relative;padding:10px 12px;overflow:auto" id="staff-rank-advisory-time">
+                <div style="text-align:center;padding:18px;color:var(--text-muted);font-size:13px">분석 실행 후 표시됩니다.</div>
               </div>
             </div>
-            <!-- 테이블 헤더 -->
-            <div style="display:grid;grid-template-columns:140px 70px 90px 90px 1fr 90px 90px 80px;
-                        gap:0;padding:7px 16px;background:#f8fafc;border-bottom:1px solid var(--border-light);
-                        font-size:11px;font-weight:600;color:#9aa4b2;">
-              <div>이름</div>
-              <div style="text-align:right">투입시간</div>
-              <div style="text-align:center">기간대비</div>
-              <div style="text-align:center">최다대비</div>
-              <div style="padding-left:8px">최다대비 비율 바</div>
-              <div style="text-align:center">품질 별점</div>
-              <div style="text-align:center">전문성</div>
-              <div style="text-align:center">수행방식</div>
-            </div>
-            <div class="card-body" style="padding:6px 14px;max-height:520px;overflow-y:auto" id="staff-analysis-body">
-              <div style="text-align:center;padding:40px;color:var(--text-muted);font-size:13px">
-                <i class="fas fa-user-clock" style="font-size:24px;opacity:0.3;display:block;margin-bottom:8px"></i>
-                기간과 조건을 선택 후 분석 버튼을 눌러주세요.
+            <div class="card">
+              <div class="card-header" style="padding:12px 16px 11px">
+                <h2><i class="fas fa-list-ol" style="color:var(--primary)"></i>&nbsp; 자문건수 순위(전체)</h2>
+              </div>
+              <div class="card-body" style="height:220px;position:relative;padding:10px 12px;overflow:auto" id="staff-rank-advisory-count">
+                <div style="text-align:center;padding:18px;color:var(--text-muted);font-size:13px">분석 실행 후 표시됩니다.</div>
               </div>
             </div>
           </div>
 
-          <!-- 별점 집계 카드 -->
-          <div class="card" style="margin-top:12px">
-            <div class="card-header" style="padding:12px 16px 11px">
-              <h2><i class="fas fa-star" style="color:#f59e0b"></i>&nbsp; 별점 평가 집계</h2>
-              <div class="card-actions">
-                <span style="font-size:11px;color:var(--text-muted)">자료실 저장 기준 · 승인자 평가</span>
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-bottom:12px;">
+            <div class="card">
+              <div class="card-header" style="padding:12px 16px 11px">
+                <h2><i class="fas fa-stopwatch" style="color:#f97316"></i>&nbsp; 자문 업무유형 평균소요(전체)</h2>
+              </div>
+              <div class="card-body" style="height:220px;position:relative;padding:10px 12px;overflow:auto" id="staff-rank-advisory-worktype-avg">
+                <div style="text-align:center;padding:18px;color:var(--text-muted);font-size:13px">분석 실행 후 표시됩니다.</div>
               </div>
             </div>
-            <div class="card-body" style="padding:12px 16px" id="staff-star-summary">
-              <div style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px">
+            <div class="card">
+              <div class="card-header" style="padding:12px 16px 11px">
+                <h2><i class="fas fa-user-check" style="color:#16a34a"></i>&nbsp; 독립수행 순위(전체)</h2>
+              </div>
+              <div class="card-body" style="height:220px;position:relative;padding:10px 12px;overflow:auto" id="staff-rank-independent">
+                <div style="text-align:center;padding:18px;color:var(--text-muted);font-size:13px">분석 실행 후 표시됩니다.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:12px">
+            <div class="card-header" style="padding:12px 16px 11px">
+              <h2><i class="fas fa-star" style="color:#f59e0b"></i>&nbsp; 독립수행 별점 순위(전체)</h2>
+              <div class="card-actions">
+                <span style="font-size:11px;color:var(--text-muted)">독립수행 업무의 전문성 별점 기준</span>
+              </div>
+            </div>
+            <div class="card-body" style="height:220px;position:relative;padding:10px 12px;overflow:auto" id="staff-rank-independent-rating">
+              <div style="text-align:center;padding:18px;color:var(--text-muted);font-size:13px">분석 실행 후 표시됩니다.</div>
+            </div>
+          </div>
+
+          <!-- 종합 우수(전체) -->
+          <div class="card" style="margin-bottom:12px">
+            <div class="card-header" style="padding:12px 16px 11px">
+              <h2><i class="fas fa-trophy" style="color:#f59e0b"></i>&nbsp; 종합 우수(전체)</h2>
+              <div class="card-actions">
+                <span style="font-size:11px;color:var(--text-muted)">가중치 반영</span>
+              </div>
+            </div>
+            <div class="card-body" style="padding:10px 12px;max-height:260px;overflow:auto" id="staff-top10">
+              <div style="text-align:center;padding:20px;color:var(--text-muted);font-size:13px">
                 분석 실행 후 표시됩니다.
               </div>
             </div>
           </div>
+
+          <!-- 전년대비 성장(전체) -->
+          <div class="card" style="margin-bottom:12px">
+            <div class="card-header" style="padding:12px 16px 11px">
+              <h2><i class="fas fa-chart-line" style="color:#16a34a"></i>&nbsp; 전년대비 성장(전체)</h2>
+              <div class="card-actions">
+                <span id="staff-growth-period-label" style="font-size:11px;color:var(--text-muted)"></span>
+              </div>
+            </div>
+            <div class="card-body" style="padding:10px 12px;max-height:260px;overflow:auto" id="staff-growth-top10">
+              <div style="text-align:center;padding:20px;color:var(--text-muted);font-size:13px">
+                분석 실행 후 표시됩니다.
+              </div>
+            </div>
+          </div>
+
+          <!-- (삭제됨) 직원별 투입시간 고과 표 + 별점 평가 집계 -->
         </div><!-- /analysis-panel-staff -->
 
         <!-- ══════════════════════════════
@@ -1023,7 +1181,7 @@
         ══════════════════════════════ -->
         <div id="analysis-panel-labor" style="display:none">
 
-          <!-- 필터 바 -->
+          <!-- 필터: 회계연도·조직·담당자 -->
           <div class="filter-bar" style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap">
             <div class="filter-group">
               <span class="filter-label">회계연도</span>
@@ -1031,54 +1189,113 @@
               </select>
             </div>
             <div class="filter-group">
-              <span class="filter-label">구분</span>
-              <select class="filter-control" id="filter-labor-view" style="width:110px" onchange="loadLaborAnalysis()">
-                <option value="client">고객사별 배부</option>
-                <option value="team">팀별 배부</option>
+              <span class="filter-label">사업부</span>
+              <select class="filter-control" id="filter-labor-department" style="min-width:140px" onchange="onLaborDepartmentChange()">
+                <option value="">전체 사업부</option>
               </select>
             </div>
-            <div class="filter-actions" style="align-self:flex-end">
+            <div class="filter-group">
+              <span class="filter-label">본부</span>
+              <select class="filter-control" id="filter-labor-hq" style="min-width:140px" onchange="onLaborHqChange()">
+                <option value="">전체 본부</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <span class="filter-label">고객지원팀</span>
+              <select class="filter-control" id="filter-labor-csteam" style="min-width:140px" onchange="onLaborCsTeamChange()">
+                <option value="">전체 팀</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <span class="filter-label">담당자</span>
+              <div id="filter-labor-staff-wrap" style="min-width:200px"></div>
+            </div>
+          </div>
+          <!-- 배부 기간 (연 인건비를 이 구간 고객사 업무시간 비율로 배분) -->
+          <div class="filter-bar" style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-top:4px">
+            <div class="filter-group">
+              <span class="filter-label">배부 기간 From</span>
+              <input type="date" class="filter-control" id="filter-labor-date-from" style="width:150px" onchange="loadLaborAnalysis()" />
+            </div>
+            <div class="filter-group">
+              <span class="filter-label">To</span>
+              <input type="date" class="filter-control" id="filter-labor-date-to" style="width:150px" onchange="loadLaborAnalysis()" />
+            </div>
+            <span style="font-size:11px;color:var(--text-muted);align-self:center;max-width:420px;line-height:1.4">
+              비우면 해당 연도 1/1~12/31 전체. 연 인건비 × (기간 내 고객사 업무시간 ÷ 해당 연도 고객사 업무시간)으로 배분합니다.
+            </span>
+            <div class="filter-actions" style="align-self:flex-end;margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
               <button class="btn btn-primary btn-sm" onclick="loadLaborAnalysis()">
                 <i class="fas fa-calculator"></i> 계산
               </button>
-              <button class="btn btn-ghost btn-sm" onclick="exportLaborExcel()">
-                <i class="fas fa-file-excel"></i> 엑셀
+              <button class="btn btn-ghost btn-sm" onclick="exportLaborExcel()" title="조직·매트릭스·개인 요약">
+                <i class="fas fa-file-excel"></i> 엑셀(현황)
               </button>
-              <!-- Admin 전용: 인건비 입력 버튼 -->
+              <button class="btn btn-ghost btn-sm" onclick="exportLaborClientCostExcel()" title="고객사별 총 배부액만">
+                <i class="fas fa-file-download"></i> 고객사집계 엑셀
+              </button>
               <button id="btn-labor-cost-setting" class="btn btn-ghost btn-sm" onclick="openLaborCostModal()"
                       style="display:none">
                 <i class="fas fa-cog"></i> 인건비 설정
               </button>
+              <button id="btn-labor-sales-upload" class="btn btn-ghost btn-sm" onclick="document.getElementById('org-financial-upload').click()"
+                      style="display:none" title="매출 연간 행 업로드">
+                <i class="fas fa-upload"></i> 매출 엑셀
+              </button>
+              <input type="file" id="org-financial-upload" accept=".xlsx,.xls,.csv" style="display:none" onchange="uploadOrgFinancialExcel(this)" />
             </div>
           </div>
 
-          <!-- 인건비 입력 현황 안내 -->
+          <!-- 인건비 입력 조회 현황 (표) -->
           <div id="labor-cost-status" style="margin-bottom:12px"></div>
 
           <!-- KPI -->
           <div class="kpi-grid" id="labor-kpi" style="margin-bottom:16px"></div>
 
-          <!-- 배부 테이블 -->
-          <div class="card">
+          <!-- (1) 조직별 인건비 현황 -->
+          <div class="card" style="margin-top:4px">
             <div class="card-header" style="padding:12px 16px 11px">
-              <h2 id="labor-table-title"><i class="fas fa-table" style="color:var(--primary)"></i>&nbsp; 고객사별 인건비 배부</h2>
-              <div class="card-actions">
-                <span style="font-size:11px;color:var(--text-muted)">고객사 지정 업무시간 기준</span>
-              </div>
+              <h2><i class="fas fa-sitemap" style="color:var(--primary)"></i>&nbsp; 사업부·본부·고객지원팀·개인 인건비 현황</h2>
+              <div class="card-actions"><span style="font-size:11px;color:var(--text-muted)">기간 배부액 기준</span></div>
             </div>
             <div class="card-body" style="padding:0;overflow-x:auto">
-              <div id="labor-table-wrap">
-                <div style="display:flex;align-items:center;justify-content:center;padding:48px;color:var(--text-muted);font-size:13px">
-                  <i class="fas fa-info-circle" style="margin-right:6px"></i>연도와 구분을 선택 후 계산 버튼을 눌러주세요.
+              <div id="labor-org-wrap">
+                <div style="display:flex;align-items:center;justify-content:center;padding:36px;color:var(--text-muted);font-size:13px">
+                  <i class="fas fa-info-circle" style="margin-right:6px"></i>필터 선택 후 계산을 눌러주세요.
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- 개인별 상세 차트 -->
+          <!-- (2) 업무팀 × 고객지원팀 배부 -->
           <div class="card" style="margin-top:12px">
             <div class="card-header" style="padding:12px 16px 11px">
-              <h2><i class="fas fa-user-tag" style="color:var(--primary)"></i>&nbsp; 직원별 인건비 배부 현황</h2>
+              <h2><i class="fas fa-th" style="color:var(--primary)"></i>&nbsp; 업무팀별 × 고객지원팀 인건비 배부</h2>
+            </div>
+            <div class="card-body" style="padding:0;overflow-x:auto">
+              <div id="labor-matrix-wrap">
+                <div style="padding:24px;color:var(--text-muted);font-size:13px;text-align:center">—</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- (3) 매출 대비 인건비율 -->
+          <div class="card" style="margin-top:12px">
+            <div class="card-header" style="padding:12px 16px 11px">
+              <h2><i class="fas fa-balance-scale" style="color:var(--primary)"></i>&nbsp; 조직별 매출 대비 인건비율</h2>
+              <div class="card-actions"><span style="font-size:11px;color:var(--text-muted)">org_financials · 통관+프로젝트 매출</span></div>
+            </div>
+            <div class="card-body" style="padding:0;overflow-x:auto">
+              <div id="labor-ratio-wrap">
+                <div style="padding:24px;color:var(--text-muted);font-size:13px;text-align:center">계산 후 표시됩니다.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 개인별 요약 -->
+          <div class="card" style="margin-top:12px">
+            <div class="card-header" style="padding:12px 16px 11px">
+              <h2><i class="fas fa-user-tag" style="color:var(--primary)"></i>&nbsp; 개인별 기간 배부 요약</h2>
             </div>
             <div class="card-body" style="padding:12px 16px;overflow-x:auto">
               <div id="labor-person-wrap">
@@ -1523,6 +1740,10 @@
                        placeholder="예) 거래조건성불충족 · Enter 또는 쉼표로 태그 추가"
                        onkeydown="if(event.key==='Enter'||event.key===','){event.preventDefault();_archAddTag('reason',this.value);this.value=''}" />
               </div>
+              <div class="arch-example-area" id="arch-reason-example-area" style="display:none;margin-top:6px;flex-direction:column;align-items:flex-start">
+                <span class="arch-example-hint">판단사유 예시:</span>
+                <div class="arch-example-tags" id="arch-reason-examples"></div>
+              </div>
             </div>
             <!-- 관련법령 입력행 -->
             <div style="flex:1;min-width:260px;">
@@ -1651,11 +1872,11 @@
   <div class="modal modal-md">
     <div class="modal-header">
       <h3 id="approvalModalTitle">업무 기록 검토</h3>
-      <button class="btn-close" onclick="closeModal('approvalModal')">×</button>
+      <button class="btn-close" onclick="closeApprovalModal()">×</button>
     </div>
     <div class="modal-body" id="approvalModalBody" onkeydown="event.stopPropagation()"></div>
     <div class="modal-footer">
-      <button type="button" class="btn btn-ghost" onclick="closeModal('approvalModal')">취소</button>
+      <button type="button" class="btn btn-ghost" onclick="closeApprovalModal()">취소</button>
       <button type="button" class="btn btn-outline" id="editEntryBtn" onclick="toggleApprovalEdit()" style="display:none">
         <i class="fas fa-edit"></i> 수정
       </button>
@@ -2104,7 +2325,11 @@
         <label class="form-label">자문 내용 <span class="required">*</span></label>
         <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px 6px 0 0;padding:7px 12px;font-size:11px;color:#1d4ed8;display:flex;align-items:center;gap:6px">
           <i class="fas fa-paste" style="flex-shrink:0"></i>
-          <span>메일 본문을 <strong>그대로 붙여넣기(Ctrl+V)</strong> 하세요 · 엑셀/Word 표도 그대로 붙여넣기 가능합니다</span>
+          <span style="flex:1">메일 본문을 <strong>그대로 붙여넣기(Ctrl+V)</strong> 하세요 · 엑셀/Word 표도 그대로 붙여넣기 가능합니다</span>
+          <button type="button" class="btn btn-secondary" style="height:28px;padding:0 10px;white-space:nowrap"
+                  onclick="openArchiveTablePasteHelper()">
+            <i class="fas fa-table"></i> 표 붙여넣기 도우미
+          </button>
         </div>
         <!-- Quill 에디터 (표 없는 일반 텍스트용) -->
         <div id="archive-quill-editor"
@@ -2112,10 +2337,11 @@
         <!-- 표 전용 contenteditable 에디터 (Quill이 table을 sanitize하므로 표 붙여넣기 시 자동 전환) -->
         <div id="archive-rich-editor"
              contenteditable="true"
-             style="display:none;font-family:'Noto Sans KR',sans-serif;min-height:250px;
+             class="rich-edit-surface"
+             style="display:none;font-family:'Noto Sans KR',sans-serif;min-height:250px;max-height:60vh;
                     border:1px solid #d1d5db;border-top:none;border-radius:0 0 6px 6px;
                     padding:10px 12px;font-size:13px;line-height:1.7;color:#1e293b;
-                    background:#fff;overflow-x:auto;outline:none;word-break:break-word;"
+                    background:#fff;outline:none;word-break:break-word;"
              placeholder="메일 본문을 그대로 붙여넣기 하세요 (엑셀 표 포함 가능)">
         </div>
         <!-- 에디터 전환 안내 배지 (표 감지 시 표시) -->
@@ -2138,6 +2364,60 @@
       <button class="btn btn-ghost" onclick="closeModal('archiveNewModal')">취소</button>
       <button id="archiveNewSaveBtn" class="btn btn-primary" onclick="saveArchiveRecord()">
         <i class="fas fa-save"></i> 저장
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- 엑셀 표 붙여넣기 도우미 (클립보드 접근 제한 환경용) -->
+<div class="modal-overlay" id="archiveTablePasteModal">
+  <div class="modal modal-md">
+    <div class="modal-header">
+      <h3><i class="fas fa-table" style="color:var(--primary);margin-right:6px"></i>표 붙여넣기 도우미</h3>
+      <button class="btn-close" onclick="closeModal('archiveTablePasteModal')">×</button>
+    </div>
+    <div class="modal-body" style="max-height:70vh;overflow-y:auto">
+      <div class="alert alert-info" style="margin-bottom:12px">
+        <i class="fas fa-info-circle"></i>
+        <span>일부 PC/브라우저에서는 엑셀 표 붙여넣기가 자동 감지되지 않을 수 있습니다. 아래 칸에 표를 붙여넣으면 표 형태로 변환해 입력합니다.</span>
+      </div>
+      <textarea id="archiveTablePasteText" class="form-control" rows="10"
+        placeholder="엑셀에서 표를 복사한 뒤 여기에 붙여넣기(Ctrl+V) 하세요."></textarea>
+      <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">
+        - 탭/줄바꿈(TSV) 또는 &lt;table&gt; HTML 붙여넣기를 지원합니다.
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('archiveTablePasteModal')">취소</button>
+      <button class="btn btn-primary" onclick="applyArchiveTablePasteHelper()">
+        <i class="fas fa-check"></i> 표로 삽입
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- (업무기록) 엑셀 표 붙여넣기 도우미 -->
+<div class="modal-overlay" id="entryTablePasteModal">
+  <div class="modal modal-md">
+    <div class="modal-header">
+      <h3><i class="fas fa-table" style="color:var(--primary);margin-right:6px"></i>표 붙여넣기 도우미</h3>
+      <button class="btn-close" onclick="closeModal('entryTablePasteModal')">×</button>
+    </div>
+    <div class="modal-body" style="max-height:70vh;overflow-y:auto">
+      <div class="alert alert-info" style="margin-bottom:12px">
+        <i class="fas fa-info-circle"></i>
+        <span>일부 PC/브라우저에서는 엑셀 표 붙여넣기가 자동 감지되지 않을 수 있습니다. 아래 칸에 표를 붙여넣으면 표 형태로 변환해 수행 내용에 삽입합니다.</span>
+      </div>
+      <textarea id="entryTablePasteText" class="form-control" rows="10"
+        placeholder="엑셀에서 표를 복사한 뒤 여기에 붙여넣기(Ctrl+V) 하세요."></textarea>
+      <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">
+        - 탭/줄바꿈(TSV) 또는 &lt;table&gt; HTML 붙여넣기를 지원합니다.
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('entryTablePasteModal')">취소</button>
+      <button class="btn btn-primary" onclick="applyEntryTablePasteHelper()">
+        <i class="fas fa-check"></i> 표로 삽입
       </button>
     </div>
   </div>
@@ -2500,16 +2780,31 @@
   </div>
 </div>
 
-<!-- JS 파일들 — v20260406c: archive.js Master 캐시 함수로 교체(API.list→Master.categories/subcategories) -->
-<script src="js/app.js?v=20260407a"></script>
+<!-- 전역 작업 중 오버레이 (저장/삭제 등 비동기 작업 표시) -->
+<div id="globalBusyOverlay" class="global-busy-overlay" aria-hidden="true">
+  <div class="global-busy-card" role="status" aria-live="polite" aria-atomic="true">
+    <div class="global-busy-spinner" aria-hidden="true">
+      <i class="fas fa-spinner fa-spin"></i>
+    </div>
+    <div class="global-busy-text">
+      <div class="global-busy-title">처리 중...</div>
+      <div class="global-busy-desc" id="globalBusyText">잠시만 기다려 주세요.</div>
+    </div>
+  </div>
+</div>
+
+<!-- JS 파일들 -->
+<script src="js/app.js?v=20260409q"></script>
+<script src="js/kw-example-maps.js?v=20260407a"></script>
+<script src="js/llm-proxy.js?v=20260409a"></script>
 <script src="js/notify.js?v=20260402a"></script>
-<script src="js/dashboard.js?v=20260331l"></script>
-<script src="js/entry.js?v=20260402r"></script>
-<script src="js/approval.js?v=20260402b"></script>
-<script src="js/analysis.js?v=20260331l"></script>
-<script src="js/archive.js?v=20260407a"></script>
+<script src="js/dashboard.js?v=20260409p"></script>
+<script src="js/entry.js?v=20260409q"></script>
+<script src="js/approval.js?v=20260409r"></script>
+<script src="js/analysis.js?v=20260409p"></script>
+<script src="js/archive.js?v=20260409q"></script>
 <!-- master.js / users.js: Settings 메뉴 진입 시 동적 로드 (초기 81KB 절감) -->
-<script src="js/main.js?v=20260405d"></script>
+<script src="js/main.js?v=20260409q"></script>
 
 
 </body>
