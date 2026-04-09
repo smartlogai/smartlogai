@@ -874,15 +874,10 @@ async function loadLaborAnalysis() {
     const yearCosts = allCosts.filter(c => Number(c.fiscal_year) === year);
 
     // ② 해당 연도 승인된 타임시트 전체 로드
-    let entries = [];
-    let page = 1;
-    while (true) {
-      const r = await API.list('time_entries', { limit: 500, page });
-      const chunk = (r && r.data) ? r.data : [];
-      entries = entries.concat(chunk);
-      if (chunk.length < 500) break;
-      page++;
-    }
+    // ★ 기존 while(true) 페이지네이션은 데이터가 많거나 API 페이지가 정상 동작하지 않을 때
+    //   무한 루프/장시간 대기로 브라우저가 "멈춤"처럼 보일 수 있음.
+    //   공통 헬퍼(listAllPages)는 maxPages로 상한을 두므로 안전하다.
+    let entries = await API.listAllPages('time_entries', { limit: 500, maxPages: 120, sort: 'updated_at' });
 
     // 해당 연도 + 승인된 것만 + 고객사 지정된 것만
     entries = entries.filter(e => {
@@ -1487,15 +1482,7 @@ async function exportLaborExcel() {
     const costByUser = {};
     yearCosts.forEach(c => { costByUser[c.user_id] = Number(c.annual_cost)||0; });
 
-    let entries = [];
-    let page = 1;
-    while (true) {
-      const r = await API.list('time_entries', { limit: 500, page });
-      const chunk = (r && r.data) ? r.data : [];
-      entries = entries.concat(chunk);
-      if (chunk.length < 500) break;
-      page++;
-    }
+    let entries = await API.listAllPages('time_entries', { limit: 500, maxPages: 120, sort: 'updated_at' });
     entries = entries.filter(e => {
       if (e.status !== 'approved' || !e.client_id || !e.work_start_at) return false;
       return new Date(Number(e.work_start_at)).getFullYear() === year;
@@ -1599,15 +1586,7 @@ async function exportAnalysisExcel() {
 
     Toast.info('데이터 준비 중...');
 
-    let entries = [];
-    let page = 1;
-    while (true) {
-      const r = await API.list('time_entries', { limit: 500, page });
-      const chunk = (r && r.data) ? r.data : [];
-      entries = entries.concat(chunk);
-      if (chunk.length < 500) break;
-      page++;
-    }
+    let entries = await API.listAllPages('time_entries', { limit: 500, maxPages: 120, sort: 'updated_at' });
 
     if (session.role === 'staff') {
       entries = entries.filter(e => String(e.user_id) === String(session.id));
