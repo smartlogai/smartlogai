@@ -44,8 +44,9 @@ h2{color:#1e293b;margin-bottom:4px}
 <div class="card" id="subCard" style="display:none"><h3>📂 전체 소분류 목록</h3><div class="result-box" id="subList"></div></div>
 <div id="finalBox" class="final wait">진단을 시작하려면 위 버튼을 클릭하세요.</div>
 <script>
-const SB_URL='https://dvjagzcqdgolspyngtxj.supabase.co';
-const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR2amFnemNxZGdvbHNweW5ndHhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNjU5MjYsImV4cCI6MjA5MDg0MTkyNn0.J3G3zHvIlCgpYaST9PCAJtd9n8OoXMZZmP5i920cfUg';
+// 운영/스테이징은 빌드 주입(supabase-env.js)을 사용하고, 로컬은 supabase.dev.js를 사용합니다.
+const SB_URL = window.__SMARTLOG_SB_URL__ || '';
+const SB_KEY = window.__SMARTLOG_SB_KEY__ || '';
 const H={'Content-Type':'application/json','apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Prefer':'count=exact'};
 function sb(n,s,m,d=''){
   const b=document.getElementById('b'+n),el=document.getElementById('d'+n);

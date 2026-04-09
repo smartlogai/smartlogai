@@ -13,6 +13,8 @@
   <meta http-equiv="X-Content-Type-Options" content="nosniff" />
   <!-- 보안 모듈: 가장 먼저 로드 -->
   <script src="js/security.js"></script>
+  <!-- Supabase 설정 (로컬: supabase.dev.js / 원격: 빌드 주입된 supabase-env.js) -->
+  <script src="js/supabase-env.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <style>
@@ -686,8 +688,8 @@
     // ─────────────────────────────────────────
     // Supabase 설정
     // ─────────────────────────────────────────
-    const SUPABASE_URL = 'https://dvjagzcqdgolspyngtxj.supabase.co';
-    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR2amFnemNxZGdvbHNweW5ndHhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNjU5MjYsImV4cCI6MjA5MDg0MTkyNn0.J3G3zHvIlCgpYaST9PCAJtd9n8OoXMZZmP5i920cfUg';
+    const SUPABASE_URL = window.__SMARTLOG_SB_URL__ || '';
+    const SUPABASE_KEY = window.__SMARTLOG_SB_KEY__ || '';
 
     // ─────────────────────────────────────────
     // Supabase API 헬퍼 (로그인 페이지 전용)

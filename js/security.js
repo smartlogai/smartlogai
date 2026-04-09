@@ -435,8 +435,9 @@
   // 보안 로그 서버 전송 (fire-and-forget) — Supabase REST API 직접 호출
   function _sendSecLogToServer(entry) {
     try {
-      const SUPA_URL = 'https://dvjagzcqdgolspyngtxj.supabase.co';
-      const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR2amFnemNxZGdvbHNweW5ndHhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNjU5MjYsImV4cCI6MjA5MDg0MTkyNn0.J3G3zHvIlCgpYaST9PCAJtd9n8OoXMZZmP5i920cfUg';
+      const SUPA_URL = window.__SMARTLOG_SB_URL__ || '';
+      const SUPA_KEY = window.__SMARTLOG_SB_KEY__ || '';
+      if (!SUPA_URL || !SUPA_KEY) return;
       const payload = { ...entry, created_at: Date.now(), updated_at: Date.now() };
       fetch(`${SUPA_URL}/rest/v1/security_logs`, {
         method: 'POST',
