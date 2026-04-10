@@ -1007,7 +1007,30 @@ async function openArchiveDetail(refId) {
           ${Utils.escHtml(utilNote)}
         </div>` : ''}
 
-        <!-- ⑦ 자문내용(수행내역) UI 제거 -->
+        <!-- ⑦ 자문내용(수행내역) -->
+        <div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <div style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:.05em">
+              <i class="fas fa-align-left" style="color:#4f46e5;margin-right:5px"></i>자문내용
+            </div>
+            <button class="arch-util-btn"
+                    onclick='_archCopyDesc(${_archJsLitId(ref.id)}, this)'
+                    ${contentText ? '' : 'disabled'}
+                    title="자문내용 복사">
+              <i class="fas fa-copy"></i> 복사
+            </button>
+          </div>
+          <div id="arch-desc-view-${String(ref.id)}"
+               class="arch-text-box"
+               style="max-height:320px;overflow:auto;line-height:1.7;user-select:text;-webkit-user-select:text">
+            ${contentHtml || '<span style="color:#94a3b8;font-size:12px">(등록된 자문내용이 없습니다)</span>'}
+          </div>
+          ${contentHtml && /<table[\s>]/i.test(contentHtml)
+            ? `<div style="margin-top:8px;font-size:11px;color:#92400e;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 10px">
+                 <i class="fas fa-info-circle"></i> 표가 포함된 자문내용입니다. 필요 시 복사 버튼을 사용하세요.
+               </div>`
+            : ''}
+        </div>
 
         <!-- ⑧ 첨부 파일 -->
         ${docs.length ? `
