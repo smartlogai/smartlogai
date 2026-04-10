@@ -1503,6 +1503,36 @@ textarea.form-control {
   width: max-content;
   min-width: 100%;
 }
+.arch-text-box--rich .arch-desc-content,
+.arch-text-box--rich .arch-desc-content * {
+  max-width: none !important;
+}
+.arch-text-box--rich .arch-desc-content {
+  display: block;
+  min-width: 100%;
+  width: max-content;
+  box-sizing: border-box;
+  padding-right: 28px;
+}
+.arch-text-box--rich .arch-desc-content [style*="overflow:hidden"] {
+  overflow: visible !important;
+}
+.arch-text-box--rich .arch-desc-content [style*="text-overflow"] {
+  text-overflow: clip !important;
+}
+.arch-text-box--rich .arch-desc-content td,
+.arch-text-box--rich .arch-desc-content th {
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: pre-wrap !important;
+}
+.arch-text-box--rich .arch-desc-content p,
+.arch-text-box--rich .arch-desc-content div,
+.arch-text-box--rich .arch-desc-content span,
+.arch-text-box--rich .arch-desc-content li {
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
 
 /* 유틸 버튼 (뷰어 내부 작은 버튼) */
 .arch-util-btn {

@@ -196,11 +196,21 @@ async function init_approval() {
     }
   } catch(e) { console.warn('approval client filter load error', e); }
 
-  // 업무 소분류 드롭다운 — time_entries에서 수집
+  // 업무 대/소분류 드롭다운 — time_entries에서 수집
   try {
     const er = { data: await API.listAllPages('time_entries', { filter: 'status=neq.draft', limit: 400, maxPages: 30 }) };
     const entries = (er && er.data) ? er.data : [];
+    const catSet = [...new Set(entries.map(e => e.work_category_name).filter(Boolean))].sort();
     const subSet = [...new Set(entries.map(e => e.work_subcategory_name).filter(Boolean))].sort();
+    const catEl = document.getElementById('filter-approval-category');
+    if (catEl) {
+      catEl.innerHTML = '<option value="">전체 대분류</option>';
+      catSet.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c; opt.textContent = c;
+        catEl.appendChild(opt);
+      });
+    }
     const subEl = document.getElementById('filter-approval-subcategory');
     if (subEl) {
       subEl.innerHTML = '<option value="">전체 소분류</option>';
@@ -233,6 +243,7 @@ async function loadApprovalList() {
   const clientFilter = (typeof ClientSearchSelect !== 'undefined')
     ? (ClientSearchSelect.getValue('filter-approval-client-wrap')?.id || '')
     : '';
+  const catFilter    = (document.getElementById('filter-approval-category') || {}).value || '';
   const subFilter    = (document.getElementById('filter-approval-subcategory') || {}).value || '';
   const status       = document.getElementById('filter-approval-status').value;
 
@@ -285,6 +296,9 @@ async function loadApprovalList() {
 
     // 고객사 필터
     if (clientFilter) entries = entries.filter(e => e.client_id === clientFilter);
+
+    // 업무 대분류 필터
+    if (catFilter) entries = entries.filter(e => (e.work_category_name || '') === catFilter);
 
     // 업무 소분류 필터
     if (subFilter) entries = entries.filter(e => (e.work_subcategory_name || '') === subFilter);
@@ -525,6 +539,8 @@ function resetApprovalFilter() {
   const teamEl = document.getElementById('filter-approval-team');
   if (teamEl) teamEl.value = '';
   if (typeof ClientSearchSelect !== 'undefined') ClientSearchSelect.clear('filter-approval-client-wrap');
+  const catEl = document.getElementById('filter-approval-category');
+  if (catEl) catEl.value = '';
   const subEl = document.getElementById('filter-approval-subcategory');
   if (subEl) subEl.value = '';
   _approvalPage = 1;

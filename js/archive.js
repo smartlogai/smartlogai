@@ -23,6 +23,42 @@ function _archJsLitId(id) {
   return JSON.stringify(String(id));
 }
 
+/** 카드/본문 요약용: HTML에서 사람이 읽을 텍스트만 추출 (Word mso 메타 제거) */
+function _archPlainTextFromHtml(raw) {
+  const src = String(raw || '');
+  if (!src) return '';
+  let text = src;
+  try {
+    if (typeof document !== 'undefined' && /<[^>]+>/.test(src)) {
+      const wrap = document.createElement('div');
+      wrap.innerHTML = src;
+      Array.from(wrap.querySelectorAll('*')).forEach((el) => {
+        const tag = String(el.tagName || '').toLowerCase();
+        if (tag === 'style' || tag === 'script' || tag === 'xml' || tag.startsWith('w:') || tag.startsWith('o:')) {
+          el.remove();
+        }
+      });
+      text = wrap.textContent || '';
+    } else {
+      text = src
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<xml[\s\S]*?<\/xml>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ');
+    }
+  } catch (_) {
+    text = src.replace(/<[^>]+>/g, ' ');
+  }
+  return text
+    .replace(/\/\*\s*style definitions[\s\S]*?\*\//gi, ' ')
+    .replace(/\btable\.msonormaltable\b[^\n]*/gi, ' ')
+    .replace(/\bmso-[a-z-]+\b[^\n]*/gi, ' ')
+    .replace(/if\s+gte\s+mso\s+\d+/gi, ' ')
+    .replace(/Normal\s+\d+\s+\d+\s+\d+\s+(false|true)\s+(false|true)\s+(false|true)[^\n]*/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // PDF.js worker 경로 설정은 LibLoader.load('pdfjs') 에서 자동 처리됨
 
 // 업무분류별 예시 태그 데이터: js/kw-example-maps.js → KwExampleMaps
@@ -498,13 +534,7 @@ function _buildArchCard(r, keyword, kwTags) {
   // ── 본문 미리보기 ──
   // 검색 키워드가 있으면 해당 키워드 주변 문장 발췌, 없으면 앞 50자
   const _rawBody = (ent?.work_description || r.work_description || r.summary || r.body_text || '');
-  const bodyRaw = _rawBody
-    .replace(/<!--[\s\S]*?-->/g, '')          // HTML 주석 제거 (Word 조건부 주석 포함)
-    .replace(/<xml[\s\S]*?<\/xml>/gi, '')     // <xml> 블록 제거
-    .replace(/<[^>]+>/g, '')                   // 나머지 HTML 태그 제거
-    .replace(/Normal\s+\d+\s+\d+\s+\d+\s+(false|true)\s+(false|true)\s+(false|true)[^\n]*/gi, '') // Word 메타 텍스트 제거
-    .replace(/\s+/g, ' ')
-    .trim();
+  const bodyRaw = _archPlainTextFromHtml(_rawBody);
   let previewHtml = '';
   if (bodyRaw) {
     let snippet = '';
@@ -931,6 +961,39 @@ async function openArchiveDetail(refId) {
       }
       return wrap.innerHTML.trim();
     };
+    const _sanitizeDetailInlineStyles = (html) => {
+      if (!html || typeof document === 'undefined' || !String(html).trim().startsWith('<')) return html || '';
+      const wrap = document.createElement('div');
+      wrap.innerHTML = String(html);
+      wrap.querySelectorAll('*').forEach((el) => {
+        const tag = String(el.tagName || '').toLowerCase();
+        // 상세보기는 "원문 스타일 재현"보다 "가독성과 비잘림" 우선:
+        // 스타일/클래스를 거의 모두 제거해 외부 문서 스타일 영향 차단
+        el.removeAttribute('class');
+        el.removeAttribute('style');
+        if (tag !== 'img' && tag !== 'video' && tag !== 'iframe') { el.removeAttribute('width'); el.removeAttribute('height'); }
+        el.removeAttribute('align');
+      });
+      wrap.querySelectorAll('table').forEach((t) => {
+        t.style.borderCollapse = 'collapse';
+        t.style.width = 'max-content';
+        t.style.minWidth = '100%';
+        t.style.maxWidth = 'none';
+        t.style.tableLayout = 'auto';
+      });
+      wrap.querySelectorAll('td, th').forEach((el) => {
+        el.style.overflow = 'visible';
+        el.style.textOverflow = 'clip';
+        el.style.whiteSpace = 'pre-wrap';
+        el.style.wordBreak = 'break-word';
+        el.style.minWidth = '56px';
+      });
+      wrap.querySelectorAll('p, div, li, span').forEach((el) => {
+        el.style.maxWidth = 'none';
+        el.style.overflow = 'visible';
+      });
+      return wrap.innerHTML.trim();
+    };
     const descHtml = _normalizeDetailDescHtml(_rawDescHtml);
     const descHtmlNoLeadingBlank = descHtml
       .replace(
@@ -946,6 +1009,7 @@ async function openArchiveDetail(refId) {
     if (contentHtml && /<table[\s>]/i.test(contentHtml)) {
       contentHtml = _cleanPasteHtml(contentHtml);
     }
+    contentHtml = _sanitizeDetailInlineStyles(contentHtml);
     const contentText = descHtml
       ? descHtml.replace(/<[^>]+>/g,' ')
                 .replace(/Normal\s+\d+\s+\d+\s+\d+\s+(false|true)\s+(false|true)\s+(false|true)[^\n]*/gi, '')
@@ -1056,7 +1120,7 @@ async function openArchiveDetail(refId) {
           <div id="arch-desc-view-${String(ref.id)}"
                class="arch-text-box${contentHtml ? ' arch-text-box--rich' : ''}"
                style="max-height:320px;overflow-y:auto;overflow-x:auto;line-height:1.7;user-select:text;-webkit-user-select:text">${contentHtml
-                 ? `<div class="arch-desc-content" style="min-width:100%;width:max-content">${contentHtml}</div>`
+                 ? `<div class="arch-desc-content">${contentHtml}</div>`
                  : '<span style="color:#94a3b8;font-size:12px">(등록된 자문내용이 없습니다)</span>'}</div>
           ${contentHtml && /<table[\s>]/i.test(contentHtml)
             ? `<div style="margin-top:8px;font-size:11px;color:#92400e;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 10px">
