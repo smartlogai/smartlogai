@@ -899,15 +899,48 @@ async function openArchiveDetail(refId) {
     // 자문내용 (entry.work_description → ref.work_description → ref.body_text 순서로 fallback)
     // ★ 저장된 데이터에 Word 메타데이터가 섞여있을 수 있으므로 _cleanPasteHtml로 정리
     const _rawDescHtml = (entryWorkDesc || ref.work_description || '').trim();
-    const descHtml = _rawDescHtml
-      ? _rawDescHtml
-          .replace(/<!--[\s\S]*?-->/g, '')       // HTML 주석(Word 조건부 주석 포함) 제거
-          .replace(/<xml[\s\S]*?<\/xml>/gi, '')   // <xml> 블록 제거
-          .trim()
-      : '';
+    const _normalizeDetailDescHtml = (rawHtml) => {
+      if (!rawHtml) return '';
+      const cleaned = String(rawHtml)
+        .replace(/<!--[\s\S]*?-->/g, '')
+        .replace(/<xml[\s\S]*?<\/xml>/gi, '')
+        .trim();
+      if (!cleaned) return '';
+      if (typeof document === 'undefined' || !cleaned.startsWith('<')) return cleaned;
+      const wrap = document.createElement('div');
+      wrap.innerHTML = cleaned;
+      const isMeaningfulNode = (node) => {
+        if (!node) return false;
+        if (node.nodeType === Node.TEXT_NODE) {
+          return String(node.textContent || '').replace(/\u00a0/g, ' ').trim().length > 0;
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) return false;
+        const el = node;
+        const tag = (el.tagName || '').toLowerCase();
+        if (tag === 'br') return false;
+        if (el.querySelector('img,video,iframe,canvas,svg,table')) return true;
+        return String(el.textContent || '').replace(/\u00a0/g, ' ').trim().length > 0;
+      };
+      while (wrap.firstChild && !isMeaningfulNode(wrap.firstChild)) {
+        wrap.removeChild(wrap.firstChild);
+      }
+      const firstEl = wrap.firstElementChild;
+      if (firstEl) {
+        firstEl.style.marginTop = '0';
+        firstEl.style.paddingTop = '0';
+      }
+      return wrap.innerHTML.trim();
+    };
+    const descHtml = _normalizeDetailDescHtml(_rawDescHtml);
+    const descHtmlNoLeadingBlank = descHtml
+      .replace(
+        /^(?:\s|<p>(?:\s|&nbsp;|<br\s*\/?>)*<\/p>|<div>(?:\s|&nbsp;|<br\s*\/?>)*<\/div>|<br\s*\/?>)+/gi,
+        ''
+      )
+      .trim();
     const summaryText = (ref.summary || '').trim();
-    let contentHtml = descHtml
-      ? (descHtml.startsWith('<') ? descHtml : '<p>' + Utils.escHtml(descHtml) + '</p>')
+    let contentHtml = descHtmlNoLeadingBlank
+      ? (descHtmlNoLeadingBlank.startsWith('<') ? descHtmlNoLeadingBlank : '<p>' + Utils.escHtml(descHtmlNoLeadingBlank) + '</p>')
       : (summaryText ? '<p>' + Utils.escHtml(summaryText) + '</p>' : '');
     // 표 포함 시 인라인 스타일 보강
     if (contentHtml && /<table[\s>]/i.test(contentHtml)) {
@@ -1021,10 +1054,10 @@ async function openArchiveDetail(refId) {
             </button>
           </div>
           <div id="arch-desc-view-${String(ref.id)}"
-               class="arch-text-box"
-               style="max-height:320px;overflow:auto;line-height:1.7;user-select:text;-webkit-user-select:text">
-            ${contentHtml || '<span style="color:#94a3b8;font-size:12px">(등록된 자문내용이 없습니다)</span>'}
-          </div>
+               class="arch-text-box${contentHtml ? ' arch-text-box--rich' : ''}"
+               style="max-height:320px;overflow-y:auto;overflow-x:auto;line-height:1.7;user-select:text;-webkit-user-select:text">${contentHtml
+                 ? `<div class="arch-desc-content" style="min-width:100%;width:max-content">${contentHtml}</div>`
+                 : '<span style="color:#94a3b8;font-size:12px">(등록된 자문내용이 없습니다)</span>'}</div>
           ${contentHtml && /<table[\s>]/i.test(contentHtml)
             ? `<div style="margin-top:8px;font-size:11px;color:#92400e;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 10px">
                  <i class="fas fa-info-circle"></i> 표가 포함된 자문내용입니다. 필요 시 복사 버튼을 사용하세요.

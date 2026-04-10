@@ -1489,6 +1489,21 @@ textarea.form-control {
   cursor: text;
 }
 
+/* 상세 자문내용(HTML) 전용: 상단 공백/가로 잘림 방지 */
+.arch-text-box--rich {
+  white-space: normal;
+  word-break: normal;
+  overflow-x: auto;
+}
+.arch-text-box--rich .arch-desc-content > :first-child {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+.arch-text-box--rich table {
+  width: max-content;
+  min-width: 100%;
+}
+
 /* 유틸 버튼 (뷰어 내부 작은 버튼) */
 .arch-util-btn {
   display: inline-flex;
