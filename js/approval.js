@@ -766,12 +766,18 @@ function _buildEntryDetailHtml(entry, atts) {
           : '<span style="color:var(--text-muted);font-size:12px">미지정</span>'}</div>
       </div>
     </div>
-    <!-- 수행내역(수행내용) UI 제거: 다른 모달/엑셀과 동일하게 숨김 처리 -->
-    <div style="display:none">
-      <div id="approval-desc-view"></div>
-      <div id="approval-rich-heavy-notice"></div>
-      <div id="approval-edit-quill-wrap"><div id="approval-edit-quill"></div></div>
-      <div id="approval-edit-rich-wrap"><div id="approval-edit-rich"></div></div>
+    <!-- 수행내역(업무수행내용) -->
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600;display:flex;align-items:center;gap:6px">
+        <i class="fas fa-align-left"></i> 업무수행내용
+      </div>
+      <div id="approval-desc-view"
+        style="max-height:320px;overflow:auto;border:1px solid var(--border-light);border-radius:8px;background:#f8fafc;padding:12px 14px;line-height:1.7;font-size:13px"></div>
+      <div id="approval-rich-heavy-notice" style="display:none;margin-top:8px;font-size:11px;color:#92400e;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 10px">
+        <i class="fas fa-info-circle"></i> 대용량 표가 포함되어 있어 기본 조회 모드로 표시됩니다.
+      </div>
+      <div id="approval-edit-quill-wrap" style="display:none;margin-top:8px"><div id="approval-edit-quill"></div></div>
+      <div id="approval-edit-rich-wrap" style="display:none;margin-top:8px"><div id="approval-edit-rich"></div></div>
     </div>
     ${entry.time_category === 'client' ? (() => {
       // 자문 분류 정보 표시 (고객업무만)
@@ -801,6 +807,16 @@ function _buildEntryDetailHtml(entry, atts) {
       </div>
       ${attHtml}
     </div>`;
+}
+
+function _renderApprovalDescView(entry) {
+  const view = document.getElementById('approval-desc-view');
+  if (!view) return;
+  const html = String(entry?.work_description || '').trim();
+  view.innerHTML = html
+    ? (html.startsWith('<') ? html : `<p>${Utils.escHtml(html)}</p>`)
+    : '<span style="color:var(--text-muted);font-size:12px">(내용 없음)</span>';
+  view.style.display = '';
 }
 
 function _apvSetAttachmentDeleteUiVisible(visible) {
@@ -970,6 +986,7 @@ function _openApprovalModal1st(entry, atts, session) {
       </label>
       <textarea class="form-control" id="approval-comment" rows="3" placeholder="검토 의견을 입력하세요."></textarea>
     </div>`;
+  _renderApprovalDescView(entry);
 
   // 수정/승인/반려 버튼 표시
   document.getElementById('editEntryBtn').style.display  = '';
@@ -1096,6 +1113,7 @@ function _openApprovalModal2nd(entry, atts, session) {
       </label>
       <textarea class="form-control" id="approval-comment" rows="3" placeholder="검토 의견을 입력하세요."></textarea>
     </div>`;
+  _renderApprovalDescView(entry);
 
   document.getElementById('editEntryBtn').style.display  = '';
   document.getElementById('rejectBtn').style.display     = '';
@@ -1179,6 +1197,7 @@ function _openApprovalModalReadonly(entry, atts, session) {
 
   document.getElementById('approvalModalBody').innerHTML =
     _buildEntryDetailHtml(entry, atts) + prevEvalHtml + prevCommentHtml;
+  _renderApprovalDescView(entry);
 
   document.getElementById('editEntryBtn').style.display  = 'none';
   document.getElementById('rejectBtn').style.display     = 'none';
@@ -1194,6 +1213,8 @@ async function processApproval1st(decision) {
   const comment = document.getElementById('approval-comment')?.value.trim() || '';
   const entry0 = _approvalTarget;
   const isClient = isClientConsultEntry(entry0);
+  const isInternalByCategoryName = String(entry0?.work_category_name || '').includes('내부');
+  const needsSecondApproval = isClient && !isInternalByCategoryName;
 
   if (decision === 'rejected' && !comment) {
     Toast.warning('반려 사유를 입력해주세요.');
@@ -1202,7 +1223,7 @@ async function processApproval1st(decision) {
   }
 
   const perfType = document.querySelector('input[name="performance_type"]:checked')?.value || null;
-  if (decision === 'pre_approved' && isClient && !perfType) {
+  if (decision === 'pre_approved' && needsSecondApproval && !perfType) {
     const pw = document.getElementById('perf-warn');
     if (pw) pw.style.display = '';
     document.querySelectorAll('.perf-btn').forEach(b => { b.style.border = '2px solid #ef4444'; });
@@ -1214,7 +1235,7 @@ async function processApproval1st(decision) {
   const approveBtn = document.getElementById('approveBtn');
   const rejectBtn  = document.getElementById('rejectBtn');
   const isApprove  = decision === 'pre_approved';
-  const approveLoading = isApprove ? (isClient ? '1차 승인 중...' : '승인 중...') : '반려 처리 중...';
+  const approveLoading = isApprove ? (needsSecondApproval ? '1차 승인 중...' : '승인 중...') : '반려 처리 중...';
   const restoreBtn    = BtnLoading.start(isApprove ? approveBtn : rejectBtn, approveLoading);
   const restoreOthers = BtnLoading.disableAll(isApprove ? rejectBtn : approveBtn);
 
@@ -1228,7 +1249,7 @@ async function processApproval1st(decision) {
         reviewer_id:      session.id,
         reviewer_name:    session.name || '',
       };
-    } else if (isClient) {
+    } else if (needsSecondApproval) {
       patchData = {
         status:           'pre_approved',
         reviewer_comment: comment,
@@ -1249,12 +1270,13 @@ async function processApproval1st(decision) {
       };
     }
     const entry1st = _approvalTarget;
+    const nextStatus = patchData.status;
     await API.patch('time_entries', entry1st.id, patchData);
 
     // ── 알림 생성 ─────────────────────────────────────────
     if (typeof createNotification === 'function') {
       const summary1st = `${entry1st.client_name || entry1st.work_category_name} | ${entry1st.work_subcategory_name || ''}`;
-      if (decision === 'rejected') {
+      if (nextStatus === 'rejected') {
         createNotification({
           toUserId:     entry1st.user_id,
           toUserName:   entry1st.user_name,
@@ -1266,7 +1288,7 @@ async function processApproval1st(decision) {
           message:      `${session.name}님이 타임시트를 반려했습니다. 사유를 확인하고 수정 후 재제출해주세요.`,
           targetMenu:   'my-entries',
         });
-      } else if (isClient) {
+      } else if (nextStatus === 'pre_approved') {
         createNotification({
           toUserId:     entry1st.user_id,
           toUserName:   entry1st.user_name,
@@ -1278,7 +1300,7 @@ async function processApproval1st(decision) {
           message:      `${session.name}님이 타임시트를 1차 승인했습니다. 본부장 최종 승인 대기 중입니다.`,
           targetMenu:   'my-entries',
         });
-        if (entry1st.reviewer2_id) {
+        if (nextStatus === 'pre_approved' && entry1st.reviewer2_id) {
           createNotification({
             toUserId:     entry1st.reviewer2_id,
             toUserName:   entry1st.reviewer2_name,
@@ -1291,7 +1313,7 @@ async function processApproval1st(decision) {
             targetMenu:   'approval',
           });
         }
-      } else {
+      } else if (nextStatus === 'approved') {
         createNotification({
           toUserId:     entry1st.user_id,
           toUserName:   entry1st.user_name,
@@ -1317,9 +1339,9 @@ async function processApproval1st(decision) {
     window._dashNeedsRefresh = true; // 대시보드 재진입 시 콘텐츠 갱신
     await updateApprovalBadge(session, true);
     loadApprovalList();
-    if (decision === 'rejected') {
+    if (nextStatus === 'rejected') {
       Toast.success('반려되었습니다.');
-    } else if (isClient) {
+    } else if (nextStatus === 'pre_approved') {
       Toast.success('1차 승인 완료 — 본부장 최종 승인 대기');
     } else {
       Toast.success('승인 완료');
