@@ -149,9 +149,9 @@ async function checkPwExpiry(session, cachedUser = null) {
 // ─────────────────────────────────────────────
 // 비밀번호 강도 표시 (main.html용)
 // ─────────────────────────────────────────────
-function updateMainPwStrength(pw) {
-  const bar  = document.getElementById('mainPwStrengthBar');
-  const text = document.getElementById('mainPwStrengthText');
+function updatePwStrength(pw, barId, textId) {
+  const bar  = document.getElementById(barId);
+  const text = document.getElementById(textId);
   if (!bar || !text) return;
   let score = 0;
   if (pw.length >= 8)           score++;
@@ -174,63 +174,118 @@ function updateMainPwStrength(pw) {
   text.style.color     = lv.color;
 }
 
+function updateMainPwStrength(pw) {
+  updatePwStrength(pw, 'mainPwStrengthBar', 'mainPwStrengthText');
+}
+
+function updateSelfPwStrength(pw) {
+  updatePwStrength(pw, 'selfPwStrengthBar', 'selfPwStrengthText');
+}
+
+function resetPwStrength(barId, textId) {
+  const bar = document.getElementById(barId);
+  const text = document.getElementById(textId);
+  if (bar) {
+    bar.style.width = '0%';
+    bar.style.background = '#eef1f5';
+  }
+  if (text) {
+    text.textContent = '';
+    text.style.color = '#8a95a3';
+  }
+}
+
+function clearPwChangeError(errorWrapId, errorTextId) {
+  const errWrap = document.getElementById(errorWrapId);
+  const errText = document.getElementById(errorTextId);
+  if (!errWrap || !errText) return;
+  errText.textContent = '';
+  errWrap.style.display = 'none';
+}
+
+function setPwChangeError(errorWrapId, errorTextId, message) {
+  const errWrap = document.getElementById(errorWrapId);
+  const errText = document.getElementById(errorTextId);
+  if (!errWrap || !errText) return;
+  errText.textContent = message;
+  errWrap.style.display = 'flex';
+}
+
+async function hashPasswordSafe(pw) {
+  if (typeof Utils !== 'undefined' && Utils.hashPassword) {
+    return Utils.hashPassword(pw);
+  }
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pw));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function validateAndBuildPwChangePayload(user, oldPw, newPw, newPwConfirm) {
+  if (!oldPw || !newPw || !newPwConfirm) {
+    throw new Error('모든 항목을 입력해주세요.');
+  }
+  if (newPw.length < 8) {
+    throw new Error('새 비밀번호는 8자 이상이어야 합니다.');
+  }
+  if (newPw !== newPwConfirm) {
+    throw new Error('새 비밀번호가 일치하지 않습니다.');
+  }
+  if (!user || !user.password) {
+    throw new Error('현재 계정 비밀번호 정보가 없습니다. 관리자에게 문의하세요.');
+  }
+
+  const oldHash = await hashPasswordSafe(oldPw);
+  if (user.password !== oldHash) {
+    throw new Error('현재 비밀번호가 올바르지 않습니다.');
+  }
+
+  const newHash = await hashPasswordSafe(newPw);
+  if (newHash === user.password) {
+    throw new Error('이전 비밀번호와 동일한 비밀번호는 사용할 수 없습니다.');
+  }
+
+  return { password: newHash, pw_changed_at: Date.now() };
+}
+
+function setPwChangeLoading(buttonId, loading, loadingText) {
+  const btn = document.getElementById(buttonId);
+  if (!btn) return;
+  btn.disabled = !!loading;
+  if (loading) {
+    btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${loadingText}`;
+  } else {
+    btn.innerHTML = '<i class="fas fa-check"></i> 비밀번호 변경';
+  }
+}
+
 // ─────────────────────────────────────────────
 // 비밀번호 변경 처리 (main.html 모달)
 // ─────────────────────────────────────────────
 async function handleMainPwChange(e) {
   e.preventDefault();
 
-  const errEl   = document.getElementById('mainPwChangeError');
-  const errText = document.getElementById('mainPwChangeErrorText');
-  const showErr = (msg) => {
-    errText.textContent = msg;
-    errEl.style.display = 'flex';
-  };
-  errEl.style.display = 'none';
+  clearPwChangeError('mainPwChangeError', 'mainPwChangeErrorText');
 
   const user = window._pwExpiredUser;
-  if (!user) { showErr('세션 오류. 페이지를 새로고침하세요.'); return; }
+  if (!user) {
+    setPwChangeError('mainPwChangeError', 'mainPwChangeErrorText', '세션 오류. 페이지를 새로고침하세요.');
+    return;
+  }
 
   const oldPw        = document.getElementById('mainPwOld').value;
   const newPw        = document.getElementById('mainPwNew').value;
   const newPwConfirm = document.getElementById('mainPwNewConfirm').value;
 
-  if (!oldPw || !newPw || !newPwConfirm) {
-    showErr('모든 항목을 입력해주세요.'); return;
-  }
-  if (newPw.length < 8) {
-    showErr('새 비밀번호는 8자 이상이어야 합니다.'); return;
-  }
-  if (newPw !== newPwConfirm) {
-    showErr('새 비밀번호가 일치하지 않습니다.'); return;
-  }
-
-  // SHA-256 해시
-  const hashPw = async (pw) => {
-    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pw));
-    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
-  };
-
-  const oldHash = await hashPw(oldPw);
-  if (user.password !== oldHash) {
-    showErr('현재 비밀번호가 올바르지 않습니다.'); return;
-  }
-
-  const newHash = await hashPw(newPw);
-  if (newHash === user.password) {
-    showErr('이전 비밀번호와 동일한 비밀번호는 사용할 수 없습니다.'); return;
-  }
-
-  const btn = document.getElementById('mainPwChangeBtn');
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 변경 중...';
+  setPwChangeLoading('mainPwChangeBtn', true, '변경 중...');
 
   try {
-    // Supabase REST API로 비밀번호 변경
-    await API.patch('users', user.id, { password: newHash, pw_changed_at: Date.now() });
+    const payload = await validateAndBuildPwChangePayload(user, oldPw, newPw, newPwConfirm);
+    await API.patch('users', user.id, payload);
 
     // 성공 → 모달 닫기 + 세션 유지
     document.getElementById('mainPwChangeModal').style.display = 'none';
+    const form = document.getElementById('mainPwChangeForm');
+    if (form) form.reset();
+    resetPwStrength('mainPwStrengthBar', 'mainPwStrengthText');
     window._pwExpiredUser = null;
     // 토스트 알림
     if (typeof Toast !== 'undefined') {
@@ -239,11 +294,61 @@ async function handleMainPwChange(e) {
       alert('비밀번호가 성공적으로 변경되었습니다.');
     }
   } catch (err) {
-    console.error(err);
-    showErr('서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+    const msg = err?.message || '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
+    setPwChangeError('mainPwChangeError', 'mainPwChangeErrorText', msg);
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-check"></i> 비밀번호 변경';
+    setPwChangeLoading('mainPwChangeBtn', false, '변경 중...');
+  }
+}
+
+function openSelfPwChangeModal() {
+  if (window._pwExpiredUser) {
+    if (typeof Toast !== 'undefined') {
+      Toast.error('비밀번호 만료 상태입니다. 강제 변경 창에서 먼저 변경해주세요.');
+    }
+    return;
+  }
+  const form = document.getElementById('selfPwChangeForm');
+  if (form) form.reset();
+  clearPwChangeError('selfPwChangeError', 'selfPwChangeErrorText');
+  resetPwStrength('selfPwStrengthBar', 'selfPwStrengthText');
+  const modal = document.getElementById('selfPwChangeModal');
+  if (modal) modal.classList.add('show');
+}
+
+function closeSelfPwChangeModal() {
+  const modal = document.getElementById('selfPwChangeModal');
+  if (modal) modal.classList.remove('show');
+}
+
+async function handleSelfPwChange(e) {
+  e.preventDefault();
+  clearPwChangeError('selfPwChangeError', 'selfPwChangeErrorText');
+
+  const session = getSession();
+  if (!session?.id) {
+    setPwChangeError('selfPwChangeError', 'selfPwChangeErrorText', '세션 오류. 다시 로그인해주세요.');
+    return;
+  }
+
+  const oldPw        = document.getElementById('selfPwOld').value;
+  const newPw        = document.getElementById('selfPwNew').value;
+  const newPwConfirm = document.getElementById('selfPwNewConfirm').value;
+
+  setPwChangeLoading('selfPwChangeBtn', true, '변경 중...');
+  try {
+    const user = await API.get('users', session.id);
+    const payload = await validateAndBuildPwChangePayload(user, oldPw, newPw, newPwConfirm);
+    await API.patch('users', user.id, payload);
+    closeSelfPwChangeModal();
+    if (typeof Toast !== 'undefined') {
+      Toast.success('비밀번호가 성공적으로 변경되었습니다.');
+    }
+  } catch (err) {
+    const msg = err?.message || '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
+    setPwChangeError('selfPwChangeError', 'selfPwChangeErrorText', msg);
+  } finally {
+    setPwChangeLoading('selfPwChangeBtn', false, '변경 중...');
   }
 }
 
