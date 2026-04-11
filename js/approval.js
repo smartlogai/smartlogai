@@ -828,9 +828,12 @@ function _buildEntryDetailHtml(entry, atts) {
 function _renderApprovalDescView(entry) {
   const view = document.getElementById('approval-desc-view');
   if (!view) return;
-  const html = String(entry?.work_description || '').trim();
-  view.innerHTML = html
-    ? (html.startsWith('<') ? html : `<p>${Utils.escHtml(html)}</p>`)
+  const raw = String(entry?.work_description || '').replace(/\r\n/g, '\n').trim();
+  const safeHtml = raw.startsWith('<')
+    ? (typeof window._cleanPasteHtml === 'function' ? window._cleanPasteHtml(raw) : raw)
+    : `<p>${Utils.escHtml(raw).replace(/\n/g, '<br>')}</p>`;
+  view.innerHTML = raw
+    ? safeHtml
     : '<span style="color:var(--text-muted);font-size:12px">(내용 없음)</span>';
   view.style.display = '';
 }
