@@ -532,7 +532,19 @@ function _buildArchCard(r, keyword, kwTags) {
     : '';
 
   // ── 본문 미리보기 ──
-  // 검색 키워드가 있으면 해당 키워드 주변 문장 발췌, 없으면 앞 50자
+  // 검색 키워드가 있으면 해당 키워드 주변 문장 발췌, 없으면 앞 N자
+  // 말줄임 전 끝문장 부호를 정리해 "입니다...." 같은 중복 점 표기를 방지한다.
+  const PREVIEW_DEFAULT_LEN = 80;
+  const PREVIEW_FALLBACK_LEN = 100;
+  const _normalizeTailForEllipsis = (s) =>
+    String(s || '')
+      .trimEnd()
+      .replace(/[.。!！?？,，;；:：~…]+$/u, '');
+  const _sliceWithEllipsis = (text, maxLen) => {
+    const base = String(text || '');
+    if (base.length <= maxLen) return Utils.escHtml(base);
+    return `${Utils.escHtml(_normalizeTailForEllipsis(base.slice(0, maxLen)))}...`;
+  };
   const _rawBody = (ent?.work_description || r.work_description || r.summary || r.body_text || '');
   const bodyRaw = _archPlainTextFromHtml(_rawBody);
   let previewHtml = '';
@@ -552,10 +564,10 @@ function _buildArchCard(r, keyword, kwTags) {
           m => `<mark style="background:#fef08a;border-radius:2px;padding:0 2px;">${m}</mark>`
         );
       } else {
-        snippet = Utils.escHtml(bodyRaw.slice(0, 80)) + (bodyRaw.length > 80 ? '…' : '');
+        snippet = _sliceWithEllipsis(bodyRaw, PREVIEW_FALLBACK_LEN);
       }
     } else {
-      snippet = Utils.escHtml(bodyRaw.slice(0, 50)) + (bodyRaw.length > 50 ? '…' : '');
+      snippet = _sliceWithEllipsis(bodyRaw, PREVIEW_DEFAULT_LEN);
     }
     previewHtml = `<div class="arch-card-preview">${snippet}</div>`;
   }
