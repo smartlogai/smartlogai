@@ -55,16 +55,21 @@ function _injectDescTableStyle(html) {
       el.style.fontWeight    = '700';
       el.style.textAlign     = 'center';
       el.style.verticalAlign = 'top';
-      el.style.whiteSpace    = 'pre-wrap';
+      el.style.whiteSpace    = 'normal';
+      el.style.lineHeight    = '1.5';
       el.style.wordBreak     = 'break-word';
     });
     tmp.querySelectorAll('td').forEach(el => {
       el.style.border        = '1px solid #cbd5e1';
       el.style.padding       = '4px 8px';
       el.style.verticalAlign = 'top';
-      el.style.whiteSpace    = 'pre-wrap';
+      el.style.whiteSpace    = 'normal';
+      el.style.lineHeight    = '1.5';
       el.style.wordBreak     = 'break-word';
     });
+    if (typeof window._archTightenTableCellMarkup === 'function') {
+      window._archTightenTableCellMarkup(tmp);
+    }
     return tmp.innerHTML;
   } catch(e) {
     return html; // 파싱 실패 시 원본 반환
@@ -2798,6 +2803,32 @@ async function openEntryDetailModal(entryId) {
         </div>`;
       body.appendChild(rejectBox);
     }
+
+    // 업무수행내용 (HTML/표 — 자료실·승인모달과 동일 파이프라인)
+    const rawWorkDesc = String(entry.work_description || '').trim();
+    const descSection = document.createElement('div');
+    descSection.style.cssText = 'margin-bottom:16px';
+    const descLabel = document.createElement('div');
+    descLabel.style.cssText = 'font-size:11px;color:var(--text-muted);margin-bottom:8px;font-weight:600;display:flex;align-items:center;gap:6px';
+    descLabel.innerHTML = '<i class="fas fa-align-left"></i> 업무수행내용';
+    const descBox = document.createElement('div');
+    descBox.className = 'arch-desc-view';
+    descBox.style.cssText = 'max-height:320px;overflow:auto;border:1px solid var(--border-light);border-radius:8px;background:#f8fafc;padding:12px 14px;font-size:13px;line-height:1.6;word-break:break-word';
+    let descInner = '';
+    if (!rawWorkDesc) {
+      descInner = '<span style="color:var(--text-muted);font-size:12px">(내용 없음)</span>';
+    } else if (rawWorkDesc.startsWith('<')) {
+      descInner = typeof window._cleanPasteHtml === 'function' ? window._cleanPasteHtml(rawWorkDesc) : rawWorkDesc;
+      if (typeof window._sanitizeWorkDescHtmlForView === 'function') {
+        descInner = window._sanitizeWorkDescHtmlForView(descInner);
+      }
+    } else {
+      descInner = `<p>${Utils.escHtml(rawWorkDesc).replace(/\n/g, '<br>')}</p>`;
+    }
+    descBox.innerHTML = descInner;
+    descSection.appendChild(descLabel);
+    descSection.appendChild(descBox);
+    body.appendChild(descSection);
 
     // 첨부 결과물
     const attLabel = document.createElement('div');

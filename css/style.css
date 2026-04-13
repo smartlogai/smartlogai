@@ -1500,17 +1500,31 @@ textarea.form-control {
   padding-top: 0 !important;
 }
 .arch-text-box--rich table {
-  width: max-content;
-  min-width: 100%;
+  width: auto;
+  max-width: 100%;
+  min-width: 0;
+}
+/* 중첩 표: 바깥 표와 동일 규칙을 쓰면 셀이 과도하게 커짐 → 폭·최소폭 완화 */
+.arch-text-box--rich table table {
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
 }
 .arch-text-box--rich .arch-desc-content,
 .arch-text-box--rich .arch-desc-content * {
   max-width: none !important;
 }
+/* 위 * 규칙보다 뒤에 두어 중첩 table에 max-width/min-width 복구 */
+.arch-text-box--rich .arch-desc-content table table {
+  max-width: 100% !important;
+  min-width: 0 !important;
+  width: auto !important;
+}
 .arch-text-box--rich .arch-desc-content {
   display: block;
-  min-width: 100%;
-  width: max-content;
+  width: auto;
+  max-width: 100%;
+  min-width: 0;
   box-sizing: border-box;
   padding-right: 28px;
 }
@@ -1524,7 +1538,10 @@ textarea.form-control {
 .arch-text-box--rich .arch-desc-content th {
   overflow: visible !important;
   text-overflow: clip !important;
-  white-space: pre-wrap !important;
+  /* pre-wrap은 Word 소스의 연속 줄바꿈·공백이 셀 세로로 크게 벌어지는 주원인 → normal + word-break */
+  white-space: normal !important;
+  line-height: 1.5 !important;
+  vertical-align: top !important;
 }
 .arch-text-box--rich .arch-desc-content p,
 .arch-text-box--rich .arch-desc-content div,
@@ -1585,6 +1602,26 @@ textarea.form-control {
 /* ── 자문내용 HTML 렌더링 박스 (Quill HTML 표시) ── */
 .arch-desc-view p   { margin: 0 0 6px; }
 .arch-desc-view br  { display: block; content: ''; margin-bottom: 4px; }
+/* 표 셀 안: 전역 br 스타일(block+여백) 해제 → 줄간격·행 정렬을 자연스럽게 */
+.arch-desc-view table td br,
+.arch-desc-view table th br {
+  display: inline !important;
+  margin: 0 !important;
+  content: normal !important;
+}
+/* 셀 안 단락: 열별 첫 줄이 위에서 맞도록 여백 축소 */
+.arch-desc-view table td p,
+.arch-desc-view table th p {
+  margin: 0 0 0.35em;
+}
+.arch-desc-view table td p:last-child,
+.arch-desc-view table th p:last-child {
+  margin-bottom: 0;
+}
+.arch-desc-view table td > p:first-child,
+.arch-desc-view table th > p:first-child {
+  margin-top: 0;
+}
 .arch-desc-view strong { font-weight: 700; }
 .arch-desc-view em     { font-style: italic; }
 .arch-desc-view u      { text-decoration: underline; }
@@ -1605,14 +1642,27 @@ textarea.form-control {
   font-size: 12px;
   /* display:block 제거 — table 레이아웃 엔진이 colspan/rowspan 계산 담당 */
 }
+.arch-desc-view table table {
+  width: auto;
+  max-width: 100%;
+  min-width: 0;
+  margin: 4px 0;
+  font-size: inherit;
+}
 .arch-desc-view table td,
 .arch-desc-view table th {
   border: 1px solid #94a3b8;
   padding: 4px 8px;
   min-width: 40px;
-  white-space: pre-wrap;
+  white-space: normal;
+  line-height: 1.5;
   word-break: break-word;
   vertical-align: top;
+}
+.arch-desc-view table table td,
+.arch-desc-view table table th {
+  padding: 2px 6px;
+  min-width: 0;
 }
 .arch-desc-view table th {
   background: #e2e8f0;
@@ -1829,7 +1879,8 @@ input[type=date].filter-control {
   padding: 4px 8px !important;
   min-width: 40px !important;
   word-break: break-word !important;
-  white-space: pre-wrap !important;
+  white-space: normal !important;
+  line-height: 1.5 !important;
   vertical-align: top !important;
 }
 #approval-edit-rich table th {
@@ -2265,7 +2316,8 @@ input[type=date].filter-control {
   padding: 4px 8px !important;
   min-width: 40px !important;
   word-break: break-word !important;
-  white-space: pre-wrap !important;
+  white-space: normal !important;
+  line-height: 1.5 !important;
   vertical-align: top !important;
 }
 #archive-rich-editor table th {
@@ -2302,7 +2354,8 @@ input[type=date].filter-control {
   padding: 4px 8px !important;
   min-width: 40px !important;
   word-break: break-word !important;
-  white-space: pre-wrap !important;
+  white-space: normal !important;
+  line-height: 1.5 !important;
   vertical-align: top !important;
 }
 #entry-rich-editor table th {
@@ -2355,9 +2408,28 @@ input[type=date].filter-control {
   line-height: 1.75;
   color: var(--text-primary);
   word-break: break-word;
+  overflow-x: auto;
 }
 #approval-desc-view p  { margin: 0 0 6px; }
 #approval-desc-view br { display: block; content: ''; margin-bottom: 4px; }
+#approval-desc-view table td br,
+#approval-desc-view table th br {
+  display: inline !important;
+  margin: 0 !important;
+  content: normal !important;
+}
+#approval-desc-view table td p,
+#approval-desc-view table th p {
+  margin: 0 0 0.35em;
+}
+#approval-desc-view table td p:last-child,
+#approval-desc-view table th p:last-child {
+  margin-bottom: 0;
+}
+#approval-desc-view table td > p:first-child,
+#approval-desc-view table th > p:first-child {
+  margin-top: 0;
+}
 #approval-desc-view strong { font-weight: 700; }
 #approval-desc-view em     { font-style: italic; }
 #approval-desc-view u      { text-decoration: underline; }
@@ -2368,23 +2440,35 @@ input[type=date].filter-control {
   padding-left: 20px; margin: 4px 0;
 }
 #approval-desc-view li { margin-bottom: 2px; }
-/* 표 스타일 */
+/* 표 스타일 — display:block 제거(colspan/rowspan), 셀은 normal로 Word 줄바꿈 과확장 방지 */
 #approval-desc-view table {
   border-collapse: collapse;
   width: auto;
   max-width: 100%;
   margin: 8px 0;
   font-size: 12px;
-  display: block;
-  overflow-x: auto;
+}
+#approval-desc-view table table {
+  width: auto;
+  max-width: 100%;
+  min-width: 0;
+  margin: 4px 0;
+  font-size: inherit;
 }
 #approval-desc-view table td,
 #approval-desc-view table th {
   border: 1px solid #94a3b8;
   padding: 4px 8px;
-  min-width: 50px;
-  white-space: pre-wrap;
+  min-width: 40px;
+  white-space: normal;
+  line-height: 1.5;
+  word-break: break-word;
   vertical-align: top;
+}
+#approval-desc-view table table td,
+#approval-desc-view table table th {
+  padding: 2px 6px;
+  min-width: 0;
 }
 #approval-desc-view table th {
   background: #e2e8f0;
@@ -2428,7 +2512,9 @@ input[type=date].filter-control {
   border: 1px solid #94a3b8;
   padding: 4px 8px;
   min-width: 50px;
-  white-space: pre-wrap;
+  white-space: normal;
+  line-height: 1.5;
+  word-break: break-word;
   vertical-align: top;
 }
 #approval-edit-quill .ql-editor table th {

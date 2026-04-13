@@ -829,12 +829,18 @@ function _renderApprovalDescView(entry) {
   const view = document.getElementById('approval-desc-view');
   if (!view) return;
   const raw = String(entry?.work_description || '').replace(/\r\n/g, '\n').trim();
-  const safeHtml = raw.startsWith('<')
-    ? (typeof window._cleanPasteHtml === 'function' ? window._cleanPasteHtml(raw) : raw)
-    : `<p>${Utils.escHtml(raw).replace(/\n/g, '<br>')}</p>`;
-  view.innerHTML = raw
-    ? safeHtml
-    : '<span style="color:var(--text-muted);font-size:12px">(내용 없음)</span>';
+  let safeHtml;
+  if (!raw) {
+    safeHtml = '<span style="color:var(--text-muted);font-size:12px">(내용 없음)</span>';
+  } else if (raw.startsWith('<')) {
+    safeHtml = typeof window._cleanPasteHtml === 'function' ? window._cleanPasteHtml(raw) : raw;
+    if (typeof window._sanitizeWorkDescHtmlForView === 'function') {
+      safeHtml = window._sanitizeWorkDescHtmlForView(safeHtml);
+    }
+  } else {
+    safeHtml = `<p>${Utils.escHtml(raw).replace(/\n/g, '<br>')}</p>`;
+  }
+  view.innerHTML = safeHtml;
   view.style.display = '';
 }
 

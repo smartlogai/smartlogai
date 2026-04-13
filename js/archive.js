@@ -973,39 +973,6 @@ async function openArchiveDetail(refId) {
       }
       return wrap.innerHTML.trim();
     };
-    const _sanitizeDetailInlineStyles = (html) => {
-      if (!html || typeof document === 'undefined' || !String(html).trim().startsWith('<')) return html || '';
-      const wrap = document.createElement('div');
-      wrap.innerHTML = String(html);
-      wrap.querySelectorAll('*').forEach((el) => {
-        const tag = String(el.tagName || '').toLowerCase();
-        // 상세보기는 "원문 스타일 재현"보다 "가독성과 비잘림" 우선:
-        // 스타일/클래스를 거의 모두 제거해 외부 문서 스타일 영향 차단
-        el.removeAttribute('class');
-        el.removeAttribute('style');
-        if (tag !== 'img' && tag !== 'video' && tag !== 'iframe') { el.removeAttribute('width'); el.removeAttribute('height'); }
-        el.removeAttribute('align');
-      });
-      wrap.querySelectorAll('table').forEach((t) => {
-        t.style.borderCollapse = 'collapse';
-        t.style.width = 'max-content';
-        t.style.minWidth = '100%';
-        t.style.maxWidth = 'none';
-        t.style.tableLayout = 'auto';
-      });
-      wrap.querySelectorAll('td, th').forEach((el) => {
-        el.style.overflow = 'visible';
-        el.style.textOverflow = 'clip';
-        el.style.whiteSpace = 'pre-wrap';
-        el.style.wordBreak = 'break-word';
-        el.style.minWidth = '56px';
-      });
-      wrap.querySelectorAll('p, div, li, span').forEach((el) => {
-        el.style.maxWidth = 'none';
-        el.style.overflow = 'visible';
-      });
-      return wrap.innerHTML.trim();
-    };
     const descHtml = _normalizeDetailDescHtml(_rawDescHtml);
     const descHtmlNoLeadingBlank = descHtml
       .replace(
@@ -1021,7 +988,7 @@ async function openArchiveDetail(refId) {
     if (contentHtml && /<table[\s>]/i.test(contentHtml)) {
       contentHtml = _cleanPasteHtml(contentHtml);
     }
-    contentHtml = _sanitizeDetailInlineStyles(contentHtml);
+    contentHtml = _sanitizeWorkDescHtmlForView(contentHtml);
     const contentText = descHtml
       ? descHtml.replace(/<[^>]+>/g,' ')
                 .replace(/Normal\s+\d+\s+\d+\s+\d+\s+(false|true)\s+(false|true)\s+(false|true)[^\n]*/gi, '')
@@ -1130,7 +1097,7 @@ async function openArchiveDetail(refId) {
             </button>
           </div>
           <div id="arch-desc-view-${String(ref.id)}"
-               class="arch-text-box${contentHtml ? ' arch-text-box--rich' : ''}"
+               class="arch-text-box${contentHtml ? ' arch-text-box--rich arch-desc-view' : ''}"
                style="max-height:320px;overflow-y:auto;overflow-x:auto;line-height:1.7;user-select:text;-webkit-user-select:text">${contentHtml
                  ? `<div class="arch-desc-content">${contentHtml}</div>`
                  : '<span style="color:#94a3b8;font-size:12px">(등록된 자문내용이 없습니다)</span>'}</div>
@@ -2201,6 +2168,93 @@ async function saveArchiveRecord() {
 let _archiveQuill = null;     // 직접등록 모달 전용 Quill 인스턴스
 let _archiveUseRich = false;  // true = contenteditable 모드 (표 포함)
 
+/** 표 행이 시각적으로 비었는지(공백·&nbsp;·br만) — Word 말미 빈 줄 제거용 */
+function _archCellIsVisuallyEmpty(cell) {
+  if (cell.querySelector('table, img, video, iframe, svg, object, embed')) return false;
+  const clone = cell.cloneNode(true);
+  clone.querySelectorAll('br').forEach(br => br.remove());
+  const text = (clone.textContent || '').replace(/\u00a0/g, ' ').replace(/\u200b/g, '').trim();
+  return text.length === 0;
+}
+
+function _archRowIsEmpty(tr) {
+  const cells = Array.from(tr.children).filter(c => /^(TD|TH)$/i.test(c.tagName));
+  if (!cells.length) return true;
+  return cells.every(_archCellIsVisuallyEmpty);
+}
+
+/** 상세 표: Word 빈 p/div·연속 br로 셀 세로가 과도해지는 것 완화 */
+function _archTightenTableCellMarkup(root) {
+  if (!root || typeof root.querySelectorAll !== 'function') return;
+  root.querySelectorAll('td, th').forEach((cell) => {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      const blocks = Array.from(cell.querySelectorAll('p, div'));
+      for (let i = blocks.length - 1; i >= 0; i--) {
+        const el = blocks[i];
+        if (!cell.contains(el)) continue;
+        if (el.querySelector('table, img, video, iframe, ul, ol, li')) continue;
+        const clone = el.cloneNode(true);
+        clone.querySelectorAll('br').forEach((b) => b.remove());
+        const text = (clone.textContent || '').replace(/\u00a0/g, ' ').replace(/\u200b/g, '').trim();
+        if (text.length === 0) {
+          el.remove();
+          changed = true;
+        }
+      }
+    }
+    if (/<br/i.test(cell.innerHTML)) {
+      cell.innerHTML = cell.innerHTML.replace(/(?:\s*<br\s*\/?>(?:\s|&nbsp;)*){2,}/gi, '<br>');
+    }
+  });
+}
+
+/**
+ * 업무수행내용 HTML 읽기 전용 표시용(자료실 상세·승인 모달·타임시트 상세 등 공통):
+ * 외부/Word 인라인 스타일 제거, 표 폭·셀 줄바꿈 정리, 빈 블록·연속 br 완화.
+ */
+function _sanitizeWorkDescHtmlForView(html) {
+  if (!html || typeof document === 'undefined' || !String(html).trim().startsWith('<')) return html || '';
+  const wrap = document.createElement('div');
+  wrap.innerHTML = String(html);
+  wrap.querySelectorAll('*').forEach((el) => {
+    const tag = String(el.tagName || '').toLowerCase();
+    el.removeAttribute('class');
+    el.removeAttribute('style');
+    if (tag !== 'img' && tag !== 'video' && tag !== 'iframe') { el.removeAttribute('width'); el.removeAttribute('height'); }
+    el.removeAttribute('align');
+    el.removeAttribute('valign');
+  });
+  wrap.querySelectorAll('table').forEach((t) => {
+    t.style.borderCollapse = 'collapse';
+    t.style.width = 'auto';
+    t.style.minWidth = '0';
+    t.style.maxWidth = '100%';
+    t.style.tableLayout = 'auto';
+  });
+  wrap.querySelectorAll('td, th').forEach((el) => {
+    el.style.overflow = 'visible';
+    el.style.textOverflow = 'clip';
+    el.style.whiteSpace = 'normal';
+    el.style.lineHeight = '1.5';
+    el.style.wordBreak = 'break-word';
+    el.style.verticalAlign = 'top';
+    el.style.minWidth = '40px';
+  });
+  wrap.querySelectorAll('p, div, li, span').forEach((el) => {
+    el.style.maxWidth = 'none';
+    el.style.overflow = 'visible';
+  });
+  _archTightenTableCellMarkup(wrap);
+  return wrap.innerHTML.trim();
+}
+
+if (typeof window !== 'undefined') {
+  window._sanitizeWorkDescHtmlForView = _sanitizeWorkDescHtmlForView;
+  window._archTightenTableCellMarkup = _archTightenTableCellMarkup;
+}
+
 /**
  * 붙여넣기 HTML 정리:
  * - Word/HWP의 mso-* 스타일, 전용 태그 제거
@@ -2248,6 +2302,15 @@ function _cleanPasteHtml(html) {
       el.removeAttribute('class');
     });
 
+    // ③-b 빈 행 제거(말미 빈 테두리 박스 방지) · 중첩 셀의 Word 고정 높이 제거
+    tmp.querySelectorAll('tr').forEach(tr => {
+      if (_archRowIsEmpty(tr)) tr.remove();
+    });
+    tmp.querySelectorAll('table table td, table table th').forEach(el => {
+      el.style.removeProperty('height');
+      el.style.removeProperty('min-height');
+    });
+
     // ③ 표 인라인 스타일 보강
     tmp.querySelectorAll('table').forEach(t => {
       t.style.borderCollapse = 'collapse';
@@ -2261,7 +2324,7 @@ function _cleanPasteHtml(html) {
       if (!el.style.padding) el.style.padding = '4px 8px';
       el.style.verticalAlign = 'top';
       el.style.wordBreak = 'break-word';
-      el.style.whiteSpace = 'pre-wrap';
+      el.style.whiteSpace = 'normal';
     });
     tmp.querySelectorAll('th').forEach(el => {
       el.style.background = '#e2e8f0';
