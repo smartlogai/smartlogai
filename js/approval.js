@@ -319,7 +319,7 @@ async function loadApprovalList() {
     if (Auth.canApprove2nd(session)) {
       const myId = String(session.id);
       entries = entries.filter(e => {
-        if (!isClientConsultEntry(e)) return false;
+        if (!needsSecondApproval(e)) return false;
         const st = e.status;
         if (st === 'submitted' || st === 'pre_approved') {
           return String(e.reviewer2_id || '') === myId || String(e.approver_id || '') === myId;
@@ -413,7 +413,7 @@ async function loadApprovalList() {
       ).length;
     } else if (Auth.canApprove2nd(session2)) {
       waitCount = pendingScoped.filter(e =>
-        isClientConsultEntry(e) &&
+        needsSecondApproval(e) &&
         (e.status === 'pre_approved' || e.status === 'submitted') &&
         (String(e.reviewer2_id) === myId2 || String(e.approver_id) === myId2)
       ).length;
@@ -442,7 +442,7 @@ async function loadApprovalList() {
 
     const tbody = document.getElementById('approval-list-body');
     if (paged.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="12" class="table-empty"><i class="fas fa-check-circle" style="color:var(--success)"></i><p>검토 대기 중인 항목이 없습니다.</p></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="13" class="table-empty"><i class="fas fa-check-circle" style="color:var(--success)"></i><p>검토 대기 중인 항목이 없습니다.</p></td></tr>`;
     } else {
       const canDoApprove = Auth.canApprove(session); // manager만 true
 
@@ -478,6 +478,12 @@ async function loadApprovalList() {
           ? `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12.5px" title="${Utils.escHtml(e.client_name)}">${Utils.escHtml(e.client_name)}</span>`
           : `<span style="color:var(--text-muted);font-size:11px">내부</span>`;
 
+        // 대분류
+        const catHtml = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12.5px"
+              title="${Utils.escHtml(e.work_category_name||'')}">
+          ${Utils.escHtml(e.work_category_name||'—')}
+        </span>`;
+
         // 소분류
         const subHtml = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12.5px"
               title="${Utils.escHtml(e.work_subcategory_name||'')}">
@@ -501,6 +507,7 @@ async function loadApprovalList() {
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12px;color:var(--text-secondary)" title="${Utils.escHtml(e.team_name||'')}">${Utils.escHtml(e.team_name||'—')}</span>
           </td>
           <td style="padding:0 10px">${clientHtml}</td>
+          <td style="padding:0 10px">${catHtml}</td>
           <td style="padding:0 10px">${subHtml}</td>
           <td style="text-align:center;padding:0 6px">${fmtDatetime(e.work_start_at)}</td>
           <td style="text-align:center;padding:0 6px">${fmtDatetime(e.work_end_at)}</td>
@@ -560,6 +567,17 @@ const ARCHIVE_RATINGS = ['normal', 'satisfied', 'very_satisfied'];
 /** 일반자문(고객) 업무 — 수행방식·2차 승인 대상 */
 function isClientConsultEntry(e) {
   return !!(e && e.time_category === 'client');
+}
+
+/** 2차 최종승인 대상: 대분류 기준(일반자문업무, 프로젝트업무만) */
+function needsSecondApproval(entry) {
+  const n = String(entry?.work_category_name || '').trim();
+  return n === '일반자문업무' || n === '프로젝트업무';
+}
+
+/** 2차 최종승인에서 품질평가/자료실 저장을 요구하는지(일반자문업무만) */
+function needsSecondApprovalQuality(entry) {
+  return String(entry?.work_category_name || '').trim() === '일반자문업무';
 }
 
 /** 품질평가 + 수행방식 → 전문성 별점/등급 자동 계산
@@ -795,8 +813,8 @@ function _buildEntryDetailHtml(entry, atts) {
       <div id="approval-edit-quill-wrap" style="display:none;margin-top:8px"><div id="approval-edit-quill"></div></div>
       <div id="approval-edit-rich-wrap" style="display:none;margin-top:8px"><div id="approval-edit-rich"></div></div>
     </div>
-    ${entry.time_category === 'client' ? (() => {
-      // 자문 분류 정보 표시 (고객업무만)
+    ${needsSecondApprovalQuality(entry) ? (() => {
+      // 자문 분류 정보 표시 (일반자문업무만)
       let kwQ = [], kwR = [], lawR = [];
       try { kwQ = Array.isArray(entry.kw_query) ? entry.kw_query : (entry.kw_query ? JSON.parse(entry.kw_query) : []); } catch {}
       try { kwR = Array.isArray(entry.kw_reason) ? entry.kw_reason : (entry.kw_reason ? JSON.parse(entry.kw_reason) : []); } catch {}
@@ -934,8 +952,8 @@ async function openApprovalModal(entryId, focusReject = false) {
 
     // ── 분기: 1차(manager) vs 2차(director/admin 열람) vs 상세보기
     const is1st = Auth.canApprove1st(session) && entry.status === 'submitted';
-    // director: pre_approved 건 OR reviewer2_id로 지정된 submitted 건
-    const is2nd = Auth.canApprove2nd(session) && isClientConsultEntry(entry) && (
+    // director: pre_approved 건 OR reviewer2_id로 지정된 submitted 건 (2차 대상 대분류만)
+    const is2nd = Auth.canApprove2nd(session) && needsSecondApproval(entry) && (
       entry.status === 'pre_approved' ||
       (entry.status === 'submitted' && String(entry.reviewer2_id) === String(session.id))
     );
@@ -970,7 +988,7 @@ async function openApprovalModal(entryId, focusReject = false) {
 
 // ── 1차 승인 모달 (manager용) ────────────────────────────────
 function _openApprovalModal1st(entry, atts, session) {
-  const showPerf = isClientConsultEntry(entry);
+  const showPerf = needsSecondApprovalQuality(entry);
   const perfBlockHtml = showPerf ? `
     <!-- 수행방식 선택 (필수) — 일반자문(client)만 -->
     <div style="margin-bottom:14px;padding:14px 16px;background:#f8fafc;border-radius:10px;border:1px solid var(--border-light)">
@@ -1045,7 +1063,8 @@ function _openApprovalModal1st(entry, atts, session) {
 // ── 2차 승인 모달 (director용) ────────────────────────────────
 function _openApprovalModal2nd(entry, atts, session) {
   const isManagerDirect = entry.status === 'submitted'; // manager 본인 건
-  const showMgrPerf = isManagerDirect && isClientConsultEntry(entry); // 2차는 client만 — 방어적 분기
+  const showMgrPerf = isManagerDirect && needsSecondApprovalQuality(entry); // 수행방식 확인은 일반자문업무만
+  const showQuality = needsSecondApprovalQuality(entry);
   const perfType = entry.performance_type || '';
   const preApproverBanner = entry.pre_approver_name
     ? `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;
@@ -1089,6 +1108,7 @@ function _openApprovalModal2nd(entry, atts, session) {
       </div>
     </div>` : ''}
 
+    ${showQuality ? `
     <!-- ① 내용 품질 평가 -->
     <div style="margin-bottom:14px;padding:14px 16px;background:#f8fafc;border-radius:10px;border:1px solid var(--border-light)">
       <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:10px">
@@ -1129,7 +1149,10 @@ function _openApprovalModal2nd(entry, atts, session) {
       <div style="margin-top:6px;font-size:11px;color:#f97316">
         <i class="fas fa-shield-alt"></i> 보안 민감 자료는 체크를 해제하세요.
       </div>
-    </div>
+    </div>` : `
+    <div style="margin-bottom:14px;padding:12px 16px;background:#f8fafc;border-radius:10px;border:1px solid var(--border-light);color:var(--text-muted);font-size:12px">
+      <i class="fas fa-info-circle"></i> 프로젝트업무는 품질평가/자료실 저장 없이 최종 승인합니다.
+    </div>`}
 
     <!-- 검토 의견 -->
     <div>
@@ -1150,8 +1173,8 @@ function _openApprovalModal2nd(entry, atts, session) {
   const rejectBtn = document.getElementById('rejectBtn');
   rejectBtn.onclick = () => processApproval2nd('rejected');
 
-  // 인터랙션: 품질평가 선택 시 전문성 미리보기 + 저장 체크 자동
-  setTimeout(() => {
+  // 인터랙션: 품질평가 선택 시 전문성 미리보기 + 저장 체크 자동 (일반자문업무만)
+  if (showQuality) setTimeout(() => {
     const updatePreview = () => {
       const qRating  = document.querySelector('input[name="quality_rating"]:checked')?.value || null;
       const pType    = showMgrPerf
@@ -1206,7 +1229,7 @@ function _openApprovalModalReadonly(entry, atts, session) {
           <span style="font-size:11px;color:var(--text-muted)">내용 품질</span>
           <div style="font-weight:600;color:#1a2b45;margin-top:2px">${RATING_LABEL[entry.quality_rating]||''} ${'★'.repeat(RATING_STARS[entry.quality_rating]||0)}</div>
         </div>
-        ${entry.performance_type && isClientConsultEntry(entry) ? `<div>
+        ${entry.performance_type && needsSecondApprovalQuality(entry) ? `<div>
           <span style="font-size:11px;color:var(--text-muted)">수행방식</span>
           <div style="font-weight:600;color:#1a2b45;margin-top:2px">${PERF_LABEL[entry.performance_type]||''}</div>
         </div>` : ''}
@@ -1237,9 +1260,8 @@ async function processApproval1st(decision) {
   const session = getSession();
   const comment = document.getElementById('approval-comment')?.value.trim() || '';
   const entry0 = _approvalTarget;
-  const isClient = isClientConsultEntry(entry0);
-  const isInternalByCategoryName = String(entry0?.work_category_name || '').includes('내부');
-  const needsSecondApproval = isClient && !isInternalByCategoryName;
+  const needs2nd = needsSecondApproval(entry0);
+  const needs2ndQuality = needsSecondApprovalQuality(entry0);
 
   if (decision === 'rejected' && !comment) {
     Toast.warning('반려 사유를 입력해주세요.');
@@ -1248,7 +1270,7 @@ async function processApproval1st(decision) {
   }
 
   const perfType = document.querySelector('input[name="performance_type"]:checked')?.value || null;
-  if (decision === 'pre_approved' && needsSecondApproval && !perfType) {
+  if (decision === 'pre_approved' && needs2nd && needs2ndQuality && !perfType) {
     const pw = document.getElementById('perf-warn');
     if (pw) pw.style.display = '';
     document.querySelectorAll('.perf-btn').forEach(b => { b.style.border = '2px solid #ef4444'; });
@@ -1260,7 +1282,7 @@ async function processApproval1st(decision) {
   const approveBtn = document.getElementById('approveBtn');
   const rejectBtn  = document.getElementById('rejectBtn');
   const isApprove  = decision === 'pre_approved';
-  const approveLoading = isApprove ? (needsSecondApproval ? '1차 승인 중...' : '승인 중...') : '반려 처리 중...';
+  const approveLoading = isApprove ? (needs2nd ? '1차 승인 중...' : '승인 중...') : '반려 처리 중...';
   const restoreBtn    = BtnLoading.start(isApprove ? approveBtn : rejectBtn, approveLoading);
   const restoreOthers = BtnLoading.disableAll(isApprove ? rejectBtn : approveBtn);
 
@@ -1274,7 +1296,7 @@ async function processApproval1st(decision) {
         reviewer_id:      session.id,
         reviewer_name:    session.name || '',
       };
-    } else if (needsSecondApproval) {
+    } else if (needs2nd) {
       patchData = {
         status:           'pre_approved',
         reviewer_comment: comment,
@@ -1282,7 +1304,7 @@ async function processApproval1st(decision) {
         pre_approver_id:   session.id,
         pre_approver_name: session.name || '',
         pre_approved_at:   Date.now(),
-        performance_type:  perfType,
+        ...(needs2ndQuality ? { performance_type: perfType } : {}),
       };
     } else {
       // 내부업무 등: 1차에서 곧바로 최종 승인 (수행방식·pre_approved 미사용)
@@ -1392,15 +1414,16 @@ async function processApproval2nd(decision) {
   }
 
   const isManagerDirect = _approvalTarget.status === 'submitted';
-  const mgrClient2nd = isManagerDirect && isClientConsultEntry(_approvalTarget);
+  const requireQuality = needsSecondApprovalQuality(_approvalTarget);
+  const mgrClient2nd = isManagerDirect && requireQuality;
   const qRating  = document.querySelector('input[name="quality_rating"]:checked')?.value || null;
   const perfType = mgrClient2nd
     ? (document.querySelector('input[name="performance_type"]:checked')?.value || null)
     : (_approvalTarget.performance_type || 'independent');
-  const shouldArchive = document.getElementById('archive-save-check')?.checked || false;
+  const shouldArchive = requireQuality ? (document.getElementById('archive-save-check')?.checked || false) : false;
 
   if (decision === 'approved') {
-    if (!qRating) {
+    if (requireQuality && !qRating) {
       Toast.warning('내용 품질 평가를 선택해야 최종 승인할 수 있습니다.');
       document.querySelectorAll('.quality-btn[data-group="quality_rating"]').forEach(b => { b.style.border = '2px solid #ef4444'; });
       setTimeout(() => document.querySelectorAll('.quality-btn[data-group="quality_rating"]').forEach(b => { b.style.border = '2px solid #e5e7eb'; }), 1800);
@@ -1420,7 +1443,7 @@ async function processApproval2nd(decision) {
 
   const qualityStars = qRating ? (RATING_STARS[qRating] || 0) : 0;
   let competencyStars = 0, competencyRating = null;
-  if (qRating && perfType) {
+  if (qRating && perfType && requireQuality) {
     const comp = calcCompetency(qRating, perfType);
     competencyStars  = comp.competency_stars;
     competencyRating = comp.competency_rating;
@@ -2209,8 +2232,8 @@ function toggleApprovalEdit() {
       subcatBox.style.border = '1.5px solid var(--primary)';
     }
 
-    // ── 자문분류 편집 UI 표시 (고객업무만) ──
-    if (_approvalTarget.time_category === 'client') {
+    // ── 자문분류 편집 UI 표시 (일반자문업무만) ──
+    if (needsSecondApprovalQuality(_approvalTarget)) {
       const kwViewEl = document.getElementById('approval-kw-view');
       if (kwViewEl) kwViewEl.style.display = 'none';
       _initApprovalKwEdit();

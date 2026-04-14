@@ -30,17 +30,36 @@
 
 ## 로컬 실행
 
-정적 파일이므로 아무 HTTP 서버로 루트를 열면 됩니다.
+정적 파일이므로 아무 HTTP 서버로 **저장소 루트**를 열면 됩니다. (파일을 `file://`로 직접 열면 일부 브라우저에서 스크립트/세션이 막힐 수 있으니 HTTP로 여세요.)
+
+**한 줄로 실행 (Node/npm 있을 때)**
+
+```bash
+npm start
+```
+
+→ `http://127.0.0.1:8080/index.html` 로 접속합니다.
+
+**PowerShell (Python 우선, 없으면 npx serve)**
+
+```powershell
+.\tools\serve-local.ps1
+```
+
+**수동 예**
 
 ```bash
 # 예: Python
 python -m http.server 8080
 
 # 예: npx
-npx --yes serve .
+npx --yes serve . -l 8080
 ```
 
-브라우저에서 `http://localhost:8080` (또는 표시된 포트)로 `index.html`에 접속합니다.
+브라우저에서 `http://127.0.0.1:8080/index.html` (또는 표시된 포트)로 접속합니다.  
+**승인 목록·대분류 컬럼 확인**: 로그인 후 왼쪽 메뉴 **Approval** → 필터 조회.
+
+**데이터 연동**: 로컬(`localhost`)에서는 [`js/supabase.dev.js`](js/supabase.dev.js)에 개발용 Supabase URL·anon 키가 있어야 API가 동작합니다. 없으면 [`js/supabase.dev.example.js`](js/supabase.dev.example.js)를 복사해 만듭니다. (자세한 내용은 아래 “로컬 개발” 절 참고)
 
 ## 개발용 체크(권장)
 

@@ -1509,6 +1509,11 @@ function getInitial(name) {
 // ─────────────────────────────────────────────
 let _badgeLastUpdated = 0;
 async function updateApprovalBadge(session, force = false) {
+  const _needsSecondApprovalByCategory = (e) => {
+    const n = String(e?.work_category_name || '').trim();
+    return n === '일반자문업무' || n === '프로젝트업무';
+  };
+
   // admin: 전사 1차(submitted)·2차(pre_approved) 건수 — 별도 배지
   if (Auth.isAdmin(session)) {
     const now = Date.now();
@@ -1520,7 +1525,7 @@ async function updateApprovalBadge(session, force = false) {
         Cache.get('time_entries_badge_admin_pre', async () => API.listAllPages('time_entries', { filter: 'status=eq.pre_approved', limit: 300, maxPages: 40 }), 120000),
       ]);
       const c1 = (submittedRows || []).length;
-      const c2 = (preRows || []).filter(e => e.time_category === 'client').length;
+      const c2 = (preRows || []).filter(e => _needsSecondApprovalByCategory(e)).length;
       const b1 = document.getElementById('approval-badge-1st');
       const b2 = document.getElementById('approval-badge-2nd');
       if (b1) {
@@ -1568,10 +1573,10 @@ async function updateApprovalBadge(session, force = false) {
         const allUsers = await Master.users();
         const scopeIds = new Set(allUsers.filter(u => Auth.scopeMatch(session, u)).map(u => String(u.id)));
         const preApproved = r.data.filter(e =>
-          e.status === 'pre_approved' && scopeIds.has(String(e.user_id)) && e.time_category === 'client'
+          e.status === 'pre_approved' && scopeIds.has(String(e.user_id)) && _needsSecondApprovalByCategory(e)
         ).length;
         const managerDirect = r.data.filter(e =>
-          e.status === 'submitted' && String(e.approver_id) === String(session.id) && e.time_category === 'client'
+          e.status === 'submitted' && String(e.approver_id) === String(session.id) && _needsSecondApprovalByCategory(e)
         ).length;
         count = preApproved + managerDirect;
       }

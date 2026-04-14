@@ -795,7 +795,7 @@ textarea.form-control {
 }
 
 /* ── Approval 테이블 (#approval-list-table) 전용 ── */
-/*   No(40) | 작성일자(90) | Staff(80) | 승인자(80) | 업무팀(90) | 고객사(130) | 소분류(flex) | 시작(110) | 종료(110) | 업무시간(68) | 상태(68) | 관리(100)  */
+/*   No(40) | 작성일자(90) | Staff(80) | 승인자(80) | 업무팀(90) | 고객사(130) | 대분류(110) | 소분류(flex) | 시작(110) | 종료(110) | 업무시간(68) | 상태(68) | 관리(100)  */
 #approval-list-table {
   width: 100%;
   table-layout: fixed;
@@ -835,18 +835,19 @@ textarea.form-control {
 #approval-list-table td:nth-child(4),
 #approval-list-table td:nth-child(5),
 #approval-list-table td:nth-child(6),
-#approval-list-table td:nth-child(7)  { overflow: hidden; }
+#approval-list-table td:nth-child(7),
+#approval-list-table td:nth-child(8)  { overflow: hidden; }
 /* 시작·종료일시 */
-#approval-list-table td:nth-child(8),
-#approval-list-table td:nth-child(9)  {
+#approval-list-table td:nth-child(9),
+#approval-list-table td:nth-child(10)  {
   text-align: center;
   font-size: 12px;
   padding: 9px 6px;
 }
 /* 업무시간·상태·관리 */
-#approval-list-table td:nth-child(10),
 #approval-list-table td:nth-child(11),
-#approval-list-table td:nth-child(12) {
+#approval-list-table td:nth-child(12),
+#approval-list-table td:nth-child(13) {
   text-align: center;
   overflow: visible;
   padding: 9px 4px;
