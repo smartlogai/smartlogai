@@ -157,8 +157,8 @@ const Auth = {
   // 기준정보 관리 (고객사·업무분류): admin + director + manager
   canManageRefData: (s) => s && (s.role === 'admin' || s.role === 'director' || s.role === 'manager'),
 
-  // 분석 열람: manager + director + admin
-  canViewAnalysis: (s) => s && (s.role === 'director' || s.role === 'admin' || s.role === 'manager'),
+  // 분석 열람: director + admin
+  canViewAnalysis: (s) => s && (s.role === 'director' || s.role === 'admin'),
 
   // 자문 자료실: 모든 역할
   canViewArchive: (s) => !!s,
@@ -1398,7 +1398,7 @@ function toggleSidebar() {
   │ My Time Sheet       │   ✅   │    ✅*  │    ❌    │   ❌   │
   │ Staff 업무 기록     │   ❌   │    ❌   │    ❌    │   ✅   │
   │ Approval(통합)      │   ❌   │    ✅   │    ✅    │   ❌   │
-  │ Analysis            │   ❌   │    ✅   │    ✅    │   ✅   │
+  │ Analysis            │   ❌   │    ❌   │    ✅    │   ✅   │
   │ Settings            │   ❌   │    ❌   │    ❌    │   ✅   │
   └─────────────────────┴───────┴─────────┴──────────┴───────┘
   * Manager 중 타임시트 대상자만 My Time Sheet · New Entry 노출
@@ -1414,7 +1414,7 @@ function setupMenuByRole(session) {
   const canApprove           = Auth.canApprove(session);        // manager
   const canViewDeptScope     = Auth.canViewDeptScope(session);  // manager+director+admin
   const canViewAll           = Auth.canViewAll(session);        // admin only
-  const canAnalysis          = Auth.canViewAnalysis(session);   // manager+director+admin
+  const canAnalysis          = Auth.canViewAnalysis(session);   // director+admin
   const isMaster             = Auth.canManageMaster(session);   // admin only
 
   // ── Time Sheet 섹션 ────────────────────────────────────────
@@ -1441,7 +1441,7 @@ function setupMenuByRole(session) {
   const adminAllEntries = document.getElementById('menu-admin-all-entries');
   if (adminAllEntries) adminAllEntries.style.display = canViewAll ? '' : 'none';
 
-  // ── Analysis: manager + director + admin ──────────────────
+  // ── Analysis: director + admin ────────────────────────────
   const analysisMenu = document.getElementById('menu-analysis');
   if (analysisMenu) analysisMenu.style.display = canAnalysis ? '' : 'none';
 
