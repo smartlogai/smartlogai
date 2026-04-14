@@ -2688,8 +2688,8 @@ async function loadMyEntries() {
           ${authorCell}
           <td class="td-written" style="font-size:12px;white-space:nowrap;color:var(--text-secondary)">${writtenAt}${docNoHtml}</td>
           <td class="td-client" style="padding:0 10px">${clientHtml}</td>
-          <td class="td-cat" style="padding:0 10px">${catHtml}</td>
           ${isCompanyInternalOnly ? '' : `<td class="td-team" style="padding:0 10px">${teamHtml}</td>`}
+          <td class="td-cat" style="padding:0 10px">${catHtml}</td>
           <td class="td-subcat" style="padding:0 10px">${subHtml}</td>
           <td class="td-start" style="text-align:center;padding:0 6px">${fmtDatetime(e.work_start_at)}</td>
           <td class="td-end" style="text-align:center;padding:0 6px">${fmtDatetime(e.work_end_at)}</td>
