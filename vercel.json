@@ -1,0 +1,12 @@
+{
+  "framework": null,
+  "buildCommand": "npm run build",
+  "installCommand": null,
+  "outputDirectory": ".",
+  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/", "destination": "/index.html" },
+    { "source": "/main", "destination": "/main.html" }
+  ]
+}
+
