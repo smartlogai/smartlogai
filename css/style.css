@@ -727,7 +727,7 @@ textarea.form-control {
 #users-table .btn-icon:hover { background: #eef2f7; }
 
 /* ── My Time Sheet 테이블 (#my-entries-table) 전용 ── */
-/*   No(40) | 작성일자(94) | 고객사(150) | 업무팀(110) | 소분류(flex) | 시작일시(110) | 종료일시(110) | 업무시간(68) | 상태(68) | 관리(88)  */
+/*   No(40) | 작성일자(94) | 고객사(150) | 대분류(120) | 업무팀(110) | 소분류(flex) | 시작일시(110) | 종료일시(110) | 업무시간(68) | 상태(68) | 관리(88)  */
 #my-entries-table {
   width: 100%;
   table-layout: fixed;
@@ -764,6 +764,7 @@ textarea.form-control {
 #my-entries-table td.td-written { font-size: 12px; color: var(--text-secondary); }
 /* 고객사·업무팀·소분류 — ellipsis */
 #my-entries-table td.td-client,
+#my-entries-table td.td-cat,
 #my-entries-table td.td-team,
 #my-entries-table td.td-subcat { overflow: hidden; }
 /* 시작·종료일시 — 가운데, 작은 글씨 */
@@ -786,6 +787,13 @@ textarea.form-control {
 /* 소분류 열: 내용이 길어도 좌우 균형 있게 */
 #my-entries-table th.th-subcat,
 #my-entries-table td.td-subcat {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+/* 대분류 열: 소분류와 동일한 패딩 */
+#my-entries-table th.th-cat,
+#my-entries-table td.td-cat {
   padding-left: 12px;
   padding-right: 12px;
 }

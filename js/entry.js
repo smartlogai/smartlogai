@@ -2598,7 +2598,9 @@ async function loadMyEntries() {
       });
     } catch {}
 
-    const emptyCols = (isAdminAll ? 11 : 10) - (isCompanyInternalOnly ? 1 : 0);
+    // 컬럼 수:
+    // No | (admin:Staff) | 작성일자 | 고객사 | 대분류 | (조건부:업무팀) | 소분류 | 시작 | 종료 | 업무시간 | 상태 | 관리
+    const emptyCols = (isAdminAll ? 12 : 11) - (isCompanyInternalOnly ? 1 : 0);
     if (paged.length === 0) {
       tbody.innerHTML = `<tr><td colspan="${emptyCols}" class="table-empty"><i class="fas fa-inbox"></i><p>조회된 데이터가 없습니다.</p></td></tr>`;
     } else {
@@ -2671,6 +2673,12 @@ async function loadMyEntries() {
           ${Utils.escHtml(e.work_subcategory_name||'—')}
         </span>`;
 
+        // 대분류
+        const catHtml = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12.5px"
+              title="${Utils.escHtml(e.work_category_name||'')}">
+          ${Utils.escHtml(e.work_category_name||'—')}
+        </span>`;
+
         const authorCell = isAdminAll
           ? `<td class="my-entries-col-author" style="font-size:11.5px;padding:0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary)" title="${Utils.escHtml(e.user_name || '')}">${Utils.escHtml(e.user_name || '—')}</td>`
           : `<td class="my-entries-col-author" style="display:none"></td>`;
@@ -2680,6 +2688,7 @@ async function loadMyEntries() {
           ${authorCell}
           <td class="td-written" style="font-size:12px;white-space:nowrap;color:var(--text-secondary)">${writtenAt}${docNoHtml}</td>
           <td class="td-client" style="padding:0 10px">${clientHtml}</td>
+          <td class="td-cat" style="padding:0 10px">${catHtml}</td>
           ${isCompanyInternalOnly ? '' : `<td class="td-team" style="padding:0 10px">${teamHtml}</td>`}
           <td class="td-subcat" style="padding:0 10px">${subHtml}</td>
           <td class="td-start" style="text-align:center;padding:0 6px">${fmtDatetime(e.work_start_at)}</td>
