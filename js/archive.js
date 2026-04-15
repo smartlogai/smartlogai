@@ -1812,9 +1812,8 @@ async function openArchiveEdit(refId) {
       const sum = (ref.summary || '').trim();
       if (sum) rawDesc = sum.startsWith('<') ? sum : ('<p>' + Utils.escHtml(sum) + '</p>');
     }
-    // 수정 모드 진입 시에는 원문을 우선 로드해 클릭/커서 반응 지연을 줄인다.
-    // 저장 시 saveArchiveRecord()에서 _cleanPasteHtml로 정리된다.
-    _archSetEditorHtml(rawDesc, { cleanOnLoad: false });
+    // 수정 모드 진입 시 편집용 경량화를 적용해 커서 반응 지연을 줄인다.
+    _archSetEditorHtml(rawDesc, { cleanOnLoad: true, optimizeForEdit: true });
 
     // 핵심키워드·판단사유·법령: saveArchiveRecord 가 읽는 hidden + 칩 UI (entry 우선)
     const kwArr = _parseArr(entry?.kw_query ?? ref.kw_query);
@@ -2360,6 +2359,61 @@ function _cleanPasteHtml(html) {
   }
 }
 
+/** 편집 지연 완화를 위한 대용량 HTML 판정 */
+function _archIsHeavyEditableHtml(html) {
+  const s = String(html || '');
+  const tdCount = (s.match(/<td[\s>]/gi) || []).length;
+  return s.length > 60000 || tdCount > 300;
+}
+
+/**
+ * 편집 전용 경량화:
+ * - 구조 유지가 필요한 table/td/th는 남기고
+ * - 불필요한 래퍼(span/font)와 과도한 속성 제거
+ * - 빈 블록/연속 <br> 축소로 caret 이동 시 레이아웃 계산 비용 완화
+ */
+function _archOptimizeHtmlForEdit(html) {
+  const raw = String(html || '');
+  if (!raw) return '';
+  const base = _cleanPasteHtml(raw);
+  if (!_archIsHeavyEditableHtml(base)) return base;
+  try {
+    const doc = new DOMParser().parseFromString(`<div id="__arch_edit_root__">${base}</div>`, 'text/html');
+    const root = doc.getElementById('__arch_edit_root__');
+    if (!root) return base;
+
+    root.querySelectorAll('*').forEach((el) => {
+      const tag = String(el.tagName || '').toLowerCase();
+      if (tag === 'table' || tag === 'thead' || tag === 'tbody' || tag === 'tr' || tag === 'td' || tag === 'th') {
+        const attrs = Array.from(el.attributes || []);
+        attrs.forEach((a) => {
+          const n = String(a.name || '').toLowerCase();
+          if (n !== 'colspan' && n !== 'rowspan') el.removeAttribute(a.name);
+        });
+        return;
+      }
+      el.removeAttribute('style');
+      el.removeAttribute('class');
+      if (tag === 'span' || tag === 'font') {
+        el.replaceWith(...Array.from(el.childNodes));
+      }
+    });
+
+    root.querySelectorAll('td, th').forEach((cell) => {
+      cell.querySelectorAll('p, div').forEach((blk) => {
+        const text = (blk.textContent || '').replace(/\u00a0/g, ' ').trim();
+        if (!text && !blk.querySelector('table,img,video,iframe')) blk.remove();
+      });
+      if (/<br/i.test(cell.innerHTML)) {
+        cell.innerHTML = cell.innerHTML.replace(/(?:\s*<br\s*\/?>(?:\s|&nbsp;)*){2,}/gi, '<br>');
+      }
+    });
+    return root.innerHTML.trim();
+  } catch {
+    return base;
+  }
+}
+
 /** 엑셀/시트에서 복사된 TSV(탭/줄바꿈) → 간단한 HTML 표로 변환 */
 function _archTsvToTableHtml(tsv) {
   const text = String(tsv || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -2433,6 +2487,10 @@ function _archSwitchToRich(html) {
   // Quill 에디터 숨기고 contenteditable 표시
   if (quillWrap) quillWrap.style.display = 'none';
   richEl.style.display = 'block';
+  richEl.setAttribute('spellcheck', 'false');
+  richEl.setAttribute('autocorrect', 'off');
+  richEl.setAttribute('autocomplete', 'off');
+  richEl.setAttribute('autocapitalize', 'off');
   if (badge)  { badge.style.display = 'flex'; }
 
   // 내용 주입
@@ -2476,7 +2534,9 @@ function _archGetEditorText() {
 function _archSetEditorHtml(html, opts = {}) {
   const raw = String(html || '');
   const cleanOnLoad = opts.cleanOnLoad !== false;
-  const clean = cleanOnLoad ? _cleanPasteHtml(raw) : raw;
+  const optimizeForEdit = opts.optimizeForEdit !== false;
+  let clean = cleanOnLoad ? _cleanPasteHtml(raw) : raw;
+  if (optimizeForEdit) clean = _archOptimizeHtmlForEdit(clean);
   if (/<table[\s>]/i.test(clean)) {
     _archSwitchToRich(clean);
     return;

@@ -2188,11 +2188,14 @@ function toggleApprovalEdit() {
       const richEl = document.getElementById('approval-edit-rich');
       if (richEl) {
         richEl.setAttribute('spellcheck', 'false');
+        richEl.setAttribute('autocorrect', 'off');
+        richEl.setAttribute('autocomplete', 'off');
+        richEl.setAttribute('autocapitalize', 'off');
         const done = GlobalBusy?.show ? GlobalBusy.show('편집 준비 중...') : (() => {});
         try {
-          // 수정 진입 시점에는 원문 로드로 반응 속도를 우선하고,
-          // 저장 시점 검증/정리 로직에서 최종 내용을 확정한다.
-          richEl.innerHTML = curHtml;
+          // 승인 수정의 리치(contenteditable) 경로는 caret 계산 비용이 크므로
+          // 진입 시 편집용 경량화를 적용해 클릭/커서 반응을 개선한다.
+          richEl.innerHTML = _apvOptimizeRichHtml(curHtml);
 
           const notice = document.getElementById('approval-rich-heavy-notice');
           if (notice) notice.style.display = 'none';
