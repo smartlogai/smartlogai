@@ -2358,6 +2358,7 @@ function _cleanPasteHtml(html) {
       el.style.verticalAlign = 'top';
       el.style.wordBreak = 'break-word';
       el.style.whiteSpace = 'normal';
+      el.style.textAlign = 'left';
       // 셀 경계 밖 텍스트 밀림 방지
       el.style.overflowWrap = 'anywhere';
       el.style.maxWidth = '100%';
@@ -2369,6 +2370,7 @@ function _cleanPasteHtml(html) {
       if (st.includes('text-indent')) el.style.textIndent = '0';
       if (st.includes('margin-left')) el.style.marginLeft = '0';
       if (st.includes('padding-left')) el.style.paddingLeft = '0';
+      el.style.textAlign = 'left';
     });
     // Word 리스트 계열은 들여쓰기 계산이 깨지면 셀 밖으로 튀는 경우가 있어 표준 여백으로 강제
     tmp.querySelectorAll('td ul, td ol, th ul, th ol').forEach(el => {
@@ -2399,7 +2401,7 @@ function _cleanPasteHtml(html) {
     tmp.querySelectorAll('th').forEach(el => {
       el.style.background = '#e2e8f0';
       el.style.fontWeight = '700';
-      el.style.textAlign = 'center';
+      el.style.textAlign = 'left';
     });
 
     return tmp.innerHTML;
