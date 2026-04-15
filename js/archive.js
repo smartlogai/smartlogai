@@ -2358,6 +2358,9 @@ function _cleanPasteHtml(html) {
       el.style.verticalAlign = 'top';
       el.style.wordBreak = 'break-word';
       el.style.whiteSpace = 'normal';
+      // 셀 경계 밖 텍스트 밀림 방지
+      el.style.overflowWrap = 'anywhere';
+      el.style.maxWidth = '100%';
     });
     // Word/Outlook 표 내 hanging indent(음수 들여쓰기) 제거:
     // 텍스트가 셀 경계 밖으로 튀어나오는 현상을 방지한다.
@@ -2366,6 +2369,32 @@ function _cleanPasteHtml(html) {
       if (st.includes('text-indent')) el.style.textIndent = '0';
       if (st.includes('margin-left')) el.style.marginLeft = '0';
       if (st.includes('padding-left')) el.style.paddingLeft = '0';
+    });
+    // Word 리스트 계열은 들여쓰기 계산이 깨지면 셀 밖으로 튀는 경우가 있어 표준 여백으로 강제
+    tmp.querySelectorAll('td ul, td ol, th ul, th ol').forEach(el => {
+      el.style.marginTop = '0';
+      el.style.marginBottom = '0';
+      el.style.marginLeft = '0';
+      el.style.paddingLeft = '20px';
+    });
+    tmp.querySelectorAll('td li, th li').forEach(el => {
+      el.style.marginLeft = '0';
+      el.style.paddingLeft = '0';
+      el.style.textIndent = '0';
+      el.style.whiteSpace = 'normal';
+      el.style.wordBreak = 'break-word';
+    });
+    // 셀 내부 모든 인라인/블록 요소의 음수 들여쓰기 잔여 제거
+    tmp.querySelectorAll('td *, th *').forEach(el => {
+      const st = (el.getAttribute('style') || '').toLowerCase();
+      if (st.includes('text-indent:-') || st.includes('margin-left:-') || st.includes('left:-')) {
+        el.style.textIndent = '0';
+        el.style.marginLeft = '0';
+        el.style.left = '0';
+      }
+      if (st.includes('position:absolute')) {
+        el.style.position = 'static';
+      }
     });
     tmp.querySelectorAll('th').forEach(el => {
       el.style.background = '#e2e8f0';
