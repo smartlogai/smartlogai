@@ -2257,6 +2257,16 @@
       <!-- 숨김 대분류 select (소분류 연동용) -->
       <select id="archive-category-select" style="display:none" onchange="onArchiveCategoryChange()"></select>
 
+      <!-- 에디터 전환 안내 배지 (표 감지 시 표시) -->
+      <div id="archive-editor-mode-badge" style="display:none;margin-bottom:12px;font-size:11px;
+           color:#7c3aed;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;
+           padding:6px 10px;display:none;align-items:center;gap:5px">
+        <i class="fas fa-table"></i>
+        <span>표 포함 모드 · 표 구조가 그대로 보존됩니다</span>
+        <button onclick="_archSwitchToQuill()" style="margin-left:auto;background:none;border:none;
+                cursor:pointer;font-size:11px;color:#6b7280;text-decoration:underline">표 제거 후 일반 모드로</button>
+      </div>
+
       <!-- ① 업무분류 + 평가등급 -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
         <div class="form-group" style="margin:0">
@@ -2356,15 +2366,6 @@
                     padding:10px 12px;font-size:13px;line-height:1.7;color:#1e293b;
                     background:#fff;outline:none;word-break:break-word;"
              placeholder="메일 본문을 그대로 붙여넣기 하세요 (엑셀 표 포함 가능)">
-        </div>
-        <!-- 에디터 전환 안내 배지 (표 감지 시 표시) -->
-        <div id="archive-editor-mode-badge" style="display:none;margin-top:4px;font-size:11px;
-             color:#7c3aed;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;
-             padding:4px 10px;display:none;align-items:center;gap:5px">
-          <i class="fas fa-table"></i>
-          <span>표 포함 모드 · 표 구조가 그대로 보존됩니다</span>
-          <button onclick="_archSwitchToQuill()" style="margin-left:auto;background:none;border:none;
-                  cursor:pointer;font-size:11px;color:#6b7280;text-decoration:underline">표 제거 후 일반 모드로</button>
         </div>
         <input type="hidden" id="archive-quill-hidden" />
       </div>
