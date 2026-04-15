@@ -467,6 +467,21 @@ function _parseArr(val) {
   return [];
 }
 
+/** 본문 후보들 중 표 구조 보존에 유리한 HTML을 선택 */
+function _archPickBestDescHtml(...candidates) {
+  const list = candidates
+    .map(v => String(v || '').trim())
+    .filter(Boolean);
+  if (!list.length) return '';
+  const score = (html) => {
+    const hasTable = /<table[\s>]/i.test(html) ? 1 : 0;
+    const len = html.length;
+    return (hasTable * 1000000) + len;
+  };
+  list.sort((a, b) => score(b) - score(a));
+  return list[0];
+}
+
 // ─────────────────────────────────────────────
 //  카드 HTML 빌더 (신규 디자인)
 // ─────────────────────────────────────────────
@@ -576,8 +591,10 @@ function _buildArchCard(r, keyword, kwTags) {
   const dateStr     = Utils.formatDate(r.sent_at || r.created_at || Date.now());
   const isManual    = r.source_type === 'manual';   // 직접등록(과거 참고사례) 여부
   const authorName  = ent?.user_name || r.sender_name || r.registered_by_name || '-';
-  const refIdFull   = String(r.id || '');
-  const refIdShort  = refIdFull ? (refIdFull.length > 10 ? `${refIdFull.slice(0, 8)}...` : refIdFull) : '-';
+  const docNoRaw    = String(ent?.doc_no || r.doc_no || '').trim();
+  const docNoView   = docNoRaw
+    ? (docNoRaw.toUpperCase().startsWith('ID') ? docNoRaw : `ID${docNoRaw}`)
+    : 'ID미지정';
 
   // 푸터 우측: 직접등록이면 [📁 과거 참고사례] 배지, 아니면 작성자명
   const footerRight = isManual
@@ -611,7 +628,7 @@ function _buildArchCard(r, keyword, kwTags) {
     ${previewHtml}
     <!-- 푸터 -->
     <div class="arch-card-footer">
-      <span class="arch-meta-chip" title="${Utils.escHtml(refIdFull)}"><i class="fas fa-fingerprint"></i> Ref ${Utils.escHtml(refIdShort)}</span>
+      <span class="arch-meta-chip" title="${Utils.escHtml(docNoRaw || '문서번호 없음')}"><i class="fas fa-hashtag"></i> ${Utils.escHtml(docNoView)}</span>
       <span class="arch-meta-chip"><i class="fas fa-calendar-alt"></i> ${dateStr}</span>
       ${footerRight}
       <div class="arch-card-actions">
@@ -941,9 +958,12 @@ async function openArchiveDetail(refId) {
     // 활용포인트
     const utilNote = (ref.archive_note || '').trim();
 
-    // 자문내용 (entry.work_description → ref.work_description → ref.body_text 순서로 fallback)
-    // ★ 저장된 데이터에 Word 메타데이터가 섞여있을 수 있으므로 _cleanPasteHtml로 정리
-    const _rawDescHtml = (entryWorkDesc || ref.work_description || '').trim();
+    // 자문내용: entry/ref/body_text 중 표 구조가 더 온전한 쪽을 선택
+    const _rawDescHtml = _archPickBestDescHtml(
+      entryWorkDesc,
+      ref.work_description,
+      ref.body_text
+    );
     const _normalizeDetailDescHtml = (rawHtml) => {
       if (!rawHtml) return '';
       const cleaned = String(rawHtml)
@@ -987,11 +1007,11 @@ async function openArchiveDetail(refId) {
     let contentHtml = descHtmlNoLeadingBlank
       ? (descHtmlNoLeadingBlank.startsWith('<') ? descHtmlNoLeadingBlank : '<p>' + Utils.escHtml(descHtmlNoLeadingBlank) + '</p>')
       : (summaryText ? '<p>' + Utils.escHtml(summaryText) + '</p>' : '');
-    // 표 포함 시 인라인 스타일 보강
-    if (contentHtml && /<table[\s>]/i.test(contentHtml)) {
-      contentHtml = _cleanPasteHtml(contentHtml);
+    const _hasTableContent = !!(contentHtml && /<table[\s>]/i.test(contentHtml));
+    // 표는 원문 렌더링을 우선해 구조 파손 가능성이 있는 후처리를 생략한다.
+    if (!_hasTableContent) {
+      contentHtml = _sanitizeWorkDescHtmlForView(contentHtml);
     }
-    contentHtml = _sanitizeWorkDescHtmlForView(contentHtml);
     const contentText = descHtml
       ? descHtml.replace(/<[^>]+>/g,' ')
                 .replace(/Normal\s+\d+\s+\d+\s+\d+\s+(false|true)\s+(false|true)\s+(false|true)[^\n]*/gi, '')
@@ -1808,9 +1828,13 @@ async function openArchiveEdit(refId) {
     _archResetEditor();
     document.getElementById('archive-quill-hidden').value = '';
 
-    // 자문 본문: openArchiveDetail 과 동일 우선순위 (승인 entry → ref)
+    // 자문 본문: entry/ref/body_text 중 표 구조가 더 온전한 쪽 선택
     const entryWorkDesc = (entry?.work_description || '').trim();
-    let rawDesc = (entryWorkDesc || ref.work_description || ref.body_text || '').trim();
+    let rawDesc = _archPickBestDescHtml(
+      entryWorkDesc,
+      ref.work_description,
+      ref.body_text
+    );
     if (!rawDesc) {
       const sum = (ref.summary || '').trim();
       if (sum) rawDesc = sum.startsWith('<') ? sum : ('<p>' + Utils.escHtml(sum) + '</p>');
