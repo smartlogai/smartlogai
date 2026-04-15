@@ -576,6 +576,8 @@ function _buildArchCard(r, keyword, kwTags) {
   const dateStr     = Utils.formatDate(r.sent_at || r.created_at || Date.now());
   const isManual    = r.source_type === 'manual';   // 직접등록(과거 참고사례) 여부
   const authorName  = ent?.user_name || r.sender_name || r.registered_by_name || '-';
+  const refIdFull   = String(r.id || '');
+  const refIdShort  = refIdFull ? (refIdFull.length > 10 ? `${refIdFull.slice(0, 8)}...` : refIdFull) : '-';
 
   // 푸터 우측: 직접등록이면 [📁 과거 참고사례] 배지, 아니면 작성자명
   const footerRight = isManual
@@ -609,6 +611,7 @@ function _buildArchCard(r, keyword, kwTags) {
     ${previewHtml}
     <!-- 푸터 -->
     <div class="arch-card-footer">
+      <span class="arch-meta-chip" title="${Utils.escHtml(refIdFull)}"><i class="fas fa-fingerprint"></i> Ref ${Utils.escHtml(refIdShort)}</span>
       <span class="arch-meta-chip"><i class="fas fa-calendar-alt"></i> ${dateStr}</span>
       ${footerRight}
       <div class="arch-card-actions">
@@ -2035,10 +2038,13 @@ async function saveArchiveRecord() {
   // ★ 평가등급
   const starsVal = parseInt(document.getElementById('archive-stars-value')?.value || '0');
 
-  // ★ 자문 내용 — Hybrid 에디터 + Word 메타데이터 완전 제거 후 저장
+  // ★ 자문 내용 저장
+  // 표 HTML은 _cleanPasteHtml를 재적용하면 레이아웃/스타일이 변형될 수 있어 원문을 그대로 저장한다.
+  // (텍스트/일반 본문만 기존 정리 로직 유지)
   const _rawDescHtml = _archGetEditorHtml();
-  // 항상 _cleanPasteHtml 통과 (Word 조건부 주석, <xml>, mso-* 스타일 등 제거)
-  const workDescHtml = _cleanPasteHtml(_rawDescHtml);
+  const _rawDescTrim = String(_rawDescHtml || '').trim();
+  const _hasTableDesc = /<table[\s>]/i.test(_rawDescTrim);
+  const workDescHtml = _hasTableDesc ? _rawDescTrim : _cleanPasteHtml(_rawDescTrim);
   const workDescText = _archGetEditorText()
     .replace(/Normal\s+\d+\s+\d+\s+\d+\s+(false|true)\s+(false|true)\s+(false|true)[^\n]*/gi, '')
     .replace(/\s+/g, ' ').trim();
