@@ -805,6 +805,12 @@ function _buildEntryDetailHtml(entry, atts) {
       <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600;display:flex;align-items:center;gap:6px">
         <i class="fas fa-align-left"></i> 업무수행내용
       </div>
+      <div id="approval-edit-guide-badge" style="display:none;margin-bottom:8px;font-size:11px;
+           color:#1d4ed8;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;
+           padding:7px 10px;align-items:flex-start;gap:6px">
+        <i class="fas fa-copy" style="font-size:12px;flex-shrink:0;margin-top:1px"></i>
+        <span id="approval-edit-guide-text" style="flex:1"></span>
+      </div>
       <div id="approval-desc-view"
         style="max-height:320px;overflow:auto;border:1px solid var(--border-light);border-radius:8px;background:#f8fafc;padding:12px 14px;line-height:1.7;font-size:13px"></div>
       <div id="approval-rich-heavy-notice" style="display:none;margin-top:8px;font-size:11px;color:#92400e;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 10px">
@@ -1776,6 +1782,19 @@ function _apvFocusRichEditor() {
   } catch {}
 }
 
+function _setApprovalEditGuideVisible(isVisible) {
+  const badge = document.getElementById('approval-edit-guide-badge');
+  const text = document.getElementById('approval-edit-guide-text');
+  if (!badge || !text) return;
+  if (isVisible) {
+    text.innerHTML = '대용량 표 문서는 마우스 커서가 지연될 수 있습니다.<br>키보드 방향키/검색으로 위치 이동 후 수정하세요.';
+    badge.style.display = 'flex';
+    return;
+  }
+  text.innerHTML = '';
+  badge.style.display = 'none';
+}
+
 function resetApprovalModalState() {
   try {
     if (window._apvDebug) console.log('[approval] resetApprovalModalState');
@@ -1815,6 +1834,7 @@ function resetApprovalModalState() {
   }
   const heavyNotice = document.getElementById('approval-rich-heavy-notice');
   if (heavyNotice) heavyNotice.style.display = 'none';
+  _setApprovalEditGuideVisible(false);
 
   // 소분류 원복
   const subcatBox = document.getElementById('approval-edit-subcat');
@@ -2249,6 +2269,7 @@ function toggleApprovalEdit() {
 
     // 첨부파일 삭제 버튼 노출 (수정 모드에서만)
     _apvSetAttachmentDeleteUiVisible(true);
+    _setApprovalEditGuideVisible(true);
 
     Toast.info('수정할 내용을 입력 후 저장 버튼을 눌러주세요.');
   } else {
@@ -2294,6 +2315,7 @@ function toggleApprovalEdit() {
     // 첨부파일 삭제 버튼 숨김
     _apvSetAttachmentDeleteUiVisible(false);
     _approvalUseRich = false;
+    _setApprovalEditGuideVisible(false);
   }
 }
 
@@ -2414,6 +2436,7 @@ async function saveApprovalEdit() {
     _approvalEditMode = false;
     _approvalUseRich = false;
     _apvPendingDescHtml = '';
+    _setApprovalEditGuideVisible(false);
     editBtn.innerHTML = '<i class="fas fa-edit"></i> 수정';
     editBtn.className = 'btn btn-outline';
     editBtn.onclick = toggleApprovalEdit;

@@ -568,6 +568,16 @@ function _entryGetEditorText() {
   return _quill ? _quill.getText().trim() : '';
 }
 
+function _setEntryPasteGuideText(isEditMode) {
+  const guide = document.getElementById('entry-paste-guide-text');
+  if (!guide) return;
+  if (isEditMode) {
+    guide.innerHTML = '대용량 표 문서는 마우스 커서가 지연될 수 있습니다.<br>키보드 방향키/검색으로 위치 이동 후 수정하세요.';
+    return;
+  }
+  guide.innerHTML = '고객 질의내용과 답변내용이 포함된 메일 본문 또는 의견서를 <strong>그대로 붙여넣기(Ctrl+C, Ctrl+V)</strong> 하세요';
+}
+
 function _entrySwitchToRich(html) {
   _entryUseRich = true;
   const quillWrap = document.getElementById('quill-editor');
@@ -690,6 +700,7 @@ async function init_entry_new() {
   // 표 전용 contenteditable 잔여 표시/플래그 제거 — 신규·수정 폼 모두 Quill 기준으로 시작
   _initQuill();
   entrySwitchToQuill();
+  _setEntryPasteGuideText(false);
 
   // URL 입력란 초기화
   const mfn = document.getElementById('manual-file-name');
@@ -3787,6 +3798,7 @@ async function editEntry(id) {
       }
     } catch { /* 첨부파일 로드 실패 무시 */ }
 
+    _setEntryPasteGuideText(true);
     Toast.info('수정 모드: 내용을 수정 후 저장하세요.');
 
   } catch (err) {
