@@ -2695,10 +2695,11 @@ function _archSetEditorHtml(html, opts = {}) {
     _archiveTableCompatEdit = false;
     if (richEl) {
       richEl.setAttribute('contenteditable', 'false');
-      richEl.style.cursor = 'default';
+      richEl.style.cursor = 'text';
       // 원본은 _archiveLockedHtml에 보관하고, 화면에는 상세보기와 동일한 안정화 렌더링을 사용한다.
       const displayHtml = _sanitizeWorkDescHtmlForView(_cleanPasteHtml(_archiveLockedHtml));
       richEl.innerHTML = displayHtml || _archiveLockedHtml;
+      richEl.setAttribute('title', '클릭하면 직접 편집 모드로 전환됩니다.');
     }
     if (badge) {
       badge.innerHTML = `
@@ -2721,6 +2722,7 @@ function _archSetEditorHtml(html, opts = {}) {
 }
 
 function _archEnableTableCompatEdit() {
+  if (!_archiveHeavyEditMode && _archiveTableCompatEdit) return;
   const richEl = document.getElementById('archive-rich-editor');
   const badge = document.getElementById('archive-editor-mode-badge');
   if (!richEl) return;
@@ -2814,6 +2816,16 @@ function _initArchiveQuill() {
   const richEl = document.getElementById('archive-rich-editor');
   if (richEl && !richEl._pasteReady) {
     richEl._pasteReady = true;
+    // 표 보호 모드에서 사용자가 본문을 클릭하면 즉시 직접 편집 모드로 전환
+    richEl.addEventListener('mousedown', function(e) {
+      if (!_archiveHeavyEditMode) return;
+      e.preventDefault();
+      _archEnableTableCompatEdit();
+    });
+    richEl.addEventListener('keydown', function() {
+      if (!_archiveHeavyEditMode) return;
+      _archEnableTableCompatEdit();
+    });
     richEl.addEventListener('paste', function(e) {
       e.preventDefault();
       const cd = e.clipboardData || window.clipboardData;
