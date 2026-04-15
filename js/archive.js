@@ -1820,12 +1820,6 @@ async function openArchiveEdit(refId) {
     // 수정 모드 진입: 기존 저장 HTML은 원문 그대로 로드해야 표 구조/스타일이 깨지지 않는다.
     // (붙여넣기/저장 경로에서만 _cleanPasteHtml을 적용)
     _archSetEditorHtml(rawDesc, { cleanOnLoad: false });
-    // 표 보호 모드에서는 수정 경로가 막힌 것처럼 느껴질 수 있어 텍스트 편집기를 자동으로 연다.
-    if (_archiveHeavyEditMode) {
-      setTimeout(() => {
-        try { _archOpenLargeTextEdit(); } catch (_) {}
-      }, 80);
-    }
 
     // 핵심키워드·판단사유·법령: saveArchiveRecord 가 읽는 hidden + 칩 UI (entry 우선)
     const kwArr = _parseArr(entry?.kw_query ?? ref.kw_query);
@@ -2205,6 +2199,7 @@ let _archiveQuill = null;     // 직접등록 모달 전용 Quill 인스턴스
 let _archiveUseRich = false;  // true = contenteditable 모드 (표 포함)
 let _archiveHeavyEditMode = false; // 표 본문: 직접 contenteditable 편집 비활성
 let _archiveLockedHtml = '';  // 표 본문 보호 모드에서 원본 HTML 보관
+let _archiveTableCompatEdit = false; // 표 본문 직접 편집 허용(호환 모드)
 
 /** 표 행이 시각적으로 비었는지(공백·&nbsp;·br만) — Word 말미 빈 줄 제거용 */
 function _archCellIsVisuallyEmpty(cell) {
@@ -2376,39 +2371,10 @@ function _cleanPasteHtml(html) {
   }
 }
 
-/** 표 HTML 표시 안정화(구조 보존): 클래스/폭 정보는 유지하고 최소 스타일만 보강 */
-function _archEnhanceTableHtmlForDisplay(html) {
-  const raw = String(html || '').trim();
-  if (!raw || typeof document === 'undefined' || !/<table[\s>]/i.test(raw)) return raw;
-  try {
-    const wrap = document.createElement('div');
-    wrap.innerHTML = raw;
-    wrap.querySelectorAll('table').forEach((t) => {
-      if (!t.style.borderCollapse) t.style.borderCollapse = 'collapse';
-      if (!t.style.maxWidth) t.style.maxWidth = '100%';
-    });
-    wrap.querySelectorAll('td, th').forEach((el) => {
-      if (!el.style.border) el.style.border = '1px solid #94a3b8';
-      if (!el.style.padding) el.style.padding = '4px 8px';
-      if (!el.style.verticalAlign) el.style.verticalAlign = 'top';
-      if (!el.style.wordBreak) el.style.wordBreak = 'break-word';
-      if (!el.style.whiteSpace) el.style.whiteSpace = 'normal';
-    });
-    wrap.querySelectorAll('th').forEach((el) => {
-      if (!el.style.background) el.style.background = '#e2e8f0';
-      if (!el.style.fontWeight) el.style.fontWeight = '700';
-    });
-    return wrap.innerHTML;
-  } catch (_) {
-    return raw;
-  }
-}
-
-/** 붙여넣기 입력용 정규화: 표 HTML은 구조 보존을 위해 원문 우선 */
+/** 붙여넣기 입력용 정규화: 표도 포함해 안정화 정리 후 편집기에 반영 */
 function _archNormalizePastedHtmlForEditor(html) {
   const raw = String(html || '').trim();
   if (!raw) return '';
-  if (/<table[\s>]/i.test(raw)) return raw;
   return _cleanPasteHtml(raw);
 }
 
@@ -2532,6 +2498,7 @@ function applyArchiveTablePasteHelper() {
 /** 표 모드(contenteditable)로 전환 */
 function _archSwitchToRich(html) {
   _archiveUseRich = true;
+  _archiveTableCompatEdit = false;
   const quillWrap = document.getElementById('archive-quill-editor');
   const richEl    = document.getElementById('archive-rich-editor');
   const badge     = document.getElementById('archive-editor-mode-badge');
@@ -2548,13 +2515,8 @@ function _archSwitchToRich(html) {
   richEl.setAttribute('autocapitalize', 'off');
   if (badge)  { badge.style.display = 'flex'; }
 
-  // 내용 주입 (표는 구조를 유지한 채 표시 안정화 스타일만 보강)
-  if (html !== undefined) {
-    const nextHtml = /<table[\s>]/i.test(String(html || ''))
-      ? _archEnhanceTableHtmlForDisplay(html)
-      : html;
-    richEl.innerHTML = nextHtml;
-  }
+  // 내용 주입
+  if (html !== undefined) richEl.innerHTML = html;
 }
 
 /** 일반 Quill 모드로 복귀 (표 제거) */
@@ -2562,6 +2524,7 @@ function _archSwitchToQuill() {
   _archiveUseRich = false;
   _archiveHeavyEditMode = false;
   _archiveLockedHtml = '';
+  _archiveTableCompatEdit = false;
   const quillWrap = document.getElementById('archive-quill-editor');
   const richEl    = document.getElementById('archive-rich-editor');
   const badge     = document.getElementById('archive-editor-mode-badge');
@@ -2617,17 +2580,20 @@ function _archSetEditorHtml(html, opts = {}) {
     // 표 HTML은 contenteditable 편집 시 커서 지연/레이아웃 파손 가능성이 커서
     // 수정 화면에서는 항상 읽기 전용으로 두고, 텍스트 편집 경로로만 수정한다.
     _archiveHeavyEditMode = true;
+    _archiveTableCompatEdit = false;
     if (richEl) {
       richEl.setAttribute('contenteditable', 'false');
       richEl.style.cursor = 'default';
-      // 원본은 _archiveLockedHtml에 보관하고, 표시용만 안정화해 렌더링한다.
-      richEl.innerHTML = _archEnhanceTableHtmlForDisplay(_archiveLockedHtml);
+      // 원본은 _archiveLockedHtml에 보관하고, 화면에는 상세보기와 동일한 안정화 렌더링을 사용한다.
+      const displayHtml = _sanitizeWorkDescHtmlForView(_cleanPasteHtml(_archiveLockedHtml));
+      richEl.innerHTML = displayHtml || _archiveLockedHtml;
     }
     if (badge) {
       badge.innerHTML = `
         <i class="fas fa-table"></i>
-        <span>표 본문 보호 모드 · 표 깨짐 방지를 위해 직접 편집은 비활성화됩니다</span>
-        <button onclick="_archOpenLargeTextEdit()" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:11px;color:#6b7280;text-decoration:underline">텍스트 편집</button>
+        <span>표 보호 모드 · 원본 보존 상태입니다. 필요 시 직접 편집 모드로 전환하세요.</span>
+        <button onclick="_archEnableTableCompatEdit()" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:11px;color:#6b7280;text-decoration:underline">직접 편집 모드</button>
+        <button onclick="_archOpenLargeTextEdit()" style="margin-left:8px;background:none;border:none;cursor:pointer;font-size:11px;color:#6b7280;text-decoration:underline">텍스트 편집</button>
       `;
     }
     return;
@@ -2640,6 +2606,24 @@ function _archSetEditorHtml(html, opts = {}) {
     _archiveQuill.setContents([]);
     _archiveQuill.clipboard.dangerouslyPasteHTML(clean || '');
   }
+}
+
+function _archEnableTableCompatEdit() {
+  const richEl = document.getElementById('archive-rich-editor');
+  const badge = document.getElementById('archive-editor-mode-badge');
+  if (!richEl) return;
+  _archiveHeavyEditMode = false;
+  _archiveTableCompatEdit = true;
+  richEl.setAttribute('contenteditable', 'true');
+  richEl.style.cursor = 'text';
+  richEl.focus();
+  if (badge) {
+    badge.innerHTML = `
+      <i class="fas fa-pen"></i>
+      <span>직접 편집 모드 · 표 구조가 복잡하면 커서가 느릴 수 있습니다.</span>
+    `;
+  }
+  Toast.info('직접 편집 모드로 전환되었습니다.');
 }
 
 function _archOpenLargeTextEdit() {
@@ -2701,6 +2685,7 @@ function _archResetEditor() {
   _archiveUseRich = false;
   _archiveHeavyEditMode = false;
   _archiveLockedHtml = '';
+  _archiveTableCompatEdit = false;
   const quillWrap = document.getElementById('archive-quill-editor');
   const richEl    = document.getElementById('archive-rich-editor');
   const badge     = document.getElementById('archive-editor-mode-badge');
