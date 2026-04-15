@@ -2398,6 +2398,29 @@ function _cleanPasteHtml(html) {
         el.style.position = 'static';
       }
     });
+    // 표 외부(본문) 목록도 Word hanging indent로 숫자/기호가 좌측으로 튀지 않게 정규화
+    tmp.querySelectorAll('ol, ul').forEach(el => {
+      el.style.marginLeft = '0';
+      el.style.paddingLeft = '20px';
+      el.style.listStylePosition = 'inside';
+    });
+    tmp.querySelectorAll('li').forEach(el => {
+      const st = (el.getAttribute('style') || '').toLowerCase();
+      if (st.includes('text-indent')) el.style.textIndent = '0';
+      if (st.includes('margin-left')) el.style.marginLeft = '0';
+      if (st.includes('padding-left')) el.style.paddingLeft = '0';
+      el.style.listStylePosition = 'inside';
+      el.style.whiteSpace = 'normal';
+      el.style.wordBreak = 'break-word';
+    });
+    // 본문 전역: 음수 들여쓰기 잔여 제거 (표 밖 숫자 튐 방지)
+    tmp.querySelectorAll('*').forEach(el => {
+      const st = (el.getAttribute('style') || '').toLowerCase();
+      if (st.includes('text-indent:-') || st.includes('margin-left:-')) {
+        el.style.textIndent = '0';
+        el.style.marginLeft = '0';
+      }
+    });
     tmp.querySelectorAll('th').forEach(el => {
       el.style.background = '#e2e8f0';
       el.style.fontWeight = '700';
