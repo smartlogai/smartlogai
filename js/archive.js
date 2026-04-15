@@ -2375,7 +2375,57 @@ function _cleanPasteHtml(html) {
 function _archNormalizePastedHtmlForEditor(html) {
   const raw = String(html || '').trim();
   if (!raw) return '';
-  return _cleanPasteHtml(raw);
+  return _archCleanDescHtmlForEdit(raw);
+}
+
+function _archCleanDescHtmlForEdit(html) {
+  let s = String(html || '').trim();
+  if (!s) return '';
+  try {
+    s = s.replace(/\bNormal\s+0\s+0\s+\d+[\s\S]{0,400}?MicrosoftInternetExplorer4\b/gi, '');
+    s = s.replace(/MicrosoftInternetExplorer4/gi, '');
+    s = s.replace(/\bX-NONE\b/gi, '');
+  } catch {}
+  try { s = _cleanPasteHtml(s); } catch {}
+  try {
+    const doc = new DOMParser().parseFromString(`<div id="__arch_root__">${s}</div>`, 'text/html');
+    const root = doc.getElementById('__arch_root__');
+    if (!root) return s;
+    root.querySelectorAll('style,script,xml,meta,link').forEach(el => { try { el.remove(); } catch {} });
+    root.querySelectorAll('o\\:p, w\\:sdt, w\\:sdtContent').forEach(el => { try { el.remove(); } catch {} });
+    const killLine = (t) => {
+      const x = String(t || '').trim();
+      if (!x) return false;
+      if (/MicrosoftInternetExplorer4/i.test(x)) return true;
+      if (/^Normal\s+0\s+0\s+\d+/i.test(x) && /false\s+false\s+false/i.test(x)) return true;
+      if (/^Normal\s+0\s+0\s+\d+/i.test(x) && /\bEN-US\b/i.test(x)) return true;
+      return false;
+    };
+    const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    const toRemove = [];
+    while (walker.nextNode()) {
+      const n = walker.currentNode;
+      const t = String(n?.nodeValue || '');
+      if (killLine(t)) toRemove.push(n);
+    }
+    toRemove.forEach(n => { try { n.remove(); } catch {} });
+    root.querySelectorAll('p,div').forEach(el => {
+      if (!el.querySelector('table,img,br') && !(el.textContent || '').trim()) {
+        try { el.remove(); } catch {}
+      }
+    });
+    return root.innerHTML;
+  } catch {
+    return s;
+  }
+}
+
+function _archCleanPastePlainText(text) {
+  let t = String(text || '');
+  t = t.replace(/\bNormal\s+0\s+0\s+\d+[\s\S]{0,400}?MicrosoftInternetExplorer4\b/gi, '');
+  t = t.replace(/MicrosoftInternetExplorer4/gi, '');
+  t = t.replace(/\bX-NONE\b/gi, '');
+  return t.replace(/^\s*\n+/, '').trim();
 }
 
 /** 편집 지연 완화를 위한 대용량 HTML 판정 */
@@ -2708,8 +2758,8 @@ function _initArchiveQuill() {
       if (!cd) return;
       const htmlData = cd.getData('text/html');
       const textData = cd.getData('text/plain');
-      // HTML이 있으면 정리 후 삽입, 없으면 plain text
-      const toInsert = htmlData ? _archNormalizePastedHtmlForEditor(htmlData) : (textData || '');
+      // HTML이 있으면 정리 후 삽입, 없으면 plain text 정리 후 삽입
+      const toInsert = htmlData ? _archNormalizePastedHtmlForEditor(htmlData) : _archCleanPastePlainText(textData || '');
       document.execCommand('insertHTML', false, toInsert);
     });
   }
@@ -2731,8 +2781,10 @@ function _initArchiveQuill() {
     }
   });
 
-  // ── Quill 에디터 paste: 표가 포함되면 contenteditable로 자동 전환 ──
+  // ── Quill 에디터 paste: 표/Word/TSV 케이스를 entry.js와 동일한 순서로 처리 ──
+  let _archiveQuillPasteLock = false;
   _archiveQuill.root.addEventListener('paste', function(e) {
+    if (_archiveQuillPasteLock) return;
     const cd = e.clipboardData || window.clipboardData;
     const htmlData = cd ? cd.getData('text/html') : '';
     const textData = cd ? cd.getData('text/plain') : '';
@@ -2750,20 +2802,52 @@ function _initArchiveQuill() {
       }
     } catch {}
 
+    if (!htmlData && textData && /MicrosoftInternetExplorer4|Normal\s+0\s+0\s+\d+/i.test(textData)) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      _archiveQuillPasteLock = true;
+      const cleaned = _archCleanPastePlainText(textData);
+      try {
+        const sel = _archiveQuill.getSelection(true) || { index: _archiveQuill.getLength(), length: 0 };
+        if (cleaned) _archiveQuill.insertText(sel.index, cleaned, 'user');
+      } catch {}
+      setTimeout(() => { _archiveQuillPasteLock = false; }, 0);
+      return;
+    }
+
+    if (htmlData && !/<table[\s>]/i.test(htmlData)) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      _archiveQuillPasteLock = true;
+      const cleaned = _archCleanDescHtmlForEdit(htmlData);
+      try {
+        const sel = _archiveQuill.getSelection(true) || { index: _archiveQuill.getLength(), length: 0 };
+        _archiveQuill.clipboard.dangerouslyPasteHTML(sel.index, cleaned, 'user');
+      } catch {
+        try { document.execCommand('insertHTML', false, cleaned); } catch {}
+      }
+      setTimeout(() => { _archiveQuillPasteLock = false; }, 0);
+      return;
+    }
+
     if (htmlData && /<table[\s>]/i.test(htmlData)) {
       // 표 감지 → Quill 처리 완전 차단 후 contenteditable 모드로 전환
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
+      _archiveQuillPasteLock = true;
 
       const cleanHtml = _archNormalizePastedHtmlForEditor(htmlData);
       _archSwitchToRich(cleanHtml);
 
       // contenteditable로 포커스 이동
       setTimeout(() => {
+        _archiveQuillPasteLock = false;
         const richEl = document.getElementById('archive-rich-editor');
         if (richEl) richEl.focus();
-      }, 50);
+      }, 120);
       return;
     }
 
@@ -2775,13 +2859,15 @@ function _initArchiveQuill() {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
+        _archiveQuillPasteLock = true;
 
         const cleanHtml = _archNormalizePastedHtmlForEditor(tableHtml);
         _archSwitchToRich(cleanHtml);
         setTimeout(() => {
+          _archiveQuillPasteLock = false;
           const richEl = document.getElementById('archive-rich-editor');
           if (richEl) richEl.focus();
-        }, 50);
+        }, 120);
       }
       return;
     }
@@ -2789,16 +2875,18 @@ function _initArchiveQuill() {
     // 마지막 우회: clipboardData가 비어있거나 탭이 누락되는 환경에서는 navigator.clipboard로 다시 시도
     // (권한/브라우저 정책에 따라 실패할 수 있음)
     setTimeout(async () => {
-      if (_archiveUseRich) return; // 이미 전환됐다면 스킵
+      if (_archiveQuillPasteLock) return;
       const tsv = await _archTryClipboardTsvFallback();
       const tableHtml = tsv ? _archTsvToTableHtml(tsv) : '';
       if (!tableHtml) return;
+      _archiveQuillPasteLock = true;
       const cleanHtml = _archNormalizePastedHtmlForEditor(tableHtml);
       _archSwitchToRich(cleanHtml);
       setTimeout(() => {
+        _archiveQuillPasteLock = false;
         const richEl = document.getElementById('archive-rich-editor');
         if (richEl) richEl.focus();
-      }, 50);
+      }, 120);
     }, 0);
     // 표 없는 경우: Quill이 정상 처리
   }, true);
