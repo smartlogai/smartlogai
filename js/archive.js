@@ -1812,8 +1812,8 @@ async function openArchiveEdit(refId) {
       const sum = (ref.summary || '').trim();
       if (sum) rawDesc = sum.startsWith('<') ? sum : ('<p>' + Utils.escHtml(sum) + '</p>');
     }
-    // 수정 모드 진입 시 편집용 경량화를 적용해 커서 반응 지연을 줄인다.
-    _archSetEditorHtml(rawDesc, { cleanOnLoad: true, optimizeForEdit: true });
+    // 수정 모드 진입: 표 구조 정합성을 우선 보존하고, 대용량은 전용 텍스트 편집 경로로 분기한다.
+    _archSetEditorHtml(rawDesc, { cleanOnLoad: true });
 
     // 핵심키워드·판단사유·법령: saveArchiveRecord 가 읽는 hidden + 칩 UI (entry 우선)
     const kwArr = _parseArr(entry?.kw_query ?? ref.kw_query);
@@ -2188,6 +2188,7 @@ async function saveArchiveRecord() {
 // ─────────────────────────────────────────────
 let _archiveQuill = null;     // 직접등록 모달 전용 Quill 인스턴스
 let _archiveUseRich = false;  // true = contenteditable 모드 (표 포함)
+let _archiveHeavyEditMode = false; // 대용량 표: 직접 contenteditable 편집 비활성
 
 /** 표 행이 시각적으로 비었는지(공백·&nbsp;·br만) — Word 말미 빈 줄 제거용 */
 function _archCellIsVisuallyEmpty(cell) {
@@ -2487,6 +2488,8 @@ function _archSwitchToRich(html) {
   // Quill 에디터 숨기고 contenteditable 표시
   if (quillWrap) quillWrap.style.display = 'none';
   richEl.style.display = 'block';
+  richEl.setAttribute('contenteditable', 'true');
+  richEl.style.cursor = 'text';
   richEl.setAttribute('spellcheck', 'false');
   richEl.setAttribute('autocorrect', 'off');
   richEl.setAttribute('autocomplete', 'off');
@@ -2500,6 +2503,7 @@ function _archSwitchToRich(html) {
 /** 일반 Quill 모드로 복귀 (표 제거) */
 function _archSwitchToQuill() {
   _archiveUseRich = false;
+  _archiveHeavyEditMode = false;
   const quillWrap = document.getElementById('archive-quill-editor');
   const richEl    = document.getElementById('archive-rich-editor');
   const badge     = document.getElementById('archive-editor-mode-badge');
@@ -2534,13 +2538,43 @@ function _archGetEditorText() {
 function _archSetEditorHtml(html, opts = {}) {
   const raw = String(html || '');
   const cleanOnLoad = opts.cleanOnLoad !== false;
-  const optimizeForEdit = opts.optimizeForEdit !== false;
-  let clean = cleanOnLoad ? _cleanPasteHtml(raw) : raw;
-  if (optimizeForEdit) clean = _archOptimizeHtmlForEdit(clean);
-  if (/<table[\s>]/i.test(clean)) {
+  const clean = cleanOnLoad ? _cleanPasteHtml(raw) : raw;
+  const hasTable = /<table[\s>]/i.test(clean);
+  if (hasTable) {
+    const isHeavy = _archIsHeavyEditableHtml(clean);
     _archSwitchToRich(clean);
+    const richEl = document.getElementById('archive-rich-editor');
+    const badge = document.getElementById('archive-editor-mode-badge');
+    if (isHeavy) {
+      _archiveHeavyEditMode = true;
+      if (richEl) {
+        richEl.setAttribute('contenteditable', 'false');
+        richEl.style.cursor = 'default';
+      }
+      if (badge) {
+        badge.innerHTML = `
+          <i class="fas fa-exclamation-triangle"></i>
+          <span>대용량 표 모드 · 직접 편집 시 느려질 수 있어 텍스트 편집을 권장합니다</span>
+          <button onclick="_archOpenLargeTextEdit()" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:11px;color:#6b7280;text-decoration:underline">텍스트 편집</button>
+        `;
+      }
+    } else {
+      _archiveHeavyEditMode = false;
+      if (richEl) {
+        richEl.setAttribute('contenteditable', 'true');
+        richEl.style.cursor = 'text';
+      }
+      if (badge) {
+        badge.innerHTML = `
+          <i class="fas fa-table"></i>
+          <span>표 포함 모드 · 표 구조가 그대로 보존됩니다</span>
+          <button onclick="_archSwitchToQuill()" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:11px;color:#6b7280;text-decoration:underline">표 제거 후 일반 모드로</button>
+        `;
+      }
+    }
     return;
   }
+  _archiveHeavyEditMode = false;
   _archSwitchToQuill();
   _initArchiveQuill();
   if (_archiveQuill) {
@@ -2549,9 +2583,65 @@ function _archSetEditorHtml(html, opts = {}) {
   }
 }
 
+function _archOpenLargeTextEdit() {
+  const richEl = document.getElementById('archive-rich-editor');
+  if (!richEl) return;
+  const srcHtml = richEl.innerHTML || '';
+  const wrap = document.createElement('div');
+  wrap.innerHTML = srcHtml;
+  const initialText = (wrap.innerText || wrap.textContent || '').trim();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay show';
+  overlay.style.zIndex = '10010';
+  overlay.innerHTML = `
+    <div class="modal modal-lg" style="max-width:760px">
+      <div class="modal-header">
+        <h3><i class="fas fa-edit" style="color:var(--primary);margin-right:6px"></i>대용량 텍스트 편집</h3>
+        <button class="btn-close" data-act="close">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-info" style="margin-bottom:10px">
+          표가 큰 경우 커서 이동이 느려질 수 있어 텍스트 편집으로 전환합니다. 저장 시 본문이 텍스트로 반영됩니다.
+        </div>
+        <textarea id="arch-large-edit-ta" class="form-control" rows="14"
+          style="font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:12.5px;line-height:1.6;white-space:pre;tab-size:4"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-act="cancel">취소</button>
+        <button class="btn btn-primary" data-act="apply"><i class="fas fa-check"></i> 적용</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const ta = overlay.querySelector('#arch-large-edit-ta');
+  if (ta) {
+    ta.value = initialText;
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  }
+  const close = () => overlay.remove();
+  overlay.querySelector('[data-act="close"]')?.addEventListener('click', close);
+  overlay.querySelector('[data-act="cancel"]')?.addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('[data-act="apply"]')?.addEventListener('click', () => {
+    const text = String(ta?.value || '');
+    _archiveHeavyEditMode = false;
+    _archSwitchToQuill();
+    _initArchiveQuill();
+    if (_archiveQuill) {
+      _archiveQuill.setContents([]);
+      if (text.trim()) _archiveQuill.setText(text);
+    }
+    close();
+    Toast.info('텍스트 편집 내용이 적용되었습니다. 저장 버튼을 누르면 반영됩니다.');
+  });
+}
+
 /** 에디터 초기화 (모달 열 때마다 호출) */
 function _archResetEditor() {
   _archiveUseRich = false;
+  _archiveHeavyEditMode = false;
   const quillWrap = document.getElementById('archive-quill-editor');
   const richEl    = document.getElementById('archive-rich-editor');
   const badge     = document.getElementById('archive-editor-mode-badge');
