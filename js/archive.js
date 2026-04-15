@@ -1812,8 +1812,9 @@ async function openArchiveEdit(refId) {
       const sum = (ref.summary || '').trim();
       if (sum) rawDesc = sum.startsWith('<') ? sum : ('<p>' + Utils.escHtml(sum) + '</p>');
     }
-    // 수정 모드 진입: 표 구조 정합성을 우선 보존하고, 대용량은 전용 텍스트 편집 경로로 분기한다.
-    _archSetEditorHtml(rawDesc, { cleanOnLoad: true });
+    // 수정 모드 진입: 기존 저장 HTML은 원문 그대로 로드해야 표 구조/스타일이 깨지지 않는다.
+    // (붙여넣기/저장 경로에서만 _cleanPasteHtml을 적용)
+    _archSetEditorHtml(rawDesc, { cleanOnLoad: false });
 
     // 핵심키워드·판단사유·법령: saveArchiveRecord 가 읽는 hidden + 칩 UI (entry 우선)
     const kwArr = _parseArr(entry?.kw_query ?? ref.kw_query);
