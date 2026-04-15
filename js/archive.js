@@ -2189,7 +2189,7 @@ async function saveArchiveRecord() {
 // ─────────────────────────────────────────────
 let _archiveQuill = null;     // 직접등록 모달 전용 Quill 인스턴스
 let _archiveUseRich = false;  // true = contenteditable 모드 (표 포함)
-let _archiveHeavyEditMode = false; // 대용량 표: 직접 contenteditable 편집 비활성
+let _archiveHeavyEditMode = false; // 표 본문: 직접 contenteditable 편집 비활성
 
 /** 표 행이 시각적으로 비었는지(공백·&nbsp;·br만) — Word 말미 빈 줄 제거용 */
 function _archCellIsVisuallyEmpty(cell) {
@@ -2542,36 +2542,23 @@ function _archSetEditorHtml(html, opts = {}) {
   const clean = cleanOnLoad ? _cleanPasteHtml(raw) : raw;
   const hasTable = /<table[\s>]/i.test(clean);
   if (hasTable) {
-    const isHeavy = _archIsHeavyEditableHtml(clean);
     _archSwitchToRich(clean);
     const richEl = document.getElementById('archive-rich-editor');
     const badge = document.getElementById('archive-editor-mode-badge');
-    if (isHeavy) {
-      _archiveHeavyEditMode = true;
-      if (richEl) {
-        richEl.setAttribute('contenteditable', 'false');
-        richEl.style.cursor = 'default';
-      }
-      if (badge) {
-        badge.innerHTML = `
-          <i class="fas fa-exclamation-triangle"></i>
-          <span>대용량 표 모드 · 직접 편집 시 느려질 수 있어 텍스트 편집을 권장합니다</span>
-          <button onclick="_archOpenLargeTextEdit()" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:11px;color:#6b7280;text-decoration:underline">텍스트 편집</button>
-        `;
-      }
-    } else {
-      _archiveHeavyEditMode = false;
-      if (richEl) {
-        richEl.setAttribute('contenteditable', 'true');
-        richEl.style.cursor = 'text';
-      }
-      if (badge) {
-        badge.innerHTML = `
-          <i class="fas fa-table"></i>
-          <span>표 포함 모드 · 표 구조가 그대로 보존됩니다</span>
-          <button onclick="_archSwitchToQuill()" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:11px;color:#6b7280;text-decoration:underline">표 제거 후 일반 모드로</button>
-        `;
-      }
+    // 원킬 대응:
+    // 표 HTML은 contenteditable 편집 시 커서 지연/레이아웃 파손 가능성이 커서
+    // 수정 화면에서는 항상 읽기 전용으로 두고, 텍스트 편집 경로로만 수정한다.
+    _archiveHeavyEditMode = true;
+    if (richEl) {
+      richEl.setAttribute('contenteditable', 'false');
+      richEl.style.cursor = 'default';
+    }
+    if (badge) {
+      badge.innerHTML = `
+        <i class="fas fa-table"></i>
+        <span>표 본문 보호 모드 · 표 깨짐 방지를 위해 직접 편집은 비활성화됩니다</span>
+        <button onclick="_archOpenLargeTextEdit()" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:11px;color:#6b7280;text-decoration:underline">텍스트 편집</button>
+      `;
     }
     return;
   }
