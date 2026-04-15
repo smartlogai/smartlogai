@@ -2302,19 +2302,13 @@ async function saveApprovalEdit() {
   const _origHasTable = /<table[\s>]/i.test(_origHtml);
   const _origIsHeavy = _origHasTable && _apvIsHeavyHtml(_origHtml);
   let allowDescSave = !_origIsHeavy || !!_apvPendingDescHtml;
-  // 수행내용 UI를 제거(숨김)한 경우: 내용 저장/검증을 건너뛰고 원본 유지
-  try {
-    const dv = document.getElementById('approval-desc-view');
-    const hidden = !dv || (() => {
-      let p = dv;
-      while (p) {
-        if (p.style && p.style.display === 'none') return true;
-        p = p.parentElement;
-      }
-      return false;
-    })();
-    if (hidden) allowDescSave = false;
-  } catch (_) { /* ignore */ }
+  // 수정 모드에서 approval-desc-view를 숨기는 것은 정상 동작이므로
+  // 표시 상태가 아니라 "실제 편집 입력원 존재 여부"로 저장 가능 여부를 판단한다.
+  const hasEditableSource = !!_apvPendingDescHtml
+    || !!document.getElementById('approval-edit-rich')
+    || !!_approvalQuill
+    || !!document.getElementById('approval-edit-desc');
+  if (!hasEditableSource) allowDescSave = false;
 
   // Quill에서 HTML 읽기
   let newDesc = '';

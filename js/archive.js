@@ -2107,6 +2107,12 @@ async function saveArchiveRecord() {
       if (session.role !== 'admin' && session.role !== 'director') {
         throw new Error('수정 권한이 없습니다.');
       }
+      let existingRef = null;
+      try {
+        existingRef = await API.get('mail_references', editId);
+      } catch (_) {
+        existingRef = null;
+      }
       await API.patch('mail_references', editId, {
         subject:           payload.subject,
         body_text:         payload.body_text,
@@ -2125,6 +2131,20 @@ async function saveArchiveRecord() {
         is_template:       payload.is_template,
         status:            'active',
       });
+      // 승인 연동(entry_id) 자료는 상세/목록에서 time_entries 값을 우선 사용하므로
+      // 자료실 수정 시 time_entries도 함께 동기화해 "저장했지만 옛값 표시"를 방지한다.
+      if (existingRef && existingRef.entry_id) {
+        await API.patch('time_entries', existingRef.entry_id, {
+          work_description:       payload.work_description,
+          work_category_name:     payload.work_category,
+          work_subcategory_name:  payload.work_subcategory,
+          kw_query:               payload.kw_query,
+          kw_reason:              payload.kw_reason,
+          law_refs:               payload.law_refs,
+          quality_stars:          payload.quality_stars,
+          quality_rating:         payload.quality_rating,
+        });
+      }
     } else {
       const created = await API.create('mail_references', payload);
       if (!created || !created.id) {
