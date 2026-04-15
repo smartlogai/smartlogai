@@ -1820,6 +1820,12 @@ async function openArchiveEdit(refId) {
     // 수정 모드 진입: 기존 저장 HTML은 원문 그대로 로드해야 표 구조/스타일이 깨지지 않는다.
     // (붙여넣기/저장 경로에서만 _cleanPasteHtml을 적용)
     _archSetEditorHtml(rawDesc, { cleanOnLoad: false });
+    // 표 보호 모드에서는 수정 경로가 막힌 것처럼 느껴질 수 있어 텍스트 편집기를 자동으로 연다.
+    if (_archiveHeavyEditMode) {
+      setTimeout(() => {
+        try { _archOpenLargeTextEdit(); } catch (_) {}
+      }, 80);
+    }
 
     // 핵심키워드·판단사유·법령: saveArchiveRecord 가 읽는 hidden + 칩 UI (entry 우선)
     const kwArr = _parseArr(entry?.kw_query ?? ref.kw_query);
@@ -2370,6 +2376,34 @@ function _cleanPasteHtml(html) {
   }
 }
 
+/** 표 HTML 표시 안정화(구조 보존): 클래스/폭 정보는 유지하고 최소 스타일만 보강 */
+function _archEnhanceTableHtmlForDisplay(html) {
+  const raw = String(html || '').trim();
+  if (!raw || typeof document === 'undefined' || !/<table[\s>]/i.test(raw)) return raw;
+  try {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = raw;
+    wrap.querySelectorAll('table').forEach((t) => {
+      if (!t.style.borderCollapse) t.style.borderCollapse = 'collapse';
+      if (!t.style.maxWidth) t.style.maxWidth = '100%';
+    });
+    wrap.querySelectorAll('td, th').forEach((el) => {
+      if (!el.style.border) el.style.border = '1px solid #94a3b8';
+      if (!el.style.padding) el.style.padding = '4px 8px';
+      if (!el.style.verticalAlign) el.style.verticalAlign = 'top';
+      if (!el.style.wordBreak) el.style.wordBreak = 'break-word';
+      if (!el.style.whiteSpace) el.style.whiteSpace = 'normal';
+    });
+    wrap.querySelectorAll('th').forEach((el) => {
+      if (!el.style.background) el.style.background = '#e2e8f0';
+      if (!el.style.fontWeight) el.style.fontWeight = '700';
+    });
+    return wrap.innerHTML;
+  } catch (_) {
+    return raw;
+  }
+}
+
 /** 붙여넣기 입력용 정규화: 표 HTML은 구조 보존을 위해 원문 우선 */
 function _archNormalizePastedHtmlForEditor(html) {
   const raw = String(html || '').trim();
@@ -2514,8 +2548,13 @@ function _archSwitchToRich(html) {
   richEl.setAttribute('autocapitalize', 'off');
   if (badge)  { badge.style.display = 'flex'; }
 
-  // 내용 주입
-  if (html !== undefined) richEl.innerHTML = html;
+  // 내용 주입 (표는 구조를 유지한 채 표시 안정화 스타일만 보강)
+  if (html !== undefined) {
+    const nextHtml = /<table[\s>]/i.test(String(html || ''))
+      ? _archEnhanceTableHtmlForDisplay(html)
+      : html;
+    richEl.innerHTML = nextHtml;
+  }
 }
 
 /** 일반 Quill 모드로 복귀 (표 제거) */
@@ -2581,8 +2620,8 @@ function _archSetEditorHtml(html, opts = {}) {
     if (richEl) {
       richEl.setAttribute('contenteditable', 'false');
       richEl.style.cursor = 'default';
-      // 원본 표/본문은 그대로 보여주고, 직접 편집만 막는다.
-      richEl.innerHTML = _archiveLockedHtml;
+      // 원본은 _archiveLockedHtml에 보관하고, 표시용만 안정화해 렌더링한다.
+      richEl.innerHTML = _archEnhanceTableHtmlForDisplay(_archiveLockedHtml);
     }
     if (badge) {
       badge.innerHTML = `
