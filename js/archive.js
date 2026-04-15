@@ -2731,20 +2731,12 @@ function _archSetEditorHtml(html, opts = {}) {
 function _archEnableTableCompatEdit() {
   if (!_archiveHeavyEditMode && _archiveTableCompatEdit) return;
   const richEl = document.getElementById('archive-rich-editor');
-  const badge = document.getElementById('archive-editor-mode-badge');
   if (!richEl) return;
   _archiveHeavyEditMode = false;
   _archiveTableCompatEdit = true;
   richEl.setAttribute('contenteditable', 'true');
   richEl.style.cursor = 'text';
   richEl.focus();
-  if (badge) {
-    badge.innerHTML = `
-      <i class="fas fa-pen"></i>
-      <span>직접 편집 모드 · 표 구조가 복잡하면 커서가 느릴 수 있습니다.</span>
-    `;
-  }
-  Toast.info('직접 편집 모드로 전환되었습니다.');
 }
 
 function _archOpenLargeTextEdit() {
