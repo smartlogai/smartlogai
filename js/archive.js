@@ -1820,6 +1820,13 @@ async function openArchiveEdit(refId) {
     // 수정 모드 진입: 기존 저장 HTML은 원문 그대로 로드해야 표 구조/스타일이 깨지지 않는다.
     // (붙여넣기/저장 경로에서만 _cleanPasteHtml을 적용)
     _archSetEditorHtml(rawDesc, { cleanOnLoad: false });
+    // 표 포함 본문은 수정 진입 직후 직접 편집 모드로 전환해
+    // 마우스 클릭/드래그 선택이 즉시 가능하도록 한다.
+    if (_archiveHeavyEditMode) {
+      setTimeout(() => {
+        try { _archEnableTableCompatEdit(); } catch (_) {}
+      }, 0);
+    }
 
     // 핵심키워드·판단사유·법령: saveArchiveRecord 가 읽는 hidden + 칩 UI (entry 우선)
     const kwArr = _parseArr(entry?.kw_query ?? ref.kw_query);
@@ -2704,7 +2711,7 @@ function _archSetEditorHtml(html, opts = {}) {
     if (badge) {
       badge.innerHTML = `
         <i class="fas fa-table"></i>
-        <span>표 보호 모드 · 원본 보존 상태입니다. 필요 시 직접 편집 모드로 전환하세요.</span>
+        <span>대용량 표 문서는 마우스 커서가 지연될 수 있습니다.<br>키보드 방향키/검색으로 위치 이동 후 수정하세요.</span>
         <button onclick="_archEnableTableCompatEdit()" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:11px;color:#6b7280;text-decoration:underline">직접 편집 모드</button>
         <button onclick="_archOpenLargeTextEdit()" style="margin-left:8px;background:none;border:none;cursor:pointer;font-size:11px;color:#6b7280;text-decoration:underline">텍스트 편집</button>
       `;
@@ -2816,16 +2823,6 @@ function _initArchiveQuill() {
   const richEl = document.getElementById('archive-rich-editor');
   if (richEl && !richEl._pasteReady) {
     richEl._pasteReady = true;
-    // 표 보호 모드에서 사용자가 본문을 클릭하면 즉시 직접 편집 모드로 전환
-    richEl.addEventListener('mousedown', function(e) {
-      if (!_archiveHeavyEditMode) return;
-      e.preventDefault();
-      _archEnableTableCompatEdit();
-    });
-    richEl.addEventListener('keydown', function() {
-      if (!_archiveHeavyEditMode) return;
-      _archEnableTableCompatEdit();
-    });
     richEl.addEventListener('paste', function(e) {
       e.preventDefault();
       const cd = e.clipboardData || window.clipboardData;
