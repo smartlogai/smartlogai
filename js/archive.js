@@ -467,21 +467,6 @@ function _parseArr(val) {
   return [];
 }
 
-/** 본문 후보들 중 표 구조 보존에 유리한 HTML을 선택 */
-function _archPickBestDescHtml(...candidates) {
-  const list = candidates
-    .map(v => String(v || '').trim())
-    .filter(Boolean);
-  if (!list.length) return '';
-  const score = (html) => {
-    const hasTable = /<table[\s>]/i.test(html) ? 1 : 0;
-    const len = html.length;
-    return (hasTable * 1000000) + len;
-  };
-  list.sort((a, b) => score(b) - score(a));
-  return list[0];
-}
-
 // ─────────────────────────────────────────────
 //  카드 HTML 빌더 (신규 디자인)
 // ─────────────────────────────────────────────
@@ -958,12 +943,9 @@ async function openArchiveDetail(refId) {
     // 활용포인트
     const utilNote = (ref.archive_note || '').trim();
 
-    // 자문내용: entry/ref/body_text 중 표 구조가 더 온전한 쪽을 선택
-    const _rawDescHtml = _archPickBestDescHtml(
-      entryWorkDesc,
-      ref.work_description,
-      ref.body_text
-    );
+    // 자문내용 (기존 안정 우선순위 유지): entry.work_description → ref.work_description
+    // 내용보기 경로는 검증된 순서를 유지해 회귀를 방지한다.
+    const _rawDescHtml = (entryWorkDesc || ref.work_description || '').trim();
     const _normalizeDetailDescHtml = (rawHtml) => {
       if (!rawHtml) return '';
       const cleaned = String(rawHtml)
@@ -1007,11 +989,11 @@ async function openArchiveDetail(refId) {
     let contentHtml = descHtmlNoLeadingBlank
       ? (descHtmlNoLeadingBlank.startsWith('<') ? descHtmlNoLeadingBlank : '<p>' + Utils.escHtml(descHtmlNoLeadingBlank) + '</p>')
       : (summaryText ? '<p>' + Utils.escHtml(summaryText) + '</p>' : '');
-    const _hasTableContent = !!(contentHtml && /<table[\s>]/i.test(contentHtml));
-    // 표는 원문 렌더링을 우선해 구조 파손 가능성이 있는 후처리를 생략한다.
-    if (!_hasTableContent) {
-      contentHtml = _sanitizeWorkDescHtmlForView(contentHtml);
+    // 표 포함 시 인라인 스타일 보강
+    if (contentHtml && /<table[\s>]/i.test(contentHtml)) {
+      contentHtml = _cleanPasteHtml(contentHtml);
     }
+    contentHtml = _sanitizeWorkDescHtmlForView(contentHtml);
     const contentText = descHtml
       ? descHtml.replace(/<[^>]+>/g,' ')
                 .replace(/Normal\s+\d+\s+\d+\s+\d+\s+(false|true)\s+(false|true)\s+(false|true)[^\n]*/gi, '')
@@ -1828,13 +1810,9 @@ async function openArchiveEdit(refId) {
     _archResetEditor();
     document.getElementById('archive-quill-hidden').value = '';
 
-    // 자문 본문: entry/ref/body_text 중 표 구조가 더 온전한 쪽 선택
+    // 자문 본문: 내용보기와 동일한 안정 우선순위 유지 (entry → ref → body_text)
     const entryWorkDesc = (entry?.work_description || '').trim();
-    let rawDesc = _archPickBestDescHtml(
-      entryWorkDesc,
-      ref.work_description,
-      ref.body_text
-    );
+    let rawDesc = (entryWorkDesc || ref.work_description || ref.body_text || '').trim();
     if (!rawDesc) {
       const sum = (ref.summary || '').trim();
       if (sum) rawDesc = sum.startsWith('<') ? sum : ('<p>' + Utils.escHtml(sum) + '</p>');
@@ -2392,6 +2370,14 @@ function _cleanPasteHtml(html) {
   }
 }
 
+/** 붙여넣기 입력용 정규화: 표 HTML은 구조 보존을 위해 원문 우선 */
+function _archNormalizePastedHtmlForEditor(html) {
+  const raw = String(html || '').trim();
+  if (!raw) return '';
+  if (/<table[\s>]/i.test(raw)) return raw;
+  return _cleanPasteHtml(raw);
+}
+
 /** 편집 지연 완화를 위한 대용량 HTML 판정 */
 function _archIsHeavyEditableHtml(html) {
   const s = String(html || '');
@@ -2500,7 +2486,7 @@ function applyArchiveTablePasteHelper() {
   }
   if (!html) { Toast.warning('표로 변환할 수 없습니다. (TSV 또는 <table> HTML만 지원)'); return; }
 
-  const cleanHtml = _cleanPasteHtml(html);
+  const cleanHtml = _archNormalizePastedHtmlForEditor(html);
   _archSwitchToRich(cleanHtml);
   closeModal('archiveTablePasteModal');
   setTimeout(() => {
@@ -2699,7 +2685,7 @@ function _initArchiveQuill() {
       const htmlData = cd.getData('text/html');
       const textData = cd.getData('text/plain');
       // HTML이 있으면 정리 후 삽입, 없으면 plain text
-      const toInsert = htmlData ? _cleanPasteHtml(htmlData) : (textData || '');
+      const toInsert = htmlData ? _archNormalizePastedHtmlForEditor(htmlData) : (textData || '');
       document.execCommand('insertHTML', false, toInsert);
     });
   }
@@ -2746,7 +2732,7 @@ function _initArchiveQuill() {
       e.stopPropagation();
       e.stopImmediatePropagation();
 
-      const cleanHtml = _cleanPasteHtml(htmlData);
+      const cleanHtml = _archNormalizePastedHtmlForEditor(htmlData);
       _archSwitchToRich(cleanHtml);
 
       // contenteditable로 포커스 이동
@@ -2766,7 +2752,7 @@ function _initArchiveQuill() {
         e.stopPropagation();
         e.stopImmediatePropagation();
 
-        const cleanHtml = _cleanPasteHtml(tableHtml);
+        const cleanHtml = _archNormalizePastedHtmlForEditor(tableHtml);
         _archSwitchToRich(cleanHtml);
         setTimeout(() => {
           const richEl = document.getElementById('archive-rich-editor');
@@ -2783,7 +2769,7 @@ function _initArchiveQuill() {
       const tsv = await _archTryClipboardTsvFallback();
       const tableHtml = tsv ? _archTsvToTableHtml(tsv) : '';
       if (!tableHtml) return;
-      const cleanHtml = _cleanPasteHtml(tableHtml);
+      const cleanHtml = _archNormalizePastedHtmlForEditor(tableHtml);
       _archSwitchToRich(cleanHtml);
       setTimeout(() => {
         const richEl = document.getElementById('archive-rich-editor');
