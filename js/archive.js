@@ -1664,8 +1664,19 @@ async function openArchiveFiles(refId) {
 // ─────────────────────────────────────────────
 //  직접 등록 모달
 // ─────────────────────────────────────────────
+function _setArchivePasteGuideText(isEditMode) {
+  const guide = document.getElementById('archive-paste-guide-text');
+  if (!guide) return;
+  if (isEditMode) {
+    guide.innerHTML = '대용량 표 문서는 마우스 커서가 지연될 수 있습니다.<br>키보드 방향키/검색으로 위치 이동 후 수정하세요.';
+  } else {
+    guide.innerHTML = '메일 본문을 <strong>그대로 붙여넣기(Ctrl+V)</strong> 하세요 · 엑셀/Word 표도 그대로 붙여넣기 가능합니다';
+  }
+}
+
 async function openArchiveNewModal() {
   _archiveNewPendingFiles = [];
+  _setArchivePasteGuideText(false);
 
   // 숨김 호환 필드 초기화
   document.getElementById('archive-edit-id').value = '';
@@ -1762,6 +1773,7 @@ async function openArchiveEdit(refId) {
     return;
   }
   try {
+    _setArchivePasteGuideText(true);
     // 상세(openArchiveDetail)와 동일하게 mail_references + time_entries 병합
     const ref = await API.get('mail_references', refId);
     if (!ref || !ref.id) {
