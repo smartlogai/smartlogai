@@ -2565,11 +2565,8 @@ function _archSetEditorHtml(html, opts = {}) {
     if (richEl) {
       richEl.setAttribute('contenteditable', 'false');
       richEl.style.cursor = 'default';
-      richEl.innerHTML = `
-        <div style="padding:10px 12px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;color:#475569;font-size:12px;line-height:1.6">
-          <div style="font-weight:700;color:#334155;margin-bottom:6px"><i class="fas fa-table" style="margin-right:6px"></i>표 본문 보호 모드</div>
-          <div>표 구조 보존을 위해 직접 커서 편집을 비활성화했습니다. <b>텍스트 편집</b> 버튼으로 수정하세요.</div>
-        </div>`;
+      // 원본 표/본문은 그대로 보여주고, 직접 편집만 막는다.
+      richEl.innerHTML = _archiveLockedHtml;
     }
     if (badge) {
       badge.innerHTML = `
