@@ -2166,7 +2166,11 @@ function toggleApprovalEdit() {
       if (descView) {
         const done = GlobalBusy?.show ? GlobalBusy.show('대용량 내용 준비 중...') : (() => {});
         try {
-          descView.innerHTML = _apvCleanDescHtmlForView(curHtml);
+          // 수정 진입 첫 반응 지연을 줄이기 위해 대용량 경로에서는 원문을 그대로 렌더링
+          // (편집 저장은 제한되어 있어 여기서 추가 정리 비용을 줄이는 편이 유리함)
+          descView.innerHTML = curHtml.trim()
+            ? (curHtml.startsWith('<') ? curHtml : '<p>' + Utils.escHtml(curHtml) + '</p>')
+            : '<span style="color:var(--text-muted);font-size:12px">(내용 없음)</span>';
         } finally { done(); }
         descView.style.display = '';
         descView.style.border = '1.5px solid var(--primary)';
@@ -2186,9 +2190,9 @@ function toggleApprovalEdit() {
         richEl.setAttribute('spellcheck', 'false');
         const done = GlobalBusy?.show ? GlobalBusy.show('편집 준비 중...') : (() => {});
         try {
-          // 저장 시 표/레이아웃이 깨지는 문제 방지: "표용 편집"에서는 과도한 최적화 금지
-          // (Word/Excel 잔여물만 제거하고 표 구조/속성은 보존)
-          richEl.innerHTML = _apvCleanDescHtmlForView(curHtml);
+          // 수정 진입 시점에는 원문 로드로 반응 속도를 우선하고,
+          // 저장 시점 검증/정리 로직에서 최종 내용을 확정한다.
+          richEl.innerHTML = curHtml;
 
           const notice = document.getElementById('approval-rich-heavy-notice');
           if (notice) notice.style.display = 'none';

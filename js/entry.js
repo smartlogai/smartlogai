@@ -3732,7 +3732,9 @@ async function editEntry(id) {
     const hidMd = document.getElementById('entry-description-md');
 
     if (catTypeForDesc === 'client') {
-      const descHtml = _entryCleanDescHtmlForEdit(rawDesc);
+      // 수정 진입 시에는 원문을 우선 로드해 첫 클릭/커서 반응 지연을 줄인다.
+      // 저장 직전에 _syncQuillToHidden()에서 정리/변환을 수행하므로 데이터 정합성은 유지된다.
+      const descHtml = String(rawDesc || '').trim();
       // Quill은 dangerouslyPasteHTML/innerHTML 로드 시 table 구조를 Delta 변환 과정에서 깨뜨림 → 표가 있으면 contenteditable 경로와 동일하게 로드
       if (_entryDescHtmlHasTable(descHtml)) {
         _entrySwitchToRich(_injectDescTableStyle(descHtml || ''));
@@ -3751,7 +3753,8 @@ async function editEntry(id) {
       if (hidHtml) hidHtml.value = descHtml;
       if (hidMd) hidMd.value = '';
       if (memoEl) memoEl.value = '';
-      _syncQuillToHidden();
+      // 수정 진입 시 즉시 동기화(정리+Markdown 변환)는 무거워 커서 반응을 늦춘다.
+      // 저장 버튼 클릭 시점에만 동기화한다.
     } else {
       entrySwitchToQuill();
       if (_quill) {

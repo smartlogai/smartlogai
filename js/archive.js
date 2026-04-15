@@ -1812,7 +1812,9 @@ async function openArchiveEdit(refId) {
       const sum = (ref.summary || '').trim();
       if (sum) rawDesc = sum.startsWith('<') ? sum : ('<p>' + Utils.escHtml(sum) + '</p>');
     }
-    _archSetEditorHtml(rawDesc);
+    // 수정 모드 진입 시에는 원문을 우선 로드해 클릭/커서 반응 지연을 줄인다.
+    // 저장 시 saveArchiveRecord()에서 _cleanPasteHtml로 정리된다.
+    _archSetEditorHtml(rawDesc, { cleanOnLoad: false });
 
     // 핵심키워드·판단사유·법령: saveArchiveRecord 가 읽는 hidden + 칩 UI (entry 우선)
     const kwArr = _parseArr(entry?.kw_query ?? ref.kw_query);
@@ -2471,9 +2473,10 @@ function _archGetEditorText() {
 }
 
 /** 에디터에 HTML 주입 (표가 있으면 rich 모드로 자동 전환) */
-function _archSetEditorHtml(html) {
+function _archSetEditorHtml(html, opts = {}) {
   const raw = String(html || '');
-  const clean = _cleanPasteHtml(raw);
+  const cleanOnLoad = opts.cleanOnLoad !== false;
+  const clean = cleanOnLoad ? _cleanPasteHtml(raw) : raw;
   if (/<table[\s>]/i.test(clean)) {
     _archSwitchToRich(clean);
     return;
