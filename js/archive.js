@@ -2190,6 +2190,7 @@ async function saveArchiveRecord() {
 let _archiveQuill = null;     // 직접등록 모달 전용 Quill 인스턴스
 let _archiveUseRich = false;  // true = contenteditable 모드 (표 포함)
 let _archiveHeavyEditMode = false; // 표 본문: 직접 contenteditable 편집 비활성
+let _archiveLockedHtml = '';  // 표 본문 보호 모드에서 원본 HTML 보관
 
 /** 표 행이 시각적으로 비었는지(공백·&nbsp;·br만) — Word 말미 빈 줄 제거용 */
 function _archCellIsVisuallyEmpty(cell) {
@@ -2505,6 +2506,7 @@ function _archSwitchToRich(html) {
 function _archSwitchToQuill() {
   _archiveUseRich = false;
   _archiveHeavyEditMode = false;
+  _archiveLockedHtml = '';
   const quillWrap = document.getElementById('archive-quill-editor');
   const richEl    = document.getElementById('archive-rich-editor');
   const badge     = document.getElementById('archive-editor-mode-badge');
@@ -2516,6 +2518,9 @@ function _archSwitchToQuill() {
 
 /** 현재 에디터에서 HTML 가져오기 */
 function _archGetEditorHtml() {
+  if (_archiveHeavyEditMode && _archiveLockedHtml) {
+    return _archiveLockedHtml;
+  }
   if (_archiveUseRich) {
     const el = document.getElementById('archive-rich-editor');
     return el ? el.innerHTML.trim() : '';
@@ -2525,6 +2530,11 @@ function _archGetEditorHtml() {
 
 /** 현재 에디터에서 텍스트 가져오기 */
 function _archGetEditorText() {
+  if (_archiveHeavyEditMode && _archiveLockedHtml) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = _archiveLockedHtml;
+    return (tmp.innerText || tmp.textContent || '').trim();
+  }
   if (_archiveUseRich) {
     const el = document.getElementById('archive-rich-editor');
     return el ? el.innerText.trim() : '';
@@ -2542,7 +2552,10 @@ function _archSetEditorHtml(html, opts = {}) {
   const clean = cleanOnLoad ? _cleanPasteHtml(raw) : raw;
   const hasTable = /<table[\s>]/i.test(clean);
   if (hasTable) {
-    _archSwitchToRich(clean);
+    // 표 HTML은 수정 진입 시점에 contenteditable DOM으로 직접 렌더링하지 않는다.
+    // (대용량에서 커서 hit-test 지연/진입 실패/레이아웃 깨짐을 유발)
+    _archiveLockedHtml = clean;
+    _archSwitchToRich('');
     const richEl = document.getElementById('archive-rich-editor');
     const badge = document.getElementById('archive-editor-mode-badge');
     // 원킬 대응:
@@ -2552,6 +2565,11 @@ function _archSetEditorHtml(html, opts = {}) {
     if (richEl) {
       richEl.setAttribute('contenteditable', 'false');
       richEl.style.cursor = 'default';
+      richEl.innerHTML = `
+        <div style="padding:10px 12px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;color:#475569;font-size:12px;line-height:1.6">
+          <div style="font-weight:700;color:#334155;margin-bottom:6px"><i class="fas fa-table" style="margin-right:6px"></i>표 본문 보호 모드</div>
+          <div>표 구조 보존을 위해 직접 커서 편집을 비활성화했습니다. <b>텍스트 편집</b> 버튼으로 수정하세요.</div>
+        </div>`;
     }
     if (badge) {
       badge.innerHTML = `
@@ -2563,6 +2581,7 @@ function _archSetEditorHtml(html, opts = {}) {
     return;
   }
   _archiveHeavyEditMode = false;
+  _archiveLockedHtml = '';
   _archSwitchToQuill();
   _initArchiveQuill();
   if (_archiveQuill) {
@@ -2572,9 +2591,7 @@ function _archSetEditorHtml(html, opts = {}) {
 }
 
 function _archOpenLargeTextEdit() {
-  const richEl = document.getElementById('archive-rich-editor');
-  if (!richEl) return;
-  const srcHtml = richEl.innerHTML || '';
+  const srcHtml = _archiveLockedHtml || document.getElementById('archive-rich-editor')?.innerHTML || '';
   const wrap = document.createElement('div');
   wrap.innerHTML = srcHtml;
   const initialText = (wrap.innerText || wrap.textContent || '').trim();
@@ -2615,6 +2632,7 @@ function _archOpenLargeTextEdit() {
   overlay.querySelector('[data-act="apply"]')?.addEventListener('click', () => {
     const text = String(ta?.value || '');
     _archiveHeavyEditMode = false;
+    _archiveLockedHtml = '';
     _archSwitchToQuill();
     _initArchiveQuill();
     if (_archiveQuill) {
@@ -2630,6 +2648,7 @@ function _archOpenLargeTextEdit() {
 function _archResetEditor() {
   _archiveUseRich = false;
   _archiveHeavyEditMode = false;
+  _archiveLockedHtml = '';
   const quillWrap = document.getElementById('archive-quill-editor');
   const richEl    = document.getElementById('archive-rich-editor');
   const badge     = document.getElementById('archive-editor-mode-badge');
