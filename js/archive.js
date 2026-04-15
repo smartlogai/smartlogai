@@ -2359,6 +2359,14 @@ function _cleanPasteHtml(html) {
       el.style.wordBreak = 'break-word';
       el.style.whiteSpace = 'normal';
     });
+    // Word/Outlook 표 내 hanging indent(음수 들여쓰기) 제거:
+    // 텍스트가 셀 경계 밖으로 튀어나오는 현상을 방지한다.
+    tmp.querySelectorAll('td p, td div, td li, th p, th div, th li').forEach(el => {
+      const st = (el.getAttribute('style') || '').toLowerCase();
+      if (st.includes('text-indent')) el.style.textIndent = '0';
+      if (st.includes('margin-left')) el.style.marginLeft = '0';
+      if (st.includes('padding-left')) el.style.paddingLeft = '0';
+    });
     tmp.querySelectorAll('th').forEach(el => {
       el.style.background = '#e2e8f0';
       el.style.fontWeight = '700';
