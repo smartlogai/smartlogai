@@ -423,7 +423,7 @@ const PAGE_TITLES = {
   'entry-new-hourly': '업무 등록 (시간제)',
   'entry-new-daily': '업무 등록 (일일)',
   'my-entries': 'My Time Sheet',
-  'my-entries-hourly': '내 타임시트 (시간제)',
+  'my-entries-hourly': 'My Time Sheet',
   'my-entries-daily': '내 타임시트 (일일)',
   'project-deliverables': '프로젝트 산출물',
   approval: 'Approval',
