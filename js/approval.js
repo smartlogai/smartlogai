@@ -11,6 +11,46 @@ let _approvalPage = 1;
 const APPROVAL_PER_PAGE = 20;
 let _approvalModalAtts = []; // 승인 모달 첨부파일 임시 저장 (index 기반 다운로드용)
 
+// 프로젝트 코드 유형(프로젝트 소분류 라벨) 캐시
+let _apvProjCodeTypeMap = null; // key: "MAIN|SUB" -> { sub_category, ... }
+async function _apvEnsureProjCodeTypes() {
+  if (_apvProjCodeTypeMap) return _apvProjCodeTypeMap;
+  _apvProjCodeTypeMap = {};
+  try {
+    const rows = typeof API !== 'undefined' && API.listAllPages
+      ? await API.listAllPages('project_code_types', { limit: 500, maxPages: 10, sort: 'main_code' })
+      : [];
+    (rows || []).forEach((t) => {
+      if (!t) return;
+      const mc = String(t.main_code || '').trim();
+      const sc = String(t.sub_code || '').trim();
+      if (!mc || !sc) return;
+      _apvProjCodeTypeMap[`${mc}|${sc}`] = t;
+    });
+  } catch (e) {
+    console.warn('[approval] project_code_types load failed', e);
+  }
+  return _apvProjCodeTypeMap;
+}
+
+function _apvParseProjectCodeMainSub(projectCode) {
+  const code = String(projectCode || '').trim();
+  if (!code) return { main: '', sub: '' };
+  const parts = code.split('_').map((s) => s.trim()).filter(Boolean);
+  return { main: parts[0] || '', sub: parts[1] || '' };
+}
+
+async function _apvAttachProjectSubcategory(entry) {
+  if (!entry) return;
+  const cat = String(entry.work_category_name || '').trim();
+  const pcode = String(entry.project_code || '').trim();
+  if (cat !== '프로젝트업무' || !pcode) return;
+  const map = await _apvEnsureProjCodeTypes();
+  const { main, sub } = _apvParseProjectCodeMainSub(pcode);
+  const typ = (main && sub) ? map[`${main}|${sub}`] : null;
+  entry._project_subcategory_label = typ ? String(typ.sub_category || '').trim() : '';
+}
+
 function _approvalParseTs(raw) {
   if (raw == null || raw === '') return NaN;
   const num = Number(raw);
@@ -18,6 +58,66 @@ function _approvalParseTs(raw) {
   if (!isNaN(num) && num > 1000000000) return num * 1000;
   const t = new Date(raw).getTime();
   return isNaN(t) ? NaN : t;
+}
+
+function _approvalFmtDateOnly(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function _approvalQuickRangeDates(key) {
+  const end = new Date();
+  end.setHours(0, 0, 0, 0);
+  const start = new Date(end);
+  if (key === 'yesterday') {
+    start.setDate(start.getDate() - 1);
+    end.setDate(end.getDate() - 1);
+  } else if (key === 'week') {
+    start.setDate(start.getDate() - 6);
+  } else if (key === 'month') {
+    start.setDate(start.getDate() - 29);
+  }
+  return { from: _approvalFmtDateOnly(start), to: _approvalFmtDateOnly(end) };
+}
+
+function _approvalSyncRangeButtonState() {
+  const fromVal = (document.getElementById('filter-approval-date-from') || {}).value || '';
+  const toVal = (document.getElementById('filter-approval-date-to') || {}).value || '';
+  document.querySelectorAll('#page-approval [data-approval-range]').forEach((btn) => {
+    const rng = _approvalQuickRangeDates(btn.dataset.approvalRange);
+    btn.classList.toggle('is-active', rng.from === fromVal && rng.to === toVal);
+  });
+}
+
+function _approvalBindQuickRangeButtons() {
+  const fromEl = document.getElementById('filter-approval-date-from');
+  const toEl = document.getElementById('filter-approval-date-to');
+  if (fromEl && !fromEl.dataset.rangeBind) {
+    fromEl.dataset.rangeBind = '1';
+    fromEl.addEventListener('change', _approvalSyncRangeButtonState);
+  }
+  if (toEl && !toEl.dataset.rangeBind) {
+    toEl.dataset.rangeBind = '1';
+    toEl.addEventListener('change', _approvalSyncRangeButtonState);
+  }
+  document.querySelectorAll('#page-approval [data-approval-range]').forEach((btn) => {
+    if (btn.dataset.rangeBind) return;
+    btn.dataset.rangeBind = '1';
+    btn.addEventListener('click', () => {
+      const { from, to } = _approvalQuickRangeDates(btn.dataset.approvalRange);
+      if (fromEl) fromEl.value = from;
+      if (toEl) toEl.value = to;
+      _approvalPage = 1;
+      _approvalSyncRangeButtonState();
+      loadApprovalList();
+    });
+  });
+  _approvalSyncRangeButtonState();
+}
+
+function _approvalSyncFilterLayoutClass(showTeam) {
+  const bar = document.querySelector('#page-approval .filter-bar');
+  if (!bar) return;
+  bar.classList.toggle('approval-layout--team-hidden', !showTeam);
 }
 
 /** 기간 필터 — Admin: 업무일·수정일·등록일 중 하나라도 범위 안이면 통과 (대기 건 누락 완화) */
@@ -130,6 +230,7 @@ async function init_approval() {
   const lastDay  = `${y}-${String(mo + 1).padStart(2, '0')}-${String(new Date(y, mo + 1, 0).getDate()).padStart(2, '0')}`;
   document.getElementById('filter-approval-date-from').value = firstDay;
   document.getElementById('filter-approval-date-to').value   = lastDay;
+  _approvalBindQuickRangeButtons();
 
   _syncApprovalStatusDropdown(session);
 
@@ -184,8 +285,10 @@ async function init_approval() {
       teamEl.appendChild(opt);
     });
     document.getElementById('filter-approval-team-group').style.display = '';
+    _approvalSyncFilterLayoutClass(true);
   } else {
     document.getElementById('filter-approval-team-group').style.display = 'none';
+    _approvalSyncFilterLayoutClass(false);
   }
 
   // 고객사 드롭다운 로드
@@ -196,7 +299,22 @@ async function init_approval() {
     }
   } catch(e) { console.warn('approval client filter load error', e); }
 
-  // 업무 대/소분류 드롭다운 — time_entries에서 수집
+  // 업무 대분류 드롭다운
+  try {
+    const categories = await Master.categories();
+    const catEl = document.getElementById('filter-approval-category');
+    if (catEl) {
+      catEl.innerHTML = '<option value="">전체 대분류</option>';
+      (categories || []).forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.category_name;
+        catEl.appendChild(opt);
+      });
+    }
+  } catch(e) { console.warn('approval category filter load error', e); }
+
+  // 업무 소분류 드롭다운 — time_entries에서 수집
   try {
     const er = { data: await API.listAllPages('time_entries', { filter: 'status=neq.draft', limit: 400, maxPages: 30 }) };
     const entries = (er && er.data) ? er.data : [];
@@ -233,6 +351,7 @@ async function init_approval() {
 }
 
 async function loadApprovalList() {
+  _approvalSyncRangeButtonState();
   const session      = getSession();
   const dateFrom     = document.getElementById('filter-approval-date-from').value;
   const dateTo       = document.getElementById('filter-approval-date-to').value;
@@ -243,7 +362,7 @@ async function loadApprovalList() {
   const clientFilter = (typeof ClientSearchSelect !== 'undefined')
     ? (ClientSearchSelect.getValue('filter-approval-client-wrap')?.id || '')
     : '';
-  const catFilter    = (document.getElementById('filter-approval-category') || {}).value || '';
+  const categoryFilter = (document.getElementById('filter-approval-category') || {}).value || '';
   const subFilter    = (document.getElementById('filter-approval-subcategory') || {}).value || '';
   const status       = document.getElementById('filter-approval-status').value;
 
@@ -298,7 +417,7 @@ async function loadApprovalList() {
     if (clientFilter) entries = entries.filter(e => e.client_id === clientFilter);
 
     // 업무 대분류 필터
-    if (catFilter) entries = entries.filter(e => (e.work_category_name || '') === catFilter);
+    if (categoryFilter) entries = entries.filter(e => String(e.work_category_id || '') === String(categoryFilter));
 
     // 업무 소분류 필터
     if (subFilter) entries = entries.filter(e => (e.work_subcategory_name || '') === subFilter);
@@ -479,7 +598,7 @@ async function loadApprovalList() {
           : `<span style="color:var(--text-muted);font-size:11px">내부</span>`;
 
         // 대분류
-        const catHtml = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12.5px"
+        const categoryHtml = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12px;color:var(--text-secondary)"
               title="${Utils.escHtml(e.work_category_name||'')}">
           ${Utils.escHtml(e.work_category_name||'—')}
         </span>`;
@@ -507,7 +626,7 @@ async function loadApprovalList() {
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12px;color:var(--text-secondary)" title="${Utils.escHtml(e.team_name||'')}">${Utils.escHtml(e.team_name||'—')}</span>
           </td>
           <td style="padding:0 10px">${clientHtml}</td>
-          <td class="td-category" style="padding:0 10px">${catHtml}</td>
+          <td style="padding:0 10px">${categoryHtml}</td>
           <td style="padding:0 10px">${subHtml}</td>
           <td style="text-align:center;padding:0 6px">${fmtDatetime(e.work_start_at)}</td>
           <td style="text-align:center;padding:0 6px">${fmtDatetime(e.work_end_at)}</td>
@@ -537,6 +656,7 @@ function resetApprovalFilter() {
     `${y}-${String(mo+1).padStart(2,'0')}-01`;
   document.getElementById('filter-approval-date-to').value =
     `${y}-${String(mo+1).padStart(2,'0')}-${String(new Date(y,mo+1,0).getDate()).padStart(2,'0')}`;
+  _approvalSyncRangeButtonState();
   _syncApprovalStatusDropdown(session);
   const stEl = document.getElementById('filter-approval-status');
   if (stEl) {
@@ -569,15 +689,9 @@ function isClientConsultEntry(e) {
   return !!(e && e.time_category === 'client');
 }
 
-/** 2차 최종승인 대상: 대분류 기준(일반자문업무, 프로젝트업무만) */
-function needsSecondApproval(entry) {
-  const n = String(entry?.work_category_name || '').trim();
-  return n === '일반자문업무' || n === '프로젝트업무';
-}
-
-/** 2차 최종승인에서 품질평가/자료실 저장을 요구하는지(일반자문업무만) */
-function needsSecondApprovalQuality(entry) {
-  return String(entry?.work_category_name || '').trim() === '일반자문업무';
+/** 일일 시트 — 시간제와 동일 승인 단계이나 수행방식(1차) 생략 */
+function isDailySheetEntry(e) {
+  return String(e && e.sheet_type || '').toLowerCase() === 'daily';
 }
 
 /** 품질평가 + 수행방식 → 전문성 별점/등급 자동 계산
@@ -719,10 +833,16 @@ async function _apvExtractAndMask(attId, idx) {
 // 공통: 업무 내용 HTML 생성
 // ══════════════════════════════════════════════
 function _buildEntryDetailHtml(entry, atts) {
+  const isDaily = isDailySheetEntry(entry);
   const fmtDt = (ms) => {
     if (!ms) return '<span style="color:var(--text-muted)">—</span>';
     const d = new Date(Number(ms));
     return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  };
+  const fmtDateOnly = (ms) => {
+    if (!ms) return '<span style="color:var(--text-muted)">—</span>';
+    const d = new Date(Number(ms));
+    return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`;
   };
   const attHtml = atts.length > 0
     ? atts.map((a, idx) => {
@@ -775,23 +895,43 @@ function _buildEntryDetailHtml(entry, atts) {
       }).join('')
     : '<div style="color:var(--text-muted);font-size:13px;padding:8px 0"><i class="fas fa-folder-open"></i> 첨부된 결과물이 없습니다.</div>';
 
+  const isProjEntry = String(entry.work_category_name || '').trim() === '프로젝트업무' && String(entry.project_code || '').trim() !== '';
+  const showDailyProjBanner = isDaily && String(entry.project_code || '').trim() !== '';
+  const teamLabel = isProjEntry ? '프로젝트 코드' : '수행팀';
+  const teamValue = isProjEntry ? (entry.project_code || '—') : (entry.team_name || '-');
+  const subLabel = isProjEntry ? '프로젝트 소분류' : '소분류';
+  const subValue = isProjEntry ? (entry._project_subcategory_label || '—') : (entry.work_subcategory_name || '');
+
   return `
+    ${showDailyProjBanner ? `<div style="margin-bottom:12px;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;font-size:12px;line-height:1.5">
+      <div style="font-weight:700;color:#166534;margin-bottom:6px"><i class="fas fa-calendar-day" style="margin-right:6px"></i>일일 타임시트</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div><span style="font-size:11px;color:var(--text-muted)">프로젝트 코드</span>
+          <div style="font-weight:600;margin-top:2px">${Utils.escHtml(entry.project_code || '—')}</div></div>
+        <div><span style="font-size:11px;color:var(--text-muted)">프로젝트명</span>
+          <div style="font-weight:600;margin-top:2px">${Utils.escHtml(entry.project_name || '—')}</div></div>
+        <div style="grid-column:1/-1"><span style="font-size:11px;color:var(--text-muted)">투입 기간</span>
+          <div style="font-weight:600;margin-top:2px">${fmtDateOnly(entry.work_start_at)} ~ ${fmtDateOnly(entry.work_end_at)}</div></div>
+        <div style="grid-column:1/-1"><span style="font-size:11px;color:var(--text-muted)">수행장소</span>
+          <div style="font-weight:600;margin-top:2px">${Utils.escHtml(entry.work_location || '—')}</div></div>
+      </div>
+    </div>` : ''}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
       <div><span style="font-size:11px;color:var(--text-muted)">문서번호</span>
         <div style="font-weight:700;margin-top:2px;color:#334155" title="${Utils.escHtml(entry.doc_no || '—')}">${Utils.escHtml(entry.doc_no ? (Utils.formatDocNoShort ? Utils.formatDocNoShort(entry.doc_no) : entry.doc_no) : '—')}</div>
       </div>
       <div><span style="font-size:11px;color:var(--text-muted)">Staff</span><div style="font-weight:600;margin-top:2px">${entry.user_name||'-'}</div></div>
-      <div><span style="font-size:11px;color:var(--text-muted)">수행팀</span><div style="font-weight:600;margin-top:2px">${entry.team_name||'-'}</div></div>
+      <div><span style="font-size:11px;color:var(--text-muted)">${teamLabel}</span><div style="font-weight:600;margin-top:2px">${Utils.escHtml(String(teamValue || '—'))}</div></div>
       <div><span style="font-size:11px;color:var(--text-muted)">고객사</span><div style="font-weight:600;margin-top:2px">${entry.client_name||'내부'}</div></div>
       <div><span style="font-size:11px;color:var(--text-muted)">대분류</span><div style="margin-top:2px">${entry.work_category_name||'-'}</div></div>
-      <div><span style="font-size:11px;color:var(--text-muted)">소분류</span>
+      <div><span style="font-size:11px;color:var(--text-muted)">${subLabel}</span>
         <div style="margin-top:2px">
-          <input id="approval-edit-subcat" type="text" value="${entry.work_subcategory_name||''}" disabled
+          <input id="approval-edit-subcat" type="text" value="${Utils.escHtml(String(subValue || ''))}" disabled
             style="width:100%;font-size:13px;padding:3px 6px;border-radius:6px;border:1px solid transparent;background:#f8fafc;color:var(--text-primary);box-sizing:border-box"/>
         </div>
       </div>
-      <div><span style="font-size:11px;color:var(--text-muted)">시작일시</span><div style="margin-top:2px">${fmtDt(entry.work_start_at)}</div></div>
-      <div><span style="font-size:11px;color:var(--text-muted)">종료일시</span><div style="margin-top:2px">${fmtDt(entry.work_end_at)}</div></div>
+      <div><span style="font-size:11px;color:var(--text-muted)">${isDaily ? '투입 시작일' : '시작일시'}</span><div style="margin-top:2px">${isDaily ? fmtDateOnly(entry.work_start_at) : fmtDt(entry.work_start_at)}</div></div>
+      <div><span style="font-size:11px;color:var(--text-muted)">${isDaily ? '투입 종료일' : '종료일시'}</span><div style="margin-top:2px">${isDaily ? fmtDateOnly(entry.work_end_at) : fmtDt(entry.work_end_at)}</div></div>
       <div><span style="font-size:11px;color:var(--text-muted)">소요시간</span><div style="font-weight:700;color:var(--primary);margin-top:2px">${Utils.formatDurationLong(entry.duration_minutes)}</div></div>
       <div><span style="font-size:11px;color:var(--text-muted)">현재 상태</span><div style="margin-top:2px">${Utils.statusBadge(entry.status)}</div></div>
       <div><span style="font-size:11px;color:var(--text-muted)">승인자</span>
@@ -947,6 +1087,8 @@ async function openApprovalModal(entryId, focusReject = false) {
 
     const entry = await API.get('time_entries', entryId);
     if (!entry) return;
+    // 프로젝트업무: 모달에서 프로젝트 소분류 표시용 라벨 부착
+    await _apvAttachProjectSubcategory(entry);
     _approvalTarget = entry;
 
     const attR = await API.list('attachments', { limit: 500 });
@@ -994,7 +1136,9 @@ async function openApprovalModal(entryId, focusReject = false) {
 
 // ── 1차 승인 모달 (manager용) ────────────────────────────────
 function _openApprovalModal1st(entry, atts, session) {
-  const showPerf = needsSecondApprovalQuality(entry);
+  const showPerf = isClientConsultEntry(entry) && !isDailySheetEntry(entry);
+  const needs2ndClient = isClientConsultEntry(entry)
+    && !String(entry.work_category_name || '').includes('내부');
   const perfBlockHtml = showPerf ? `
     <!-- 수행방식 선택 (필수) — 일반자문(client)만 -->
     <div style="margin-bottom:14px;padding:14px 16px;background:#f8fafc;border-radius:10px;border:1px solid var(--border-light)">
@@ -1042,7 +1186,7 @@ function _openApprovalModal1st(entry, atts, session) {
   document.getElementById('rejectBtn').style.display     = '';
   const approveBtn = document.getElementById('approveBtn');
   approveBtn.style.display  = '';
-  approveBtn.innerHTML      = showPerf
+  approveBtn.innerHTML      = (showPerf || needs2ndClient)
     ? '<i class="fas fa-arrow-right"></i> 1차 승인'
     : '<i class="fas fa-check"></i> 승인';
   approveBtn.onclick        = () => processApproval1st('pre_approved');
@@ -1069,8 +1213,7 @@ function _openApprovalModal1st(entry, atts, session) {
 // ── 2차 승인 모달 (director용) ────────────────────────────────
 function _openApprovalModal2nd(entry, atts, session) {
   const isManagerDirect = entry.status === 'submitted'; // manager 본인 건
-  const showMgrPerf = isManagerDirect && needsSecondApprovalQuality(entry); // 수행방식 확인은 일반자문업무만
-  const showQuality = needsSecondApprovalQuality(entry);
+  const showMgrPerf = isManagerDirect && isClientConsultEntry(entry) && !isDailySheetEntry(entry); // 2차는 client만 — 방어적 분기
   const perfType = entry.performance_type || '';
   const preApproverBanner = entry.pre_approver_name
     ? `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;
@@ -1276,7 +1419,7 @@ async function processApproval1st(decision) {
   }
 
   const perfType = document.querySelector('input[name="performance_type"]:checked')?.value || null;
-  if (decision === 'pre_approved' && needs2nd && needs2ndQuality && !perfType) {
+  if (decision === 'pre_approved' && needsSecondApproval && !perfType && !isDailySheetEntry(entry0)) {
     const pw = document.getElementById('perf-warn');
     if (pw) pw.style.display = '';
     document.querySelectorAll('.perf-btn').forEach(b => { b.style.border = '2px solid #ef4444'; });
@@ -1310,7 +1453,7 @@ async function processApproval1st(decision) {
         pre_approver_id:   session.id,
         pre_approver_name: session.name || '',
         pre_approved_at:   Date.now(),
-        ...(needs2ndQuality ? { performance_type: perfType } : {}),
+        performance_type:  perfType || '',
       };
     } else {
       // 내부업무 등: 1차에서 곧바로 최종 승인 (수행방식·pre_approved 미사용)
@@ -1424,7 +1567,8 @@ async function processApproval2nd(decision) {
   const mgrClient2nd = isManagerDirect && requireQuality;
   const qRating  = document.querySelector('input[name="quality_rating"]:checked')?.value || null;
   const perfType = mgrClient2nd
-    ? (document.querySelector('input[name="performance_type"]:checked')?.value || null)
+    ? (document.querySelector('input[name="performance_type"]:checked')?.value
+      || (isDailySheetEntry(_approvalTarget) ? 'independent' : null))
     : (_approvalTarget.performance_type || 'independent');
   const shouldArchive = requireQuality ? (document.getElementById('archive-save-check')?.checked || false) : false;
 
@@ -1435,7 +1579,7 @@ async function processApproval2nd(decision) {
       setTimeout(() => document.querySelectorAll('.quality-btn[data-group="quality_rating"]').forEach(b => { b.style.border = '2px solid #e5e7eb'; }), 1800);
       return;
     }
-    if (mgrClient2nd && !perfType) {
+    if (mgrClient2nd && !perfType && !isDailySheetEntry(_approvalTarget)) {
       Toast.warning('수행방식을 선택해주세요.');
       return;
     }

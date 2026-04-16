@@ -91,6 +91,10 @@ const Session = {
     - 대시보드, Approval 열람, 분석 — 소속 단위 범위 내
     - 자문 자료실 이용
 
+  top_mgr:
+    - 사업부장·대표·경영지원 등 시스템 상위 권한 묶음 (2차 승인 라인은 director 유지)
+    - director에 준하는 소속 범위 열람·분석·기준정보(조직 마스터 제외)
+
   admin:
     - 시스템 전체 관리 (등록/수정/삭제/설정)
     - Staff 업무 기록(전체 타임시트·상태 필터)로 열람 (승인 처리는 Manager/Director 역할)
@@ -99,6 +103,7 @@ const Session = {
 const ROLE_LABEL = {
   admin:    'Admin',       // 테이블 배지용 짧은 표기
   director: 'Director',   // 본부장 — 2차 최종 승인
+  top_mgr:  'Top Mgr',    // 사업부장·대표·경영지원 등 상위 권한
   manager:  'Manager',    // 고객지원팀장 — 1차 승인
   staff:    'Staff',      // 담당자 — 타임시트 작성
 };
@@ -106,12 +111,14 @@ const ROLE_LABEL = {
 const ROLE_LABEL_FULL = {
   admin:    'Administrator',
   director: '본부장 (Director)',
+  top_mgr:  '경영·사업 (Top Mgr)',
   manager:  '팀장 (Manager)',
   staff:    'Staff',
 };
 const ROLE_COLOR = {
   admin:    'badge-purple',
   director: 'badge-orange',
+  top_mgr:  'badge-amber',
   manager:  'badge-blue',
   staff:    'badge-green',
 };
@@ -119,14 +126,24 @@ const ROLE_COLOR = {
 const Auth = {
   isAdmin:    (s) => s && s.role === 'admin',
   isDirector: (s) => s && s.role === 'director',
+  isTopMgr:   (s) => s && s.role === 'top_mgr',
   isManager:  (s) => s && s.role === 'manager',
   isStaff:    (s) => s && s.role === 'staff',
+
+  /** 프로젝트 산출물 열람 (DB can_view_project_deliverables + 세션) */
+  canViewProjectDeliverables: (s) => !!(s && s.can_view_project_deliverables),
+
+  /** 비용·인건비·배부 성격 UI — admin 제외, director·top_mgr 허용 */
+  canViewCostFinancials: (s) => !!(s && (s.role === 'director' || s.role === 'top_mgr')),
+
+  /** 인건비 설정·매출 업로드 등 (기존 admin 전용 버튼 → 경영층으로 이전) */
+  canManageLaborCostSettings: (s) => !!(s && (s.role === 'director' || s.role === 'top_mgr')),
 
   // ★ 승인자 지정 여부 (staff에만 의미 있음, manager 이상은 true 반환)
   hasApprover: (s) => {
     if (!s) return false;
     if (s.role === 'staff') return !!(s.approver_id);
-    return true; // manager/director/admin은 항상 true
+    return true; // manager/director/top_mgr/admin 등
   },
 
   // 타임시트 작성: 승인자 지정된 staff OR 타임시트 대상자인 manager
@@ -136,6 +153,16 @@ const Auth = {
     if (s.role === 'manager') return s.is_timesheet_target !== false;
     return false;
   },
+
+  /** Hourly 시트 메뉴·진입 (DB timesheet_hourly, 없으면 is_timesheet_target) */
+  timesheetHourlyEnabled: (s) => {
+    if (!s) return false;
+    if (s.timesheet_hourly === false) return false;
+    if (s.timesheet_hourly === true) return true;
+    return s.is_timesheet_target !== false;
+  },
+  /** Daily 시트 메뉴·진입 — 명시 true 일 때만 */
+  timesheetDailyEnabled: (s) => !!(s && s.timesheet_daily === true),
 
   // ── 승인 권한 분리 ──────────────────────────────────────
   // 1차 승인: manager (수행방식 확인 + 형식 검증)
@@ -148,17 +175,20 @@ const Auth = {
   // 전체 열람 (필터 없음): admin만
   canViewAll: (s) => s && s.role === 'admin',
 
-  // 소속 단위 열람: manager + director + admin
-  canViewDeptScope: (s) => s && (s.role === 'manager' || s.role === 'director' || s.role === 'admin'),
+  // 소속 단위 열람: manager + director + top_mgr + admin
+  canViewDeptScope: (s) => s && (s.role === 'manager' || s.role === 'director' || s.role === 'top_mgr' || s.role === 'admin'),
 
   // 마스터 관리 (조직구성·직원): admin만
   canManageMaster: (s) => s && s.role === 'admin',
 
-  // 기준정보 관리 (고객사·업무분류): admin + director + manager
-  canManageRefData: (s) => s && (s.role === 'admin' || s.role === 'director' || s.role === 'manager'),
+  // 기준정보 관리 (고객사·업무분류): admin + director + top_mgr + manager
+  canManageRefData: (s) => s && (s.role === 'admin' || s.role === 'director' || s.role === 'top_mgr' || s.role === 'manager'),
 
-  // 분석 열람: director + admin
-  canViewAnalysis: (s) => s && (s.role === 'director' || s.role === 'admin'),
+  // 프로젝트 등록 (팀장 이상): 기준정보와 동일
+  canManageProjectRegister: (s) => s && (s.role === 'admin' || s.role === 'director' || s.role === 'top_mgr' || s.role === 'manager'),
+
+  // 분석 열람: manager + director + top_mgr + admin
+  canViewAnalysis: (s) => s && (s.role === 'director' || s.role === 'top_mgr' || s.role === 'admin' || s.role === 'manager'),
 
   // 자문 자료실: 모든 역할
   canViewArchive: (s) => !!s,
@@ -179,6 +209,7 @@ const Auth = {
     if (Auth.canViewAll(s)) return {};    // admin: 전체
     if (s.role === 'manager')  return {}; // manager: 전체 가져와서 JS 필터
     if (s.role === 'director') return {}; // director: 전체 가져와서 JS 필터
+    if (s.role === 'top_mgr')  return {}; // top_mgr: director와 동일 패턴
     return { user: s.id };               // staff: 본인만
   },
 };
@@ -444,6 +475,15 @@ const API = {
     } catch (_) {}
     console.error(`[API.delete] 실패 (${table}/${id}):`, errMsg, errBody);
     throw new Error(errMsg);
+  },
+
+  /** Supabase PostgREST RPC (예: fn_allocate_project_code) */
+  async rpc(fn, body = {}) {
+    const url = `${SUPABASE_URL}/rest/v1/rpc/${fn}`;
+    return this._fetch(url, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
   },
 };
 
@@ -876,6 +916,20 @@ const Utils = {
 // ─────────────────────────────────────────────
 // 전역 캐시 (★ TTL 연장: 30초 → 3분, 마스터 데이터는 5분)
 // ─────────────────────────────────────────────
+/** 동일 id 행이 중복될 때(캐시·API 이중 등) 목록용으로 한 건만 유지 */
+function _uniqMasterRowsById(rows) {
+  const seen = new Set();
+  const out = [];
+  for (const row of rows || []) {
+    if (!row || row.id == null) continue;
+    const k = String(row.id);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(row);
+  }
+  return out;
+}
+
 const Cache = {
   _store: {},
   // ★ 진행 중인 fetch 요청 추적 (중복 요청 방지: Request Deduplication)
@@ -934,7 +988,17 @@ const Master = {
     return Cache.get('categories', async () => {
       try {
         const r = await API.list('work_categories', { limit: 200 });
-        return (r && r.data) ? r.data.sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)) : [];
+        let rows = _uniqMasterRowsById((r && r.data) ? r.data : []);
+        rows.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+        const seenName = new Set();
+        rows = rows.filter((c) => {
+          const nm = String(c.category_name || '').trim();
+          if (!nm) return true;
+          if (seenName.has(nm)) return false;
+          seenName.add(nm);
+          return true;
+        });
+        return rows;
       } catch(e) { console.warn('[Master.categories]', e.message); return []; }
     }, MASTER_TTL);
   },
@@ -942,7 +1006,8 @@ const Master = {
     return Cache.get('subcategories', async () => {
       try {
         const r = await API.list('work_subcategories', { limit: 500 });
-        return (r && r.data) ? r.data.sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)) : [];
+        const rows = _uniqMasterRowsById((r && r.data) ? r.data : []);
+        return rows.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
       } catch(e) { console.warn('[Master.subcategories]', e.message); return []; }
     }, MASTER_TTL);
   },
@@ -1367,18 +1432,39 @@ const UserSearchSelect = (() => {
 // 사이드바 내비게이션
 // ─────────────────────────────────────────────
 function navigateTo(page) {
-  // 모든 섹션 숨김
+  const SECTION_ALIAS = {
+    'entry-new-hourly': 'entry-new',
+    'entry-new-daily': 'entry-new',
+    'my-entries-hourly': 'my-entries',
+    'my-entries-daily': 'my-entries',
+  };
+  const sectionPage = SECTION_ALIAS[page] || page;
+
+  if (page === 'entry-new-hourly' || page === 'entry-new-daily') {
+    try {
+      sessionStorage.setItem('entry_sheet_type', page === 'entry-new-daily' ? 'daily' : 'hourly');
+    } catch (_) {}
+  } else if (page === 'my-entries-hourly' || page === 'my-entries-daily') {
+    try {
+      sessionStorage.setItem('my_entries_sheet_type', page === 'my-entries-daily' ? 'daily' : 'hourly');
+    } catch (_) {}
+  } else if (page === 'my-entries') {
+    try {
+      const sess = typeof getSession === 'function' ? getSession() : null;
+      if (sess && Auth.canViewAll(sess)) sessionStorage.removeItem('my_entries_sheet_type');
+      else sessionStorage.setItem('my_entries_sheet_type', 'hourly');
+    } catch (_) {}
+  } else if (page === 'entry-new') {
+    try { sessionStorage.setItem('entry_sheet_type', 'hourly'); } catch (_) {}
+  }
+
   document.querySelectorAll('.page-section').forEach(s => s.classList.remove('active'));
-  // 해당 섹션 표시
-  const section = document.getElementById(`page-${page}`);
+  const section = document.getElementById(`page-${sectionPage}`);
   if (section) section.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(item => {
     item.classList.toggle('active', item.dataset.page === page);
   });
-  // 모바일 사이드바 닫기
   document.querySelector('.sidebar')?.classList.remove('open');
-
-  // 페이지별 초기화 (main.js의 PAGE_INIT_MAP에서 처리)
 }
 
 function toggleSidebar() {
@@ -1418,15 +1504,24 @@ function setupMenuByRole(session) {
   const isMaster             = Auth.canManageMaster(session);   // admin only
 
   // ── Time Sheet 섹션 ────────────────────────────────────────
-  // 승인자 있는 staff OR 타임시트 대상자 manager
   const isManagerTimesheetTarget = Auth.isManager(session) && session.is_timesheet_target !== false;
-  const showTS = isStaffWithApprover || isManagerTimesheetTarget;
-  const tsSection   = document.getElementById('menu-timesheet-section');
-  const entryMenu   = document.getElementById('menu-entry-new');
-  const myEntryMenu = document.getElementById('menu-my-entries');
-  if (tsSection)    tsSection.style.display   = showTS ? '' : 'none';
-  if (entryMenu)    entryMenu.style.display    = showTS ? '' : 'none';
-  if (myEntryMenu)  myEntryMenu.style.display  = showTS ? '' : 'none';
+  const baseTs = isStaffWithApprover || isManagerTimesheetTarget;
+  const hourlyOk = Auth.timesheetHourlyEnabled(session);
+  const dailyOk = Auth.timesheetDailyEnabled(session);
+  const showTS = baseTs && (hourlyOk || dailyOk);
+  const tsSection = document.getElementById('menu-timesheet-section');
+  if (tsSection) tsSection.style.display = showTS ? '' : 'none';
+  const mHourlyNew = document.getElementById('menu-entry-new-hourly');
+  const mDailyNew = document.getElementById('menu-entry-new-daily');
+  const mHourlyMy = document.getElementById('menu-my-entries-hourly');
+  const mDailyMy = document.getElementById('menu-my-entries-daily');
+  if (mHourlyNew) mHourlyNew.style.display = showTS && hourlyOk ? '' : 'none';
+  if (mDailyNew) mDailyNew.style.display = showTS && dailyOk ? '' : 'none';
+  if (mHourlyMy) mHourlyMy.style.display = showTS && hourlyOk ? '' : 'none';
+  if (mDailyMy) mDailyMy.style.display = showTS && dailyOk ? '' : 'none';
+
+  const delivMenu = document.getElementById('menu-deliverables');
+  if (delivMenu) delivMenu.style.display = Auth.canViewProjectDeliverables(session) ? '' : 'none';
 
   // ── Management 섹션 타이틀 ─────────────────────────────────
   const mgmtSection = document.getElementById('menu-management-section');

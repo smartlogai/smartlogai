@@ -247,7 +247,7 @@ async function openDeptModal(id = '') {
     dirEl.innerHTML = '<option value="">사업부장 선택 (미지정)</option>';
     const allDirUsers = await Master.users();
     allDirUsers
-      .filter(u => (u.role === 'director' || u.role === 'admin') && u.is_active !== false)
+      .filter(u => (u.role === 'director' || u.role === 'top_mgr' || u.role === 'admin') && u.is_active !== false)
       .forEach(u => {
         const o = new Option(u.name, u.id);
         o.dataset.name = u.name;
@@ -367,7 +367,7 @@ async function _fillHqManagerSelect(selectedId = '') {
   // ★ Master 캐시 사용
   const allMgrUsers = await Master.users();
   allMgrUsers
-    .filter(u => (u.role === 'manager' || u.role === 'director' || u.role === 'admin') && u.is_active !== false)
+    .filter(u => (u.role === 'manager' || u.role === 'director' || u.role === 'top_mgr' || u.role === 'admin') && u.is_active !== false)
     .forEach(u => {
       const o = new Option(`${u.name} (${ROLE_LABEL_FULL[u.role] || u.role})`, u.id);
       o.dataset.name = u.name;
@@ -745,7 +745,7 @@ async function _fillCsTeamManagerByHq(hqId, selectedMgrId) {
   // 전체 Manager/Director 목록 로드 ★ Master 캐시 사용
   const allTeamMgrUsers = await Master.users();
   const managers = allTeamMgrUsers.filter(u =>
-    (u.role === 'manager' || u.role === 'director') && u.is_active !== false
+    (u.role === 'manager' || u.role === 'director' || u.role === 'top_mgr') && u.is_active !== false
   );
 
   mgrEl.innerHTML = '<option value="">팀장 선택 (미지정)</option>';

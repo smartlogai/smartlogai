@@ -47,7 +47,9 @@ window.addEventListener('DOMContentLoaded', async () => {
         reviewer2_id:   freshUser.reviewer2_id   || _session.reviewer2_id   || '',
         reviewer2_name: freshUser.reviewer2_name || _session.reviewer2_name || '',
         // 타임시트 대상자 여부 갱신 (신규 필드) — null/undefined 는 false로 처리
-        is_timesheet_target: freshUser.is_timesheet_target === true,
+        is_timesheet_target: freshUser.is_timesheet_target !== false,
+        timesheet_hourly: freshUser.timesheet_hourly !== false,
+        timesheet_daily: freshUser.timesheet_daily === true,
         // 역할도 최신 값 사용 — DB 값이 반드시 우선 (null·빈값이면 기존 세션 유지)
         role:      (freshUser.role && freshUser.role.trim()) ? freshUser.role : _session.role,
         is_active: freshUser.is_active !== undefined ? freshUser.is_active : _session.is_active,
@@ -418,34 +420,48 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
 const PAGE_TITLES = {
   dashboard: 'Dashboard',
   'entry-new': 'New Entry',
+  'entry-new-hourly': '업무 등록 (시간제)',
+  'entry-new-daily': '업무 등록 (일일)',
   'my-entries': 'My Time Sheet',
+  'my-entries-hourly': '내 타임시트 (시간제)',
+  'my-entries-daily': '내 타임시트 (일일)',
+  'project-deliverables': '프로젝트 산출물',
   approval: 'Approval',
   analysis: 'Analysis',
   archive: '자문 자료실',
   'master-teams': 'Teams',
   'master-clients': 'Clients',
   'master-categories': 'Categories',
+  'master-project-codes': '프로젝트 Code 관리',
   'master-org': '사업부·본부 관리',
   'master-departments': '사업부 관리',
   'master-csteams': '고객지원팀 관리',
   users: 'Staff 관리',
+  'project-register': '프로젝트 등록 (Create Project)',
 };
 
 // page init 함수 매핑
 const PAGE_INIT_MAP = {
   'dashboard': 'init_dashboard',
   'entry-new': 'init_entry_new',
+  'entry-new-hourly': 'init_entry_new',
+  'entry-new-daily': 'init_entry_new',
   'my-entries': 'init_my_entries',
+  'my-entries-hourly': 'init_my_entries',
+  'my-entries-daily': 'init_my_entries',
+  'project-deliverables': 'init_project_deliverables',
   'approval': 'init_approval',
   'analysis': 'init_analysis',
   'archive': 'init_archive',
   'master-teams': 'init_master_teams',
   'master-clients': 'init_master_clients',
   'master-categories': 'init_master_categories',
+  'master-project-codes': 'init_master_project_codes',
   'master-org': 'init_master_org',
   'master-departments': 'init_master_departments',
   'master-csteams': 'init_master_csteams',
   'users': 'init_users',
+  'project-register': 'init_project_register',
 };
 
 // ─────────────────────────────────────────────
@@ -456,10 +472,12 @@ const _LAZY_SCRIPTS = {
   'master-teams'      : 'js/master.js?v=20260405b',
   'master-clients'    : 'js/master.js?v=20260405b',
   'master-categories' : 'js/master.js?v=20260405b',
+  'master-project-codes': 'js/project-code-master.js?v=20260413a',
   'master-org'        : 'js/master.js?v=20260405b',
   'master-departments': 'js/master.js?v=20260405b',
   'master-csteams'    : 'js/master.js?v=20260405b',
   'users'             : 'js/users.js?v=20260405b',
+  'project-register'  : 'js/project-register.js?v=20260413typelock2',
 };
 const _lazyLoaded = {};  // 이미 로드된 파일 추적
 

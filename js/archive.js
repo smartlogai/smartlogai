@@ -1126,7 +1126,7 @@ async function openArchiveDetail(refId) {
     `;
     // ── 하단 버튼: 관리자/사업부장만 강제삭제 버튼 표시 ──
     const _session = Session.get();
-    const canForceDelete = _session && (_session.role === 'admin' || _session.role === 'director');
+    const canForceDelete = _session && (_session.role === 'admin' || _session.role === 'director' || _session.role === 'top_mgr');
 
     document.getElementById('archiveDetailFooter').innerHTML = `
       <button class="btn btn-ghost" onclick="closeModal('archiveDetailModal')">

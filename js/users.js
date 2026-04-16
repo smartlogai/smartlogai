@@ -6,7 +6,9 @@
             cs_team_id, cs_team_name, team_name,
             approver_id, approver_name,       ← 1차 승인자 (Manager/팀장) — staff 전용
             reviewer2_id, reviewer2_name,     ← 2차 승인자 (Director/본부장) — staff·manager 공통
-            role, is_active, is_timesheet_target
+            role, job_title, can_view_project_deliverables,
+            is_active, is_timesheet_target,
+            timesheet_hourly, timesheet_daily
    - departments: id, department_name
    - headquarters: id, hq_name, dept_id, dept_name
    - cs_teams: id, cs_team_name, dept_id, dept_name, hq_id, hq_name
@@ -33,11 +35,14 @@ function _onUserRoleChange(role) {
   const csTeamWrap = document.getElementById('csteam-select-wrap');
   if (csTeamWrap) csTeamWrap.style.display = isStaffLike ? '' : 'none';
 
-  // 타임시트 대상자 체크박스: staff + manager 모두 표시
-  const tsTargetWrap  = document.getElementById('timesheet-target-wrap');
-  const tsTargetInput = document.getElementById('user-timesheet-target-input');
+  const tsTargetWrap = document.getElementById('timesheet-target-wrap');
+  const tsH = document.getElementById('user-timesheet-hourly-input');
+  const tsD = document.getElementById('user-timesheet-daily-input');
   if (tsTargetWrap) tsTargetWrap.style.display = isStaffLike ? '' : 'none';
-  if (tsTargetInput && !isStaffLike) tsTargetInput.checked = false;
+  if (!isStaffLike) {
+    if (tsH) tsH.checked = false;
+    if (tsD) tsD.checked = false;
+  }
 
   // 사업부/본부는 항상 표시
 }
@@ -387,8 +392,14 @@ async function openUserModal(userId = '') {
   document.getElementById('user-pw-confirm-input').value = '';
   document.getElementById('user-role-input').value       = 'staff';
   document.getElementById('user-active-input').value     = 'true';
-  const tsTargetEl = document.getElementById('user-timesheet-target-input');
-  if (tsTargetEl) tsTargetEl.checked = true; // 신규 직원 기본값: 타임시트 대상
+  const jobTitleEl = document.getElementById('user-job-title-input');
+  if (jobTitleEl) jobTitleEl.value = '';
+  const delivEl = document.getElementById('user-deliverables-view-input');
+  if (delivEl) delivEl.checked = false;
+  const tsH0 = document.getElementById('user-timesheet-hourly-input');
+  const tsD0 = document.getElementById('user-timesheet-daily-input');
+  if (tsH0) tsH0.checked = true;
+  if (tsD0) tsD0.checked = false;
   document.getElementById('userModalError').style.display = 'none';
   _onUserRoleChange('staff');
   _resetAffiliationUI();
@@ -431,9 +442,12 @@ async function openUserModal(userId = '') {
         // 2차 승인자 (staff·manager 공통)
         await fillReviewer2Select(userId, user.reviewer2_id || '');
 
-        // 타임시트 기록 대상 여부 (staff·manager 공통, null/undefined → true 기본값)
-        const tsEl = document.getElementById('user-timesheet-target-input');
-        if (tsEl) tsEl.checked = (user.is_timesheet_target !== false);
+        const tsH = document.getElementById('user-timesheet-hourly-input');
+        const tsD = document.getElementById('user-timesheet-daily-input');
+        if (tsH) tsH.checked = user.timesheet_hourly !== false;
+        if (tsD) tsD.checked = user.timesheet_daily === true;
+        if (jobTitleEl) jobTitleEl.value = user.job_title || '';
+        if (delivEl) delivEl.checked = user.can_view_project_deliverables === true;
       }
     } catch(e) { console.error(e); }
   } else {
@@ -458,6 +472,7 @@ async function saveUser() {
   const pwConfirm = document.getElementById('user-pw-confirm-input').value;
   const role    = document.getElementById('user-role-input').value;
   const isActive = document.getElementById('user-active-input').value === 'true';
+  const isStaffLike = role === 'staff' || role === 'manager';
 
   const approverEl   = document.getElementById('user-approver-input');
   const approverId   = approverEl ? approverEl.value : '';
@@ -471,9 +486,16 @@ async function saveUser() {
     ? (reviewer2El.options[reviewer2El.selectedIndex]?.dataset.name || '')
     : '';
 
-  // 타임시트 기록 대상 여부
-  const tsTargetInputEl = document.getElementById('user-timesheet-target-input');
-  const isTimesheetTarget = tsTargetInputEl ? tsTargetInputEl.checked : true;
+  const tsHourlyEl = document.getElementById('user-timesheet-hourly-input');
+  const tsDailyEl = document.getElementById('user-timesheet-daily-input');
+  const tsHourly = !!(tsHourlyEl && tsHourlyEl.checked);
+  const tsDaily = !!(tsDailyEl && tsDailyEl.checked);
+  const isTimesheetTarget = tsHourly || tsDaily;
+
+  const jobTitleInput = document.getElementById('user-job-title-input');
+  const jobTitle = jobTitleInput ? String(jobTitleInput.value || '').trim() : '';
+  const delivInput = document.getElementById('user-deliverables-view-input');
+  const canViewDeliverables = !!(delivInput && delivInput.checked);
 
   const showErr = (msg) => {
     document.getElementById('userModalErrorText').textContent = msg;
@@ -487,6 +509,10 @@ async function saveUser() {
   if (pw && pw.length < 8) { showErr('비밀번호는 8자 이상이어야 합니다.'); return; }
   if (pw && !pwConfirm) { showErr('비밀번호 확인란을 입력하세요.'); return; }
   if (pw && pw !== pwConfirm) { showErr('비밀번호가 일치하지 않습니다.'); return; }
+  if (isStaffLike && !tsHourly && !tsDaily) {
+    showErr('Hourly 또는 Daily Time Sheet 중 최소 하나를 선택하세요.');
+    return;
+  }
 
   // 이메일 중복 체크 (신규만)
   if (!id) {
@@ -526,8 +552,12 @@ async function saveUser() {
       name,
       email,
       role,
+      job_title: jobTitle,
+      can_view_project_deliverables: canViewDeliverables,
       is_active:            isActive,
       is_timesheet_target:  isTimesheetTarget,
+      timesheet_hourly:     tsHourly,
+      timesheet_daily:      tsDaily,
       approver_id:          approverId,
       approver_name:        approverName,
       reviewer2_id:         reviewer2Id,
@@ -709,6 +739,7 @@ async function uploadUsers() {
 
     const roleMap = {
       '담당자': 'staff', '팀장': 'manager', '책임자': 'director', '관리자': 'admin',
+      '경영': 'top_mgr', 'top_mgr': 'top_mgr', 'topmgr': 'top_mgr',
       'staff': 'staff', 'manager': 'manager', 'director': 'director',
       'admin': 'admin', 'administrator': 'admin',
     };
@@ -831,7 +862,7 @@ async function downloadUserTemplate() {
     ['A: 이름',    '직원 실명',                                                          '홍길동'],
     ['B: 이메일',  '로그인 이메일 (이미 등록된 경우 권한·승인자만 업데이트)',              'hong@company.com'],
     ['C: 비밀번호','8자 이상 (기존 직원 업데이트 시 비워도 됨)',                           'hanjoo1234'],
-    ['D: 권한',    'staff(담당자) / manager(팀장) / director(관리자) / admin(시스템 관리자)', 'staff'],
+    ['D: 권한',    'staff / manager / director / top_mgr / admin', 'staff'],
     ['E: 승인자',  '승인자의 이메일 주소 (빈칸이면 승인자 변경 안 함)',                   'kim@company.com'],
     ['', '※ 같은 파일 내 다른 직원을 승인자로 지정 가능', ''],
     ['', '※ E열 승인자는 시스템에 이미 등록된 계정이어야 합니다', ''],
@@ -842,5 +873,5 @@ async function downloadUserTemplate() {
   XLSX.utils.book_append_sheet(wb, ws,      '직원목록');
   XLSX.utils.book_append_sheet(wb, wsGuide, '작성안내');
   xlsxDownload(wb, '직원_업로드_양식.xlsx');
-  Toast.info('양식을 다운로드했습니다. D열 권한: staff/manager/director/admin, E열 승인자 이메일을 입력하세요.');
+  Toast.info('양식을 다운로드했습니다. D열 권한: staff/manager/director/top_mgr/admin, E열 승인자 이메일을 입력하세요.');
 }

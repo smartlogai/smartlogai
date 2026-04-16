@@ -61,6 +61,16 @@ npx --yes serve . -l 8080
 
 **데이터 연동**: 로컬(`localhost`)에서는 [`js/supabase.dev.js`](js/supabase.dev.js)에 개발용 Supabase URL·anon 키가 있어야 API가 동작합니다. 없으면 [`js/supabase.dev.example.js`](js/supabase.dev.example.js)를 복사해 만듭니다. (자세한 내용은 아래 “로컬 개발” 절 참고)
 
+### 빠른 시작 (Windows PowerShell)
+
+```powershell
+.\tools\start-local-dev.ps1
+```
+
+- `js/supabase.dev.js`가 없으면 자동으로 예시 파일을 복사하고 안내 메시지를 출력합니다.
+- 개발 중에는 배포 URL이 아니라 `localhost`에서 먼저 확인하세요.
+- 상세 워크플로우: [`docs/LOCAL_DEV_WORKFLOW.md`](docs/LOCAL_DEV_WORKFLOW.md)
+
 ## 개발용 체크(권장)
 
 ### JS 문법 체크 (화면 깨짐/탭 클릭 불가 사전 방지)

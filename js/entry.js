@@ -640,6 +640,355 @@ function updateDescCount(el) {
 }
 
 // ─────────────────────────────────────────────
+// 시트 유형 (시간제 / 일일) — sessionStorage + DB sheet_type
+// ─────────────────────────────────────────────
+function entryFormSheetType() {
+  try {
+    return sessionStorage.getItem('entry_sheet_type') === 'daily' ? 'daily' : 'hourly';
+  } catch (_) {}
+  return 'hourly';
+}
+
+function myEntriesSheetFilter(session) {
+  if (session && Auth.canViewAll(session)) return null;
+  try {
+    const v = sessionStorage.getItem('my_entries_sheet_type');
+    if (v === 'daily' || v === 'hourly') return v;
+  } catch (_) {}
+  return 'hourly';
+}
+
+function _rowSheetType(e) {
+  return e && e.sheet_type === 'daily' ? 'daily' : 'hourly';
+}
+
+/** 일일 시트 대분류 (통관 제외) */
+const ENTRY_DAILY_CATEGORY_ALLOW = ['프로젝트업무', '일반자문업무', '회사내부업무'];
+let _dailyOpenProjectRows = [];
+let _dailyOpenProjectListFiltered = [];
+
+function entryDailyCategoryName() {
+  const catEl = document.getElementById('entry-category');
+  if (!catEl || catEl.selectedIndex < 0) return '';
+  return (catEl.options[catEl.selectedIndex]?.textContent || '').trim();
+}
+
+/** 회사내부·일일 프로젝트: 수행팀 드롭다운 없이 저장(프로필 소속팀·본부로 처리, 비용배분 미사용) */
+function _entryOmitTeamFromFormPick(catNameTrim) {
+  const nm = String(catNameTrim || '').trim();
+  if (nm === '회사내부업무') return true;
+  if (entryFormSheetType() === 'daily' && nm === '프로젝트업무') return true;
+  return false;
+}
+
+/** 일일 시트: 저장·검증용 time_category (대분류 이름 우선 — DB category_type이 client로 잘못된 경우 보정) */
+function _entryEffectiveTimeCategory(catType, catName) {
+  const nm = String(catName || '').trim();
+  if (entryFormSheetType() !== 'daily') return catType || 'client';
+  if (nm === '일반자문업무') return 'client';
+  if (nm === '프로젝트업무' || nm === '회사내부업무') return 'internal';
+  return catType || 'client';
+}
+
+function _entryRegisteredProjectOngoing(r) {
+  if (!r || String(r.registration_status || '').trim().toLowerCase() !== 'approved') return false;
+  const pe = r.period_end;
+  if (pe == null || String(pe).trim() === '') return true;
+  const endDay = String(pe).slice(0, 10);
+  const endMs = new Date(`${endDay}T23:59:59`).getTime();
+  const startToday = new Date();
+  startToday.setHours(0, 0, 0, 0);
+  return endMs >= startToday.getTime();
+}
+
+/** 일 단위: 시작일~종료일(포함) 캘린더 일수 */
+function _entryInclusiveCalendarDays(ymdFrom, ymdTo) {
+  const a = new Date(`${String(ymdFrom || '').trim()}T12:00:00`);
+  const b = new Date(`${String(ymdTo || '').trim()}T12:00:00`);
+  if (isNaN(a.getTime()) || isNaN(b.getTime())) return 0;
+  if (String(ymdFrom).trim() > String(ymdTo).trim()) return 0;
+  const diff = Math.round((b.getTime() - a.getTime()) / 86400000);
+  return diff + 1;
+}
+
+/** 수정 진입 시: 종일(00:00~23:59대) 구간이면 일 단위, 그 외는 시간 단위 (프로젝트업무만 일 단위 UI) */
+function _inferDailyPeriodModeFromEntry(entry) {
+  const cat = (entry.work_category_name || '').trim();
+  if (cat && cat !== '프로젝트업무') return 'by_hour';
+  if (!entry || entry.work_start_at == null || entry.work_end_at == null) return 'by_day_span';
+  const sd = new Date(Number(entry.work_start_at));
+  const ed = new Date(Number(entry.work_end_at));
+  const sMin = sd.getHours() * 60 + sd.getMinutes() + sd.getSeconds() / 60;
+  const eMin = ed.getHours() * 60 + ed.getMinutes() + ed.getSeconds() / 60;
+  const endLooksEndOfDay = eMin >= 23 * 60 + 59;
+  const startMidnight = sMin === 0;
+  if (startMidnight && endLooksEndOfDay) return 'by_day_span';
+  return 'by_hour';
+}
+
+function _entryDailyPeriodModeValue() {
+  const sel = document.getElementById('entry-daily-period-mode-select');
+  let v = sel && sel.value;
+  if (v === 'by_day' || v === 'by_week') v = 'by_day_span';
+  if (v === 'by_hour' || v === 'by_day_span') return v;
+  return 'by_day_span';
+}
+
+/** 일일 시트: 일 단위(기간×8h) 선택 UI는 프로젝트업무만. 그 외 대분류는 시간제와 동일하게 항상 시간 단위 */
+function _entryDailyEffectivePeriodMode() {
+  if (entryFormSheetType() !== 'daily') return '';
+  if (entryDailyCategoryName() !== '프로젝트업무') return 'by_hour';
+  return _entryDailyPeriodModeValue();
+}
+
+function onDailyPeriodModeChange() {
+  if (entryFormSheetType() !== 'daily') return;
+  syncEntrySheetTimeRowUI();
+  const mode = _entryDailyEffectivePeriodMode();
+  if (mode === 'by_day_span') applyDailyPeriodFromInput();
+  else calcDuration();
+}
+
+function _entryPickDailyProjectByIdx(idx) {
+  const r = _dailyOpenProjectListFiltered[idx];
+  if (!r) return;
+  const cEl = document.getElementById('entry-daily-project-code');
+  const nEl = document.getElementById('entry-daily-project-name');
+  const ciEl = document.getElementById('entry-daily-project-client-id');
+  const cnEl = document.getElementById('entry-daily-project-client-name');
+  if (cEl) cEl.value = String(r.project_code || '').trim();
+  if (nEl) nEl.value = String(r.project_name || '').trim();
+  if (ciEl) ciEl.value = String(r.client_id || '').trim();
+  if (cnEl) cnEl.value = String(r.client_name || '').trim();
+  const selBox = document.getElementById('entry-daily-project-selected');
+  const selTxt = document.getElementById('entry-daily-project-selected-text');
+  if (selBox) selBox.style.display = '';
+  if (selTxt) selTxt.textContent = `${r.project_code || ''} — ${r.project_name || ''}`;
+}
+
+function _entryClearDailyProjectPick() {
+  ['entry-daily-project-code', 'entry-daily-project-name', 'entry-daily-project-client-id', 'entry-daily-project-client-name'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  const selBox = document.getElementById('entry-daily-project-selected');
+  if (selBox) selBox.style.display = 'none';
+}
+
+function _entryGetDailyProjFilterClientId() {
+  if (typeof ClientSearchSelect === 'undefined') return '';
+  const v = ClientSearchSelect.getValue('entry-daily-proj-client-wrap');
+  return (v && v.id) ? String(v.id) : '';
+}
+
+function _entryRefreshDailyProjectList() {
+  const host = document.getElementById('entry-daily-project-list');
+  if (!host) return;
+  const q = (document.getElementById('entry-daily-proj-filter-text')?.value || '').trim().toLowerCase();
+  const mainF = (document.getElementById('entry-daily-proj-filter-main')?.value || '').trim();
+  const clientF = _entryGetDailyProjFilterClientId();
+  const rows = _dailyOpenProjectRows.filter((r) => {
+    if (mainF && String(r._main_code || '') !== mainF) return false;
+    if (clientF && String(r.client_id || '') !== clientF) return false;
+    if (!q) return true;
+    const code = String(r.project_code || '').toLowerCase();
+    const nm = String(r.project_name || '').toLowerCase();
+    const cn = String(r.client_name || '').toLowerCase();
+    return code.includes(q) || nm.includes(q) || cn.includes(q);
+  });
+  _dailyOpenProjectListFiltered = rows;
+  if (!rows.length) {
+    host.innerHTML = '<div style="padding:12px;color:#64748b">조건에 맞는 미완료 프로젝트가 없습니다.</div>';
+    return;
+  }
+  host.innerHTML = rows.map((r, idx) => {
+    const code = Utils.escHtml(String(r.project_code || ''));
+    const name = Utils.escHtml(String(r.project_name || ''));
+    const cl = Utils.escHtml(String(r.client_name || '-'));
+    return `<div class="entry-daily-proj-row" style="padding:8px 10px;border-bottom:1px solid #f1f5f9;cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:flex-start"
+      onmouseover="this.style.background='#f0fdf4'" onmouseout="this.style.background=''"
+      onclick="_entryPickDailyProjectByIdx(${idx})">
+      <div style="min-width:0"><strong>${code}</strong> ${name}<br/><span style="font-size:11px;color:#64748b">${cl}</span></div>
+    </div>`;
+  }).join('');
+}
+
+async function _entryFillDailyProjMainFilter() {
+  const sel = document.getElementById('entry-daily-proj-filter-main');
+  if (!sel) return;
+  const cur = sel.value;
+  const seen = new Set();
+  const opts = [];
+  _dailyOpenProjectRows.forEach((r) => {
+    const lb = (r._main_label || '').trim() || '(분류 없음)';
+    const code = String(r._main_code || '');
+    const key = `${code}|${lb}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    opts.push({ value: code, text: lb });
+  });
+  opts.sort((a, b) => a.text.localeCompare(b.text));
+  sel.innerHTML = '<option value="">전체</option>';
+  opts.forEach((o) => {
+    const opt = document.createElement('option');
+    opt.value = o.value;
+    opt.textContent = o.text;
+    sel.appendChild(opt);
+  });
+  if (cur && [...sel.options].some((o) => o.value === cur)) sel.value = cur;
+}
+
+async function _entryLoadDailyOpenProjects() {
+  _dailyOpenProjectRows = [];
+  try {
+    const [rows, types] = await Promise.all([
+      API.listAllPages('registered_projects', { limit: 500, maxPages: 10, sort: 'created_at', filter: 'registration_status=eq.approved' }),
+      API.listAllPages('project_code_types', { limit: 500, maxPages: 5, sort: 'main_code' }),
+    ]);
+    const typeById = {};
+    (types || []).forEach((t) => { if (t && t.id) typeById[t.id] = t; });
+    (rows || []).forEach((r) => {
+      if (!_entryRegisteredProjectOngoing(r)) return;
+      const typ = r.project_code_type_id && typeById[r.project_code_type_id];
+      const mc = typ ? (typ.main_code || '') : '';
+      const mcat = typ ? (typ.main_category || '') : '';
+      const mlabel = typ ? `${mcat || ''} (${mc || ''})`.trim() : '';
+      _dailyOpenProjectRows.push({
+        ...r,
+        _main_label: mlabel || '(분류 없음)',
+        _main_code: mc,
+        _main_cat: mcat,
+      });
+    });
+    _dailyOpenProjectRows.sort((a, b) => String(a.project_code || '').localeCompare(String(b.project_code || '')));
+  } catch (e) {
+    console.warn('[entry] open projects', e);
+  }
+  await _entryFillDailyProjMainFilter();
+  _entryRefreshDailyProjectList();
+}
+
+function _syncEntrySheetTypeBadge() {
+  const el = document.getElementById('entry-sheet-type-badge');
+  if (!el) return;
+  el.textContent = entryFormSheetType() === 'daily' ? '일일 시트' : '시간제 시트';
+  el.style.display = 'inline-flex';
+}
+
+/** 시간제: 시작·종료 datetime / 일일: 시간 단위면 동일 UI(투입 단위 바로 아래로 DOM 이동), 일 단위면 날짜 구간 */
+function syncEntrySheetTimeRowUI() {
+  const daily = entryFormSheetType() === 'daily';
+  const mode = daily ? _entryDailyEffectivePeriodMode() : '';
+  const hourlyRow = document.getElementById('entry-row-hourly-datetime');
+  const mountH = document.getElementById('entry-hourly-mount-hourly');
+  const mountD = document.getElementById('entry-hourly-mount-daily');
+  const modeWrap = document.getElementById('entry-daily-period-mode-wrap');
+  const hintEl = document.getElementById('entry-daily-period-hint');
+  const allowProjectPeriodUi = daily && entryDailyCategoryName() === '프로젝트업무';
+  if (modeWrap) modeWrap.style.display = allowProjectPeriodUi ? '' : 'none';
+  if (hintEl) hintEl.style.display = allowProjectPeriodUi ? '' : 'none';
+  if (hourlyRow && mountH && mountD) {
+    if (daily && mode === 'by_hour') mountD.appendChild(hourlyRow);
+    else mountH.appendChild(hourlyRow);
+  }
+  const dailyRow = document.getElementById('entry-row-daily-fields');
+  const startEl = document.getElementById('entry-start');
+  const endEl = document.getElementById('entry-end');
+  const fromEl = document.getElementById('entry-daily-from');
+  const toEl = document.getElementById('entry-daily-to');
+  const wDay = document.getElementById('entry-daily-period-day-wrap');
+  if (hourlyRow) hourlyRow.style.display = (!daily || mode === 'by_hour') ? 'grid' : 'none';
+  if (dailyRow) dailyRow.style.display = daily ? 'block' : 'none';
+  if (wDay) wDay.style.display = (daily && mode === 'by_day_span') ? '' : 'none';
+  if (startEl) {
+    if (!daily) startEl.setAttribute('required', 'required');
+    else if (mode === 'by_hour') startEl.setAttribute('required', 'required');
+    else startEl.removeAttribute('required');
+  }
+  if (endEl) {
+    if (!daily) endEl.setAttribute('required', 'required');
+    else if (mode === 'by_hour') endEl.setAttribute('required', 'required');
+    else endEl.removeAttribute('required');
+  }
+  if (fromEl) {
+    if (daily && mode === 'by_day_span') fromEl.setAttribute('required', 'required');
+    else fromEl.removeAttribute('required');
+  }
+  if (toEl) {
+    if (daily && mode === 'by_day_span') toEl.setAttribute('required', 'required');
+    else toEl.removeAttribute('required');
+  }
+}
+
+/** 일일 시트·일 단위: 투입 시작~종료일 → 저장용 datetime-local + 일수×8h 소요시간 */
+function applyDailyPeriodFromInput() {
+  if (entryFormSheetType() !== 'daily' || _entryDailyEffectivePeriodMode() !== 'by_day_span') return;
+  const fromEl = document.getElementById('entry-daily-from');
+  const toEl = document.getElementById('entry-daily-to');
+  const hidDate = document.getElementById('entry-work-date');
+  const startEl = document.getElementById('entry-start');
+  const endEl = document.getElementById('entry-end');
+  const text = document.getElementById('duration-text');
+  const display = document.getElementById('duration-display');
+  if (!startEl || !endEl) return;
+  const d0 = fromEl && fromEl.value;
+  const d1 = toEl && toEl.value;
+  if (hidDate && d0) hidDate.value = d0;
+  if (!d0 || !d1) {
+    startEl.value = '';
+    endEl.value = '';
+    if (text) {
+      text.textContent = '투입 시작일·종료일을 선택하세요.';
+    }
+    _clearDurationInput();
+    syncActualDuration();
+    return;
+  }
+  if (d0 > d1) {
+    if (text) text.textContent = '투입 종료일이 시작일보다 빠를 수 없습니다.';
+    startEl.value = '';
+    endEl.value = '';
+    _clearDurationInput();
+    syncActualDuration();
+    return;
+  }
+  startEl.value = `${d0}T00:00`;
+  endEl.value = `${d1}T23:59`;
+  const days = _entryInclusiveCalendarDays(d0, d1);
+  const mins = days > 0 ? days * 480 : 0;
+  if (text) {
+    text.textContent = days > 0
+      ? `일 단위: ${days}일 × 8시간 = ${typeof Utils !== 'undefined' && Utils.formatDurationLong ? Utils.formatDurationLong(mins) : `${mins}분`} (소요시간에 반영)`
+      : '투입 시작일·종료일을 선택하세요.';
+  }
+  if (display) {
+    display.style.borderColor = '#bbf7d0';
+    display.style.background  = '#f0fdf4';
+    display.style.color       = '#15803d';
+  }
+  if (mins > 0) _setDurationInput(mins);
+  else _clearDurationInput();
+  syncActualDuration();
+  clearTimeout(_overlapWarnTimer);
+  const prevWarn = document.getElementById('overlap-warn-banner');
+  if (prevWarn) prevWarn.remove();
+}
+
+function onDailyPeriodChange() {
+  if (entryFormSheetType() !== 'daily') return;
+  applyDailyPeriodFromInput();
+}
+
+/** @deprecated 호환용 — 일일 기간 동기화로 위임 */
+function applyDailyWorkDateFromInput() {
+  applyDailyPeriodFromInput();
+}
+
+function onDailyWorkDateChange() {
+  onDailyPeriodChange();
+}
+
+// ─────────────────────────────────────────────
 // 타임시트 등록 초기화
 // ─────────────────────────────────────────────
 async function init_entry_new() {
@@ -666,6 +1015,20 @@ async function init_entry_new() {
     }
   }
 
+  if (entryFormSheetType() === 'daily') {
+    if (!Auth.timesheetDailyEnabled(session)) {
+      navigateTo('dashboard');
+      Toast.warning('Daily Time Sheet 대상으로 등록되지 않았습니다. Staff 관리에서 권한을 요청하세요.');
+      return;
+    }
+  } else if (!Auth.timesheetHourlyEnabled(session)) {
+    navigateTo('dashboard');
+    Toast.warning('Hourly Time Sheet 대상으로 등록되지 않았습니다. Staff 관리에서 권한을 요청하세요.');
+    return;
+  }
+
+  _syncEntrySheetTypeBadge();
+
   // 신규 등록: 초기화
   _editEntryId  = null;
   _pendingFiles = [];
@@ -680,7 +1043,8 @@ async function init_entry_new() {
       subReset.selectedIndex = 0;
     }
     ['entry-category','entry-subcategory','entry-team','entry-client',
-     'entry-start','entry-end','entry-duration',
+     'entry-start','entry-end','entry-work-date','entry-daily-from','entry-daily-to',
+     'entry-work-location','entry-duration',
      'kw-query-hidden','law-refs-hidden','kw-reason-hidden'
     ].forEach(id => {
       const el = document.getElementById(id);
@@ -689,11 +1053,36 @@ async function init_entry_new() {
       if (el.tagName === 'SELECT') el.selectedIndex = 0;
       else el.value = el.id === 'law-refs-hidden' ? '[]' : '';
     });
+    _entryClearDailyProjectPick();
+    const ft = document.getElementById('entry-daily-proj-filter-text');
+    if (ft) ft.value = '';
+    const mf = document.getElementById('entry-daily-proj-filter-main');
+    if (mf) mf.innerHTML = '<option value="">전체</option>';
+    const modeSel = document.getElementById('entry-daily-period-mode-select');
+    if (modeSel) modeSel.value = 'by_day_span';
+    if (typeof ClientSearchSelect !== 'undefined') {
+      try { ClientSearchSelect.clear('entry-daily-proj-client-wrap'); } catch (_) {}
+    }
+    _dailyOpenProjectListFiltered = [];
+    const plist = document.getElementById('entry-daily-project-list');
+    if (plist) plist.innerHTML = '';
   };
   _resetFormFields();
-  document.getElementById('duration-text').textContent = '시작/종료 시간을 입력하면 자동 계산됩니다.';
   document.getElementById('entry-duration').value = '';
   _clearDurationInput(); // 실제 소요시간 시간·분 입력란 초기화
+  syncEntrySheetTimeRowUI();
+  if (entryFormSheetType() === 'daily') {
+    const t = new Date();
+    const ymd = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+    const df = document.getElementById('entry-daily-from');
+    const dto = document.getElementById('entry-daily-to');
+    if (df) df.value = ymd;
+    if (dto) dto.value = ymd;
+    onDailyPeriodModeChange();
+  } else {
+    document.getElementById('duration-text').textContent = '시작/종료 시간을 입력하면 자동 계산됩니다.';
+    calcDuration();
+  }
   document.getElementById('entry-user-name').value = session.name;
 
   // Quill 에디터 초기화 (최초 1회 생성, 이후 리셋만)
@@ -739,8 +1128,12 @@ async function init_entry_new() {
     const preserveCatId = (catEl.value || '').trim();
     const preserveSubId = (subEl && subEl.value || '').trim();
 
+    const catsForForm = entryFormSheetType() === 'daily'
+      ? categories.filter((c) => ENTRY_DAILY_CATEGORY_ALLOW.includes(String(c.category_name || '').trim()))
+      : categories;
+
     catEl.innerHTML = '<option value="">대분류 선택</option>';
-    categories.forEach(c => {
+    catsForForm.forEach((c) => {
       const opt = document.createElement('option');
       opt.value = c.id;
       opt.textContent = c.category_name;
@@ -748,7 +1141,7 @@ async function init_entry_new() {
       catEl.appendChild(opt);
     });
 
-    const catOk = preserveCatId && categories.some(c => String(c.id) === String(preserveCatId));
+    const catOk = preserveCatId && catsForForm.some((c) => String(c.id) === String(preserveCatId));
     if (catOk) {
       catEl.value = preserveCatId;
       onCategoryChange();
@@ -773,6 +1166,18 @@ async function init_entry_new() {
       }
     });
     document.getElementById('entry-client').value = '';
+
+    if (entryFormSheetType() === 'daily') {
+      ClientSearchSelect.init('entry-daily-proj-client-wrap', clients, {
+        placeholder: '고객사로 필터…',
+        onSelect: () => { _entryRefreshDailyProjectList(); },
+      });
+      ClientSearchSelect.clear('entry-daily-proj-client-wrap');
+      const modeSel = document.getElementById('entry-daily-period-mode-select');
+      if (modeSel) modeSel.value = 'by_day_span';
+      onDailyPeriodModeChange();
+      await _entryLoadDailyOpenProjects();
+    }
 
     // 고객 섹션 초기 상태
     updateClientSection();
@@ -831,6 +1236,11 @@ function onCategoryChange() {
   const catId  = catEl.value;
   const catType = selectedOpt ? selectedOpt.dataset.type : 'client';
   _currentCategoryType = catType || 'client';
+  const catNm = (selectedOpt && selectedOpt.textContent) ? selectedOpt.textContent.trim() : '';
+  if (entryFormSheetType() === 'daily') {
+    if (catNm === '일반자문업무') _currentCategoryType = 'client';
+    else if (catNm === '프로젝트업무' || catNm === '회사내부업무') _currentCategoryType = 'internal';
+  }
 
   const subs = _allSubcategories.filter(s => String(s.category_id) === String(catId));
   const subEl = document.getElementById('entry-subcategory');
@@ -842,8 +1252,25 @@ function onCategoryChange() {
     subEl.appendChild(opt);
   });
 
+  if (entryFormSheetType() === 'daily' && catNm === '프로젝트업무' && subEl.options.length > 1) {
+    let picked = false;
+    for (let i = 0; i < subEl.options.length; i++) {
+      if ((subEl.options[i].textContent || '').trim() === '기타') {
+        subEl.selectedIndex = i;
+        picked = true;
+        break;
+      }
+    }
+    if (!picked) subEl.selectedIndex = 1;
+  }
+
   updateClientSection();
   _entryUpdateExampleTags();
+  if (entryFormSheetType() === 'daily') {
+    const eff = _entryDailyEffectivePeriodMode();
+    if (eff === 'by_day_span') applyDailyPeriodFromInput();
+    else calcDuration();
+  }
 }
 
 function updateClientSection() {
@@ -852,32 +1279,59 @@ function updateClientSection() {
   const isNone     = !_currentCategoryType; // 대분류 미선택
   const catEl = document.getElementById('entry-category');
   const catName = catEl?.options?.[catEl.selectedIndex]?.textContent || '';
-  const isClearance = catName.trim() === '일반통관업무';
-  const isCompanyInternal = catName.trim() === '회사내부업무';
+  const catNameTrim = catName.trim();
+  const isClearance = catNameTrim === '일반통관업무';
+  const isCompanyInternal = catNameTrim === '회사내부업무';
+  const isDaily = entryFormSheetType() === 'daily';
+  const isProject = catNameTrim === '프로젝트업무';
+  const isDailyProject = isDaily && isProject;
+  const isDailyInternalCo = isDaily && isCompanyInternal;
+  /** 일일: ②③④는 「일반자문업무」일 때만 (마스터 category_type이 client로 잘못돼도 프로젝트/내부는 ①만) */
+  const showFourConsultPanels = isDaily ? (catNameTrim === '일반자문업무') : isClient;
 
-  // ── 패널 요소 ──────────────────────────────────────
-  const metaPanel      = document.querySelector('.entry-panel-meta');   // ① 기본정보
-  const descPanel      = document.querySelector('.entry-panel-desc');   // ② 수행내용
-  const filePanel      = document.getElementById('filePanel');          // ④ 결과물
-  const kwSection      = document.getElementById('kwSection');          // ③ 자문분류
-  const clientSection  = document.getElementById('clientSection');      // 고객사 행
+  const metaPanel      = document.querySelector('.entry-panel-meta');
+  const descPanel      = document.querySelector('.entry-panel-desc');
+  const filePanel      = document.getElementById('filePanel');
+  const kwSection      = document.getElementById('kwSection');
+  const clientSection  = document.getElementById('clientSection');
   const attachRequired = document.getElementById('attachRequired');
   const attachOptional = document.getElementById('attachOptional');
-  const memoSection    = document.getElementById('internalMemoSection'); // 메모란
-  const teamRow        = document.getElementById('entry-team-row');     // 수행팀 행(2열)
+  const memoSection    = document.getElementById('internalMemoSection');
+  const teamRow        = document.getElementById('entry-team-row');
   const teamEl         = document.getElementById('entry-team');
+  const dpWrap         = document.getElementById('entry-daily-project-work-wrap');
+  const memoTitle      = document.getElementById('entry-memo-title');
+  const memoOpt        = document.getElementById('entry-memo-optional');
+  const memoReq        = document.getElementById('entry-memo-required');
+  const memoTa         = document.getElementById('entry-memo');
 
-  // 회사내부업무: 수행팀 선택 자체를 숨김(요청사항)
-  if (teamRow) teamRow.style.display = isCompanyInternal ? 'none' : '';
-  if (isCompanyInternal && teamEl) {
-    teamEl.value = '';
-    try { teamEl.removeAttribute('required'); } catch {}
+  const hideDailyProjWrap = () => {
+    if (dpWrap) dpWrap.style.display = 'none';
+    const locWrap = document.getElementById('entry-daily-work-location-wrap');
+    if (locWrap) locWrap.style.display = 'none';
+  };
+
+  // 회사내부: 팀 숨김 / 일일 프로젝트업무: 팀·Staff 행 숨김(세션 팀명으로 자동 매칭)
+  const hideTeamRow = (isCompanyInternal && !isDailyProject) || isDailyProject;
+  if (teamRow) teamRow.style.display = hideTeamRow ? 'none' : '';
+  if (hideTeamRow && teamEl) {
+    if (isCompanyInternal && !isDailyProject) teamEl.value = '';
+    try { teamEl.removeAttribute('required'); } catch (_) {}
   } else if (teamEl) {
-    try { teamEl.setAttribute('required', ''); } catch {}
+    try { teamEl.setAttribute('required', ''); } catch (_) {}
   }
 
+  const resetMemoChrome = () => {
+    if (memoTitle) memoTitle.textContent = '수행 내용 메모';
+    if (memoOpt) memoOpt.style.display = '';
+    if (memoReq) memoReq.style.display = 'none';
+    if (memoTa) {
+      memoTa.removeAttribute('required');
+      memoTa.placeholder = '수행한 업무 내용을 간략히 메모하세요.';
+    }
+  };
+
   if (isNone) {
-    // ── 대분류 미선택: ① 기본정보만 전체폭, 나머지 숨김 ──
     if (metaPanel)  { metaPanel.classList.add('span-full'); }
     if (descPanel)  descPanel.style.display = 'none';
     if (filePanel)  { filePanel.style.display = 'none'; filePanel.classList.remove('span-full'); }
@@ -886,9 +1340,10 @@ function updateClientSection() {
     if (attachRequired) attachRequired.style.display = 'none';
     if (attachOptional) attachOptional.style.display = 'none';
     if (memoSection) memoSection.style.display = 'none';
+    hideDailyProjWrap();
+    resetMemoChrome();
 
-  } else if (isClient) {
-    // ── 일반자문업무: ①②③④ 4패널 전체 표시 ──────────
+  } else if (showFourConsultPanels) {
     if (metaPanel)  metaPanel.classList.remove('span-full');
     if (descPanel)  descPanel.style.display = '';
     if (filePanel)  { filePanel.style.display = ''; filePanel.classList.remove('span-full'); }
@@ -897,19 +1352,95 @@ function updateClientSection() {
     if (attachRequired) attachRequired.style.display = '';
     if (attachOptional) attachOptional.style.display = 'none';
     if (memoSection) memoSection.style.display = 'none';
+    hideDailyProjWrap();
+    resetMemoChrome();
+
+  } else if (isProject && isDaily) {
+    if (metaPanel) metaPanel.classList.add('span-full');
+    if (descPanel) descPanel.style.display = 'none';
+    if (filePanel) { filePanel.style.display = 'none'; filePanel.classList.remove('span-full'); }
+    if (kwSection) kwSection.style.display = 'none';
+    if (clientSection) clientSection.style.display = 'none';
+    if (attachRequired) attachRequired.style.display = 'none';
+    if (attachOptional) attachOptional.style.display = 'none';
+    if (memoSection) memoSection.style.display = '';
+    if (memoTitle) memoTitle.textContent = '수행 내역';
+    if (memoOpt) memoOpt.style.display = 'none';
+    if (memoReq) memoReq.style.display = '';
+    if (memoTa) {
+      memoTa.setAttribute('required', 'required');
+      memoTa.placeholder = '프로젝트 수행 내역을 간단히 입력하세요.';
+    }
+    if (dpWrap) {
+      dpWrap.style.display = 'block';
+      if (!_dailyOpenProjectRows.length) _entryLoadDailyOpenProjects().catch(() => {});
+    }
+    const locWrapProj = document.getElementById('entry-daily-work-location-wrap');
+    if (locWrapProj) locWrapProj.style.display = '';
 
   } else {
-    // ── 내부업무(프로젝트·통관·기타): ① 기본정보만 전체폭 + 메모 ──
     if (metaPanel)  metaPanel.classList.add('span-full');
     if (descPanel)  descPanel.style.display = 'none';
     if (filePanel)  { filePanel.style.display = 'none'; filePanel.classList.remove('span-full'); }
     if (kwSection)  kwSection.style.display  = 'none';
-    // 일반통관업무는 내부업무 UI를 유지하되, 고객사 지정은 필요하므로 고객사 행만 노출
     if (clientSection) clientSection.style.display = isClearance ? '' : 'none';
     if (attachRequired) attachRequired.style.display = 'none';
     if (attachOptional) attachOptional.style.display = 'none';
     if (memoSection) memoSection.style.display = '';
+    hideDailyProjWrap();
+    if (isDailyInternalCo) {
+      if (memoTitle) memoTitle.textContent = '수행 내역';
+      if (memoOpt) memoOpt.style.display = 'none';
+      if (memoReq) memoReq.style.display = '';
+      if (memoTa) {
+        memoTa.setAttribute('required', 'required');
+        memoTa.placeholder = '수행 내역을 입력하세요.';
+      }
+    } else {
+      resetMemoChrome();
+    }
   }
+
+  _entrySyncDailyProjectSubGrid(catNameTrim, isDailyProject, isCompanyInternal);
+  if (isDaily) syncEntrySheetTimeRowUI();
+}
+
+/** 일일·프로젝트업무: 소분류 열 숨김 + 팀 자동선택 */
+function _entryAutofillTeamFromSession() {
+  const teamEl = document.getElementById('entry-team');
+  if (!teamEl || teamEl.options.length < 2) return;
+  let session = null;
+  try { session = typeof getSession === 'function' ? getSession() : null; } catch (_) {}
+  if (!session) return;
+  const cand = [session.team_name, session.cs_team_name].map((s) => String(s || '').trim()).filter(Boolean);
+  for (const name of cand) {
+    for (let i = 0; i < teamEl.options.length; i++) {
+      const o = teamEl.options[i];
+      const tn = (o.textContent || '').trim();
+      if (tn && name && (tn === name || tn.includes(name) || name.includes(tn))) {
+        teamEl.value = o.value;
+        return;
+      }
+    }
+  }
+}
+
+function _entrySyncDailyProjectSubGrid(catNameTrim, isDailyProject, isCompanyInternal) {
+  const grid = document.getElementById('entry-cat-sub-grid');
+  const subWrap = document.getElementById('entry-subcategory-col-wrap');
+  const subEl = document.getElementById('entry-subcategory');
+  if (!grid || !subWrap) return;
+  if (entryFormSheetType() === 'daily' && isDailyProject) {
+    subWrap.style.display = 'none';
+    grid.style.gridTemplateColumns = '1fr';
+    if (subEl) subEl.removeAttribute('required');
+    _entryAutofillTeamFromSession();
+    return;
+  }
+  subWrap.style.display = '';
+  grid.style.gridTemplateColumns = '1fr 1fr';
+  const catEl = document.getElementById('entry-category');
+  if (subEl && catEl && catEl.value) subEl.setAttribute('required', 'required');
 }
 
 // ─── 소분류 변경 → 자문자료실과 동일 예시 태그 칩 ──────────────
@@ -1351,6 +1882,10 @@ function _overlapMessage(conflict, newStart, newEnd) {
 let _overlapWarnTimer = null; // 디바운스용
 
 async function calcDuration() {
+  if (entryFormSheetType() === 'daily' && _entryDailyEffectivePeriodMode() !== 'by_hour') {
+    applyDailyWorkDateFromInput();
+    return;
+  }
   const start   = document.getElementById('entry-start').value;
   const end     = document.getElementById('entry-end').value;
   const minutes = Utils.calcDurationMinutes(start, end);
@@ -2103,15 +2638,52 @@ async function saveEntry(status) {
   const catId    = (catEl && catEl.value || '').trim();
   const catName  = catEl && catEl.selectedIndex >= 0 ? (catEl.options[catEl.selectedIndex]?.textContent || '') : '';
   const catType  = catEl && catEl.selectedIndex >= 0 ? (catEl.options[catEl.selectedIndex]?.dataset.type || 'client') : 'client';
+  const catTypeEff = _entryEffectiveTimeCategory(catType, catName);
   const subId    = (subEl && subEl.value || '').trim();
   const subName  = subEl.options[subEl.selectedIndex]?.textContent || '';
-  const isCompanyInternal = catName.trim() === '회사내부업무';
-  const teamId   = isCompanyInternal ? '' : teamEl.value;
-  const teamName = isCompanyInternal ? '' : (teamEl.options[teamEl.selectedIndex]?.textContent || '');
+  const catNameTrimSaveEntry = catName.trim();
+  const omitTeamPick = _entryOmitTeamFromFormPick(catNameTrimSaveEntry);
+  const teamId   = omitTeamPick ? '' : teamEl.value;
+  const teamName = omitTeamPick ? '' : (teamEl.options[teamEl.selectedIndex]?.textContent || '');
   // ★ ClientSearchSelect에서 고객사 값 읽기
   const csVal      = ClientSearchSelect.getValue('entry-client-wrap');
   const clientId   = csVal.id || document.getElementById('entry-client').value || '';
   const clientName = csVal.name || '';
+  if (entryFormSheetType() === 'daily') {
+    const mode = _entryDailyEffectivePeriodMode();
+    if (mode === 'by_day_span') {
+      applyDailyPeriodFromInput();
+      const df = (document.getElementById('entry-daily-from') || {}).value;
+      const dto = (document.getElementById('entry-daily-to') || {}).value;
+      if (!df || !dto) {
+        Toast.warning('투입 시작일과 종료일을 선택하세요.');
+        return;
+      }
+      if (df > dto) {
+        Toast.warning('투입 종료일이 시작일보다 빠를 수 없습니다.');
+        return;
+      }
+    }
+    const dCat = entryDailyCategoryName();
+    if (dCat === '일반자문업무' && !clientId) {
+      Toast.warning('고객사를 선택하세요.');
+      return;
+    }
+  }
+  // 프로젝트업무(시간제/일일 공통): 프로젝트 코드 기반으로 신청
+  const catNameTrimGlobal = catName.trim();
+  if (catNameTrimGlobal === '프로젝트업무') {
+    const pcode = (document.getElementById('entry-daily-project-code')?.value || '').trim();
+    if (!pcode) {
+      Toast.warning('프로젝트 목록에서 프로젝트를 선택하세요.');
+      return;
+    }
+    const loc = (document.getElementById('entry-work-location')?.value || '').trim();
+    if (!loc) {
+      Toast.warning('수행장소를 입력하세요.');
+      return;
+    }
+  }
   const startAt    = document.getElementById('entry-start').value;
   const endAt      = document.getElementById('entry-end').value;
   // ★ 실제 소요시간: 사용자 직접 입력(시간·분) 우선, 없으면 hidden(자동계산) 사용
@@ -2122,7 +2694,7 @@ async function saveEntry(status) {
   // internal 대분류는 메모란 텍스트를 description으로 사용
   let description   = '';
   let descriptionMd = '';
-  if (catType === 'client') {
+  if (catTypeEff === 'client') {
     _syncQuillToHidden();
     description   = document.getElementById('entry-description').value.trim();
     descriptionMd = document.getElementById('entry-description-md')?.value.trim() || '';
@@ -2134,28 +2706,51 @@ async function saveEntry(status) {
 
   // 유효성 검사
   if (!catId || !subId)   { Toast.warning('대분류와 소분류를 선택하세요.'); return; }
-  if (!isCompanyInternal && !teamId) { Toast.warning('수행 팀을 선택하세요.'); return; }
-  if (!startAt || !endAt) { Toast.warning('업무 시작/종료 일시를 입력하세요.'); return; }
+  if (!omitTeamPick && !teamId) { Toast.warning('수행 팀을 선택하세요.'); return; }
+  if (!startAt || !endAt) {
+    const dailyNoRange = entryFormSheetType() === 'daily' && _entryDailyEffectivePeriodMode() === 'by_day_span';
+    Toast.warning(dailyNoRange ? '투입 시작일과 종료일을 선택하세요.' : '업무 시작/종료 일시를 입력하세요.');
+    return;
+  }
   if (duration <= 0)      { Toast.warning('실제 소요시간을 입력하세요. (시간 또는 분에 숫자를 입력)'); return; }
-  if (catType === 'client' && !description) {
+  if (catTypeEff === 'client' && !description) {
     Toast.warning('수행 내용을 입력하세요.');
     if (_quill) _quill.focus();
     return;
   }
   const isClearance = catName.trim() === '일반통관업무';
-  if ((catType === 'client' || isClearance) && !clientId) { Toast.warning('고객사를 선택하세요.'); return; }
-  // 핵심키워드 필수 (고객업무 제출 시)
-  if (catType === 'client' && status === 'submitted') {
+  if ((catTypeEff === 'client' || isClearance) && !clientId) { Toast.warning('고객사를 선택하세요.'); return; }
+  if (catName.trim() === '프로젝트업무') {
+    const memoEl = document.getElementById('entry-memo');
+    const memoTxt = memoEl ? memoEl.value.trim() : '';
+    if (!memoTxt) {
+      Toast.warning('수행 내역을 입력하세요.');
+      memoEl?.focus();
+      return;
+    }
+  }
+  if (entryFormSheetType() === 'daily' && entryDailyCategoryName() === '회사내부업무') {
+    const memoEl = document.getElementById('entry-memo');
+    const memoTxt = memoEl ? memoEl.value.trim() : '';
+    if (!memoTxt) {
+      Toast.warning('수행 내역을 입력하세요.');
+      memoEl?.focus();
+      return;
+    }
+  }
+  // 핵심키워드·첨부 필수 (고객업무 제출 시 — 일일·시간제 동일)
+  if (catTypeEff === 'client' && status === 'submitted') {
     let kwArr = [];
     try { kwArr = JSON.parse(document.getElementById('kw-query-hidden')?.value || '[]'); } catch {}
     if (!kwArr.length) { Toast.warning('핵심키워드를 1개 이상 입력하세요. (자문 분류 정보)'); document.getElementById('kw-query-input')?.focus(); return; }
   }
-  if (catType === 'client' && status === 'submitted' && _pendingFiles.length === 0) {
+  if (catTypeEff === 'client' && status === 'submitted' && _pendingFiles.length === 0) {
     Toast.warning('고객업무는 자문 결과물을 첨부해야 합니다.'); return;
   }
 
-  // ★ 시간 겹침 — 경고만 표시, 저장은 허용
-  {
+  // ★ 시간 겹침 — 경고만 표시, 저장은 허용 (일일·일 단위만 생략, 일일·시간 단위는 시간제와 동일 검사)
+  const skipOverlapDaily = entryFormSheetType() === 'daily' && _entryDailyEffectivePeriodMode() === 'by_day_span';
+  if (!skipOverlapDaily) {
     const newStart = new Date(startAt).getTime();
     const newEnd   = new Date(endAt).getTime();
     const { overlap, conflict } = await checkTimeOverlap(newStart, newEnd, _editEntryId || '');
@@ -2167,7 +2762,7 @@ async function saveEntry(status) {
 
   // ★ 민감정보 감지 — 일반자문업무(client)만 적용
   //    검사 대상: ② 수행내용(Quill) + ③ 자문분류(핵심키워드·판단사유)
-  if (catType === 'client') {
+  if (catTypeEff === 'client') {
     // ② 수행내용: Quill 평문 추출
     const quillText = _quill ? _quill.getText() : description;
 
@@ -2224,10 +2819,12 @@ async function _doSaveEntry(status, approverInfo) {
   const catId      = catEl.value;
   const catName    = catEl.options[catEl.selectedIndex]?.textContent || '';
   const catType    = catEl.options[catEl.selectedIndex]?.dataset.type || 'client';
+  const catTypeEff = _entryEffectiveTimeCategory(catType, catName);
   const subId      = subEl.value;
   const subName    = subEl.options[subEl.selectedIndex]?.textContent || '';
-  const teamId     = teamEl.value;
-  const teamName   = teamEl.options[teamEl.selectedIndex]?.textContent || '';
+  const omitTeamPickSave = _entryOmitTeamFromFormPick(catName.trim());
+  const teamId     = omitTeamPickSave ? '' : teamEl.value;
+  const teamName   = omitTeamPickSave ? '' : (teamEl.options[teamEl.selectedIndex]?.textContent || '');
   const csVal      = ClientSearchSelect.getValue('entry-client-wrap');
   const clientId   = csVal.id || document.getElementById('entry-client').value || '';
   const clientName = csVal.name || '';
@@ -2237,7 +2834,7 @@ async function _doSaveEntry(status, approverInfo) {
   const duration   = parseInt(document.getElementById('entry-duration').value) || 0;
 
   let description = '', descriptionMd = '';
-  if (catType === 'client') {
+  if (catTypeEff === 'client') {
     _syncQuillToHidden();
     description   = document.getElementById('entry-description').value.trim();
     descriptionMd = document.getElementById('entry-description-md')?.value.trim() || '';
@@ -2259,19 +2856,34 @@ async function _doSaveEntry(status, approverInfo) {
 
   try {
     const isClearance = catName.trim() === '일반통관업무';
+    const isDailySheet = entryFormSheetType() === 'daily';
+    const isProjSave = catName.trim() === '프로젝트업무';
+    let project_code = '';
+    let project_name = '';
+    let work_location = '';
+    if (isProjSave) {
+      project_code = (document.getElementById('entry-daily-project-code')?.value || '').trim();
+      project_name = (document.getElementById('entry-daily-project-name')?.value || '').trim();
+      work_location = (document.getElementById('entry-work-location')?.value || '').trim();
+    }
+    let effClientId = (catTypeEff === 'client' || isClearance) ? clientId : '';
+    let effClientName = (catTypeEff === 'client' || isClearance) ? clientName : '';
+    if (isProjSave) {
+      effClientId = (document.getElementById('entry-daily-project-client-id')?.value || '').trim();
+      effClientName = (document.getElementById('entry-daily-project-client-name')?.value || '').trim();
+    }
     const entryData = {
       user_id:   session.id,
       user_name: session.name,
       team_id:   teamId,
       team_name: teamName,
-      // 일반통관업무도 고객사 지정 허용/필수화 예정 (아래에서 isClearance로 제어)
-      client_id:   (catType === 'client' || isClearance) ? clientId : '',
-      client_name: (catType === 'client' || isClearance) ? clientName : '',
+      client_id:   effClientId,
+      client_name: effClientName,
       work_category_id:   catId,
       work_category_name: catName,
       work_subcategory_id:   subId,
       work_subcategory_name: subName,
-      time_category:  catType,
+      time_category:  catTypeEff,
       work_start_at:  new Date(startAt).getTime(),
       work_end_at:    new Date(endAt).getTime(),
       duration_minutes: duration,
@@ -2283,9 +2895,13 @@ async function _doSaveEntry(status, approverInfo) {
       reviewer2_name: approverInfo.reviewer2_name || '',
       status,
       // 자문 분류 정보 (고객업무 시만 의미있음)
-      kw_query:  catType === 'client' ? (() => { try { return JSON.parse(document.getElementById('kw-query-hidden')?.value || '[]'); } catch { return []; } })() : [],
-      law_refs:  catType === 'client' ? (document.getElementById('law-refs-hidden')?.value || '[]') : '[]',
-      kw_reason: catType === 'client' ? (() => { try { return JSON.parse(document.getElementById('kw-reason-hidden')?.value || '[]'); } catch { return []; } })() : [],
+      kw_query:  catTypeEff === 'client' ? (() => { try { return JSON.parse(document.getElementById('kw-query-hidden')?.value || '[]'); } catch { return []; } })() : [],
+      law_refs:  catTypeEff === 'client' ? (document.getElementById('law-refs-hidden')?.value || '[]') : '[]',
+      kw_reason: catTypeEff === 'client' ? (() => { try { return JSON.parse(document.getElementById('kw-reason-hidden')?.value || '[]'); } catch { return []; } })() : [],
+      sheet_type: entryFormSheetType(),
+      project_code:   isProjSave ? project_code : '',
+      project_name:   isProjSave ? project_name : '',
+      work_location:  isProjSave ? work_location : '',
     };
 
     let entry;
@@ -2348,6 +2964,7 @@ async function _doSaveEntry(status, approverInfo) {
 
       // 1차 승인자에게 알림
       if (approverInfo.approver_id) {
+        const sheetHint = entryFormSheetType() === 'daily' ? '일일 타임시트' : '타임시트';
         createNotification({
           toUserId:     approverInfo.approver_id,
           toUserName:   approverInfo.approver_name,
@@ -2356,7 +2973,7 @@ async function _doSaveEntry(status, approverInfo) {
           type:         'submitted',
           entryId:      entry.id,
           entrySummary: summary,
-          message:      `${session.name}님이 타임시트 승인을 요청했습니다.`,
+          message:      `${session.name}님이 ${sheetHint} 승인을 요청했습니다.`,
           targetMenu:   'approval',
         });
       }
@@ -2372,7 +2989,8 @@ async function _doSaveEntry(status, approverInfo) {
     document.getElementById('fileList').innerHTML = '';
     // form 태그 제거로 .reset() 대신 필드를 직접 초기화
     ['entry-category','entry-subcategory','entry-team','entry-client',
-     'entry-start','entry-end','entry-duration',
+     'entry-start','entry-end','entry-work-date','entry-daily-from','entry-daily-to',
+     'entry-work-location','entry-duration',
      'kw-query-hidden','law-refs-hidden','kw-reason-hidden'
     ].forEach(id => {
       const el = document.getElementById(id);
@@ -2380,6 +2998,12 @@ async function _doSaveEntry(status, approverInfo) {
       if (el.tagName === 'SELECT') el.selectedIndex = 0;
       else el.value = el.id === 'law-refs-hidden' ? '[]' : '';
     });
+    _entryClearDailyProjectPick();
+    const plistAfter = document.getElementById('entry-daily-project-list');
+    if (plistAfter) plistAfter.innerHTML = '';
+    if (typeof ClientSearchSelect !== 'undefined') {
+      try { ClientSearchSelect.clear('entry-daily-proj-client-wrap'); } catch (_) {}
+    }
     document.getElementById('duration-text').textContent = '시작/종료 시간을 입력하면 자동 계산됩니다.';
     _clearDurationInput(); // 실제 소요시간 입력란 초기화
     document.getElementById('entry-user-name').value = session.name;
@@ -2396,7 +3020,7 @@ async function _doSaveEntry(status, approverInfo) {
     await updateApprovalBadge(session);
     restoreSubmit();
     restoreOther();
-    navigateTo('my-entries');
+    navigateTo(entryFormSheetType() === 'daily' ? 'my-entries-daily' : 'my-entries-hourly');
 
   } catch (err) {
     console.error(err);
@@ -2409,6 +3033,57 @@ async function _doSaveEntry(status, approverInfo) {
 // ─────────────────────────────────────────────
 // 나의 타임시트 초기화
 // ─────────────────────────────────────────────
+function _entryFmtDateOnly(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function _entryQuickRangeDates(key) {
+  const end = new Date();
+  end.setHours(0, 0, 0, 0);
+  const start = new Date(end);
+  if (key === 'yesterday') {
+    start.setDate(start.getDate() - 1);
+    end.setDate(end.getDate() - 1);
+  } else if (key === 'week') {
+    start.setDate(start.getDate() - 6);
+  } else if (key === 'month') {
+    start.setDate(start.getDate() - 29);
+  }
+  return { from: _entryFmtDateOnly(start), to: _entryFmtDateOnly(end) };
+}
+function _entrySyncRangeButtonState() {
+  const fromVal = (document.getElementById('filter-entry-date-from') || {}).value || '';
+  const toVal = (document.getElementById('filter-entry-date-to') || {}).value || '';
+  document.querySelectorAll('#page-my-entries [data-entry-range]').forEach((btn) => {
+    const rng = _entryQuickRangeDates(btn.dataset.entryRange);
+    btn.classList.toggle('is-active', rng.from === fromVal && rng.to === toVal);
+  });
+}
+function _entryBindQuickRangeButtons() {
+  const fromEl = document.getElementById('filter-entry-date-from');
+  const toEl = document.getElementById('filter-entry-date-to');
+  if (fromEl && !fromEl.dataset.rangeBind) {
+    fromEl.dataset.rangeBind = '1';
+    fromEl.addEventListener('change', _entrySyncRangeButtonState);
+  }
+  if (toEl && !toEl.dataset.rangeBind) {
+    toEl.dataset.rangeBind = '1';
+    toEl.addEventListener('change', _entrySyncRangeButtonState);
+  }
+  document.querySelectorAll('#page-my-entries [data-entry-range]').forEach((btn) => {
+    if (btn.dataset.rangeBind) return;
+    btn.dataset.rangeBind = '1';
+    btn.addEventListener('click', () => {
+      const { from, to } = _entryQuickRangeDates(btn.dataset.entryRange);
+      if (fromEl) fromEl.value = from;
+      if (toEl) toEl.value = to;
+      _entriesPage = 1;
+      _entrySyncRangeButtonState();
+      loadMyEntries();
+    });
+  });
+  _entrySyncRangeButtonState();
+}
+
 async function init_my_entries() {
   const session = getSession();
   const isAdminAll = Auth.canViewAll(session);
@@ -2442,6 +3117,7 @@ async function init_my_entries() {
   const fmt   = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   document.getElementById('filter-entry-date-from').value = fmt(from);
   document.getElementById('filter-entry-date-to').value   = fmt(to);
+  _entryBindQuickRangeButtons();
 
   const [clients, categories, subcategories] = await Promise.all([
     Master.clients(), Master.categories(), Master.subcategories()
@@ -2514,6 +3190,7 @@ async function _loadTimeEntriesForMyList(session, isAdminAll, statusVal) {
 }
 
 async function loadMyEntries() {
+  _entrySyncRangeButtonState();
   const session      = getSession();
   const isAdminAll   = Auth.canViewAll(session);
   const dateFrom     = document.getElementById('filter-entry-date-from').value;  // 'YYYY-MM-DD'
@@ -2553,6 +3230,9 @@ async function loadMyEntries() {
     if (categoryId)    entries = entries.filter(e => e.work_category_id === categoryId);
     if (subcategoryId) entries = entries.filter(e => e.work_subcategory_id === subcategoryId);
     if (status)        entries = entries.filter(e => String(e.status) === String(status));
+
+    const sheetF = myEntriesSheetFilter(session);
+    if (sheetF) entries = entries.filter(e => _rowSheetType(e) === sheetF);
 
     // My Time Sheet 정렬: (1)반려 (2)임시저장 (3)1차검토 (4)2차검토 (5)최종승인 (6)기타
     // 동일 그룹 내: 반려·임시·1차·2차는 과거→최근, 최종승인(approved)만 최신→과거
@@ -3652,6 +4332,7 @@ function resetEntryFilter() {
   document.getElementById('filter-entry-category').value     = '';
   document.getElementById('filter-entry-subcategory').value  = '';
   document.getElementById('filter-entry-status').value       = '';
+  _entrySyncRangeButtonState();
 
   // 소분류 전체 옵션 다시 표시
   const subEl = document.getElementById('filter-entry-subcategory');
@@ -3671,6 +4352,9 @@ async function editEntry(id) {
     ]);
     if (!entry) { Toast.error('데이터를 찾을 수 없습니다.'); return; }
 
+    const sheetNorm = _rowSheetType(entry);
+    try { sessionStorage.setItem('entry_sheet_type', sheetNorm); } catch (_) {}
+
     // ② 마스터 데이터 + 폼 초기화 (신규 등록과 동일하게 드롭다운 먼저 로드)
     _editEntryId   = null;   // 잠시 null로 놓고 init_entry_new() 정상 실행
     _editMode      = false;
@@ -3681,7 +4365,7 @@ async function editEntry(id) {
     //    navigateTo가 init_entry_new()를 재호출하지 않도록 _editMode=true 선행 세팅
     _editEntryId = id;
     _editMode    = true;
-    navigateTo('entry-new');   // 이 시점에 init_entry_new()가 재호출되지만 즉시 return
+    navigateTo(sheetNorm === 'daily' ? 'entry-new-daily' : 'entry-new-hourly');
 
     // ④ 대분류 세팅 → 소분류 목록 갱신 (onCategoryChange 동기 실행)
     const catEl = document.getElementById('entry-category');
@@ -3702,30 +4386,97 @@ async function editEntry(id) {
     ClientSearchSelect.setValue('entry-client-wrap', entry.client_id || '', entry.client_name || '');
     document.getElementById('entry-client').value = entry.client_id || '';
 
-    // ⑧ 업무 시작/종료 일시 세팅
-    if (entry.work_start_at) {
-      const startDate = new Date(Number(entry.work_start_at));
-      // toISOString은 UTC 기준이므로 로컬 시간으로 변환
-      const localStart = new Date(startDate.getTime() - startDate.getTimezoneOffset() * 60000)
-        .toISOString().slice(0, 16);
-      document.getElementById('entry-start').value = localStart;
-    }
-    if (entry.work_end_at) {
-      const endDate = new Date(Number(entry.work_end_at));
-      const localEnd = new Date(endDate.getTime() - endDate.getTimezoneOffset() * 60000)
-        .toISOString().slice(0, 16);
-      document.getElementById('entry-end').value = localEnd;
+    // ⑧ 업무 일자 / 시작·종료 세팅
+    syncEntrySheetTimeRowUI();
+    if (sheetNorm === 'daily') {
+      const modeSel = document.getElementById('entry-daily-period-mode-select');
+      const inferred = _inferDailyPeriodModeFromEntry(entry);
+      if (modeSel) modeSel.value = inferred;
+
+      if (inferred === 'by_day_span') {
+        const df = document.getElementById('entry-daily-from');
+        const dto = document.getElementById('entry-daily-to');
+        if (entry.work_start_at && df) {
+          const startDate = new Date(Number(entry.work_start_at));
+          const y = startDate.getFullYear();
+          const mo = String(startDate.getMonth() + 1).padStart(2, '0');
+          const da = String(startDate.getDate()).padStart(2, '0');
+          df.value = `${y}-${mo}-${da}`;
+        }
+        if (entry.work_end_at && dto) {
+          const endDate = new Date(Number(entry.work_end_at));
+          const y = endDate.getFullYear();
+          const mo = String(endDate.getMonth() + 1).padStart(2, '0');
+          const da = String(endDate.getDate()).padStart(2, '0');
+          dto.value = `${y}-${mo}-${da}`;
+        }
+        applyDailyPeriodFromInput();
+      } else {
+        if (entry.work_start_at) {
+          const startDate = new Date(Number(entry.work_start_at));
+          const localStart = new Date(startDate.getTime() - startDate.getTimezoneOffset() * 60000)
+            .toISOString().slice(0, 16);
+          document.getElementById('entry-start').value = localStart;
+        }
+        if (entry.work_end_at) {
+          const endDate = new Date(Number(entry.work_end_at));
+          const localEnd = new Date(endDate.getTime() - endDate.getTimezoneOffset() * 60000)
+            .toISOString().slice(0, 16);
+          document.getElementById('entry-end').value = localEnd;
+        }
+        await calcDuration();
+      }
+      syncEntrySheetTimeRowUI();
+      if ((entry.work_category_name || '').trim() === '프로젝트업무') {
+        await _entryLoadDailyOpenProjects();
+        const cEl = document.getElementById('entry-daily-project-code');
+        const nEl = document.getElementById('entry-daily-project-name');
+        const ciEl = document.getElementById('entry-daily-project-client-id');
+        const cnEl = document.getElementById('entry-daily-project-client-name');
+        if (cEl) cEl.value = entry.project_code || '';
+        if (nEl) nEl.value = entry.project_name || '';
+        if (ciEl) ciEl.value = entry.client_id || '';
+        if (cnEl) cnEl.value = entry.client_name || '';
+        const selBox = document.getElementById('entry-daily-project-selected');
+        const selTxt = document.getElementById('entry-daily-project-selected-text');
+        if (entry.project_code && selBox && selTxt) {
+          selBox.style.display = '';
+          selTxt.textContent = `${entry.project_code} — ${entry.project_name || ''}`;
+        }
+      } else {
+        _entryClearDailyProjectPick();
+      }
+      const wl = document.getElementById('entry-work-location');
+      if (wl) wl.value = entry.work_location || '';
+    } else {
+      if (entry.work_start_at) {
+        const startDate = new Date(Number(entry.work_start_at));
+        const localStart = new Date(startDate.getTime() - startDate.getTimezoneOffset() * 60000)
+          .toISOString().slice(0, 16);
+        document.getElementById('entry-start').value = localStart;
+      }
+      if (entry.work_end_at) {
+        const endDate = new Date(Number(entry.work_end_at));
+        const localEnd = new Date(endDate.getTime() - endDate.getTimezoneOffset() * 60000)
+          .toISOString().slice(0, 16);
+        document.getElementById('entry-end').value = localEnd;
+      }
+      calcDuration();
     }
 
-    // ⑨ 소요시간: 자동 계산 후 → 기존 저장된 실제 소요시간으로 강제 복원
-    calcDuration();
+    updateClientSection();
+
+    // ⑨ 소요시간: 기존 저장값 복원 (일일·일 단위는 날짜 기준 자동분이 우선)
     if (entry.duration_minutes && Number(entry.duration_minutes) > 0) {
-      // 저장된 실제 소요시간이 있으면 그 값으로 입력란을 덮어씀
-      _setDurationInput(Number(entry.duration_minutes));
+      if (!(sheetNorm === 'daily' && _entryDailyEffectivePeriodMode() === 'by_day_span')) {
+        _setDurationInput(Number(entry.duration_minutes));
+      }
     }
 
     // ⑩ 수행내용 세팅 — 고객(자문)은 Quill, 내부/통관/프로젝트 등은 메모란(entry-memo)
-    const catTypeForDesc = catEl.options[catEl.selectedIndex]?.dataset?.type || 'client';
+    const catNameForDesc = catEl.options[catEl.selectedIndex]?.textContent || '';
+    const catTypeRawDesc = catEl.options[catEl.selectedIndex]?.dataset?.type || 'client';
+    const catTypeForDesc = _entryEffectiveTimeCategory(catTypeRawDesc, catNameForDesc);
     const rawDesc = entry.work_description || '';
     const memoEl = document.getElementById('entry-memo');
     const hidHtml = document.getElementById('entry-description');
@@ -3774,9 +4525,6 @@ async function editEntry(id) {
       _setLawRefs(entry.law_refs || '[]');
       _entryUpdateExampleTags();
     } catch (kwErr) { console.warn('kw 복원 실패:', kwErr); }
-
-    // ⑪ 고객 섹션 표시 상태 갱신
-    updateClientSection();
 
     // ⑫ 기존 첨부파일 목록 표시 (읽기 전용 — 수정 시 새 파일 추가만 가능)
     try {
@@ -4064,6 +4812,9 @@ async function exportEntriesToExcel() {
     if (subcategoryId) entries = entries.filter(e => e.work_subcategory_id === subcategoryId);
     if (statusVal)     entries = entries.filter(e => String(e.status) === String(statusVal));
 
+    const sheetF = myEntriesSheetFilter(session);
+    if (sheetF) entries = entries.filter(e => _rowSheetType(e) === sheetF);
+
     console.log('[Excel] entries count:', entries.length);
     if (!entries.length) {
       Toast.info('내보낼 데이터가 없습니다.');
@@ -4180,5 +4931,16 @@ async function exportEntriesToExcel() {
     Toast.error('내보내기 실패: ' + (err.message || String(err)));
   } finally {
     if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
+  }
+}
+
+// ─────────────────────────────────────────────
+// 프로젝트 산출물 (플레이스홀더 — 메뉴는 can_view_project_deliverables 로 제어)
+// ─────────────────────────────────────────────
+function init_project_deliverables() {
+  const session = getSession();
+  if (!Auth.canViewProjectDeliverables(session)) {
+    navigateTo('dashboard');
+    Toast.warning('프로젝트 산출물 열람 권한이 없습니다.');
   }
 }

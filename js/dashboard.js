@@ -36,7 +36,7 @@ function _getVisibleUserIdSetForDashboard(session, allUsers) {
     );
   }
 
-  if (role === 'director') {
+  if (role === 'director' || role === 'top_mgr') {
     const deptId = String(s.dept_id || '');
     const hqId = String(s.hq_id || '');
 

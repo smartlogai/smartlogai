@@ -81,7 +81,7 @@ function _getVisibleUserIdSetForAnalysis(session, allUsers) {
         .filter(Boolean)
     );
   }
-  if (role === 'director') {
+  if (role === 'director' || role === 'top_mgr') {
     const deptId = String(s.dept_id || '');
     const hqId = String(s.hq_id || '');
 
@@ -120,11 +120,11 @@ function _getVisibleUserIdSetForAnalysis(session, allUsers) {
 function switchAnalysisTab(tab) {
   const session = getSession();
 
-  // 인건비 탭 권한 체크: director/admin만 허용
+  // 인건비 탭: director·top_mgr (admin 제외)
   if (tab === 'labor') {
-    const canLaborTab = session && (session.role === 'director' || session.role === 'admin');
+    const canLaborTab = session && Auth.canViewCostFinancials(session);
     if (!canLaborTab) {
-      Toast.warning('인건비 분석 탭은 원장·관리자만 접근 가능합니다.');
+      Toast.warning('인건비 분석 탭은 본부장·경영층(Top Mgr)만 접근 가능합니다.');
       return;
     }
   }
@@ -172,8 +172,8 @@ async function init_analysis() {
     return;
   }
 
-  // ── 인건비 탭: director/admin만 표시 ──────────────────────
-  const canLaborTab = session && (session.role === 'director' || session.role === 'admin');
+  // ── 인건비 탭: director·top_mgr (admin 제외) ──────────────
+  const canLaborTab = session && Auth.canViewCostFinancials(session);
   const tabLaborBtn = document.getElementById('analysis-tab-labor');
   if (tabLaborBtn) tabLaborBtn.style.display = canLaborTab ? '' : 'none';
 
@@ -677,7 +677,7 @@ function _savePerfWeights(w) {
 }
 
 function _canEditPerfWeights(session) {
-  return !!(session && (session.role === 'admin' || session.role === 'director'));
+  return !!(session && (session.role === 'admin' || session.role === 'director' || session.role === 'top_mgr'));
 }
 
 function openPerfWeightsModal() {
@@ -1859,11 +1859,11 @@ async function exportPerformanceYearlyExcel() {
 async function _initLaborTab() {
   const session = getSession();
 
-  // Admin만 인건비 설정·매출 업로드 표시
+  // 인건비 설정·매출 업로드: director·top_mgr
   const btnSetting = document.getElementById('btn-labor-cost-setting');
-  if (btnSetting) btnSetting.style.display = (session.role === 'admin') ? '' : 'none';
+  if (btnSetting) btnSetting.style.display = Auth.canManageLaborCostSettings(session) ? '' : 'none';
   const btnSales = document.getElementById('btn-labor-sales-upload');
-  if (btnSales) btnSales.style.display = (session.role === 'admin') ? '' : 'none';
+  if (btnSales) btnSales.style.display = Auth.canManageLaborCostSettings(session) ? '' : 'none';
 
   // 연도 드롭다운 생성 (현재연도 기준 ±3년)
   const yearEl = document.getElementById('filter-labor-year');
