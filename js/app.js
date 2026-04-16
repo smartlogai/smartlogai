@@ -146,23 +146,46 @@ const Auth = {
     return true; // manager/director/top_mgr/admin 등
   },
 
-  // 타임시트 작성: 승인자 지정된 staff OR 타임시트 대상자인 manager
+  // 타임시트 작성: 승인자 지정 + 타임시트 대상 staff OR 타임시트 대상 manager
   canWriteEntry: (s) => {
     if (!s) return false;
-    if (s.role === 'staff') return !!(s.approver_id);
-    if (s.role === 'manager') return s.is_timesheet_target !== false;
+    const isDailyDept = Auth.preferredSheetType(s) === 'daily';
+    if (s.role === 'staff') return !!(s.approver_id) && (isDailyDept || s.is_timesheet_target !== false);
+    if (s.role === 'manager') return isDailyDept || s.is_timesheet_target !== false;
+    if (s.role === 'director') {
+      return isDailyDept;
+    }
     return false;
   },
 
-  /** Hourly 시트 메뉴·진입 (DB timesheet_hourly, 없으면 is_timesheet_target) */
+  /** Hourly 시트 메뉴·진입 (소속 기반 sheet_type + 타임시트 대상) */
   timesheetHourlyEnabled: (s) => {
     if (!s) return false;
-    if (s.timesheet_hourly === false) return false;
-    if (s.timesheet_hourly === true) return true;
-    return s.is_timesheet_target !== false;
+    if (s.is_timesheet_target === false) return false;
+    return Auth.preferredSheetType(s) === 'hourly';
   },
-  /** Daily 시트 메뉴·진입 — 명시 true 일 때만 */
-  timesheetDailyEnabled: (s) => !!(s && s.timesheet_daily === true),
+  /** Daily 시트 메뉴·진입 (소속 기반 sheet_type + 타임시트 대상) */
+  timesheetDailyEnabled: (s) => {
+    if (!s) return false;
+    if (Auth.preferredSheetType(s) !== 'daily') return false;
+    if (s.role === 'staff') return !!s.approver_id;
+    return s.role === 'manager' || s.role === 'director';
+  },
+  sheetTypeByDeptName: (deptName) => {
+    const token = String(deptName || '').trim().toUpperCase();
+    if (token.includes('CCB')) return 'daily';
+    if (token.includes('CRB') || token.includes('COB')) return 'hourly';
+    return '';
+  },
+  /** 사용자 기본 시트 타입 (소속 우선, 없으면 users.sheet_type 사용) */
+  preferredSheetType: (s) => {
+    if (!s) return 'hourly';
+    const deptBased = Auth.sheetTypeByDeptName(s.dept_name || '');
+    if (deptBased) return deptBased;
+    const st = String(s.sheet_type || '').toLowerCase();
+    if (st === 'daily' || st === 'hourly') return st;
+    return 'hourly';
+  },
 
   // ── 승인 권한 분리 ──────────────────────────────────────
   // 1차 승인: manager (수행방식 확인 + 형식 검증)
@@ -185,7 +208,13 @@ const Auth = {
   canManageRefData: (s) => s && (s.role === 'admin' || s.role === 'director' || s.role === 'top_mgr' || s.role === 'manager'),
 
   // 프로젝트 등록 (팀장 이상): 기준정보와 동일
-  canManageProjectRegister: (s) => s && (s.role === 'admin' || s.role === 'director' || s.role === 'top_mgr' || s.role === 'manager'),
+  canManageProjectRegister: (s) => s && (
+    s.role === 'admin' ||
+    s.role === 'director' ||
+    s.role === 'top_mgr' ||
+    s.role === 'manager' ||
+    Auth.preferredSheetType(s) === 'daily'
+  ),
 
   // 분석 열람: manager + director + top_mgr + admin
   canViewAnalysis: (s) => s && (s.role === 'director' || s.role === 'top_mgr' || s.role === 'admin' || s.role === 'manager'),
@@ -1432,11 +1461,27 @@ const UserSearchSelect = (() => {
 // 사이드바 내비게이션
 // ─────────────────────────────────────────────
 function navigateTo(page) {
+  const session = Session.get();
+  if (page === 'entry-new' || page === 'my-entries') {
+    if (session && !Auth.canViewAll(session)) {
+      const prefer = Auth.preferredSheetType(session);
+      const hourlyOk = Auth.timesheetHourlyEnabled(session);
+      const dailyOk = Auth.timesheetDailyEnabled(session);
+      if (page === 'entry-new') {
+        if (prefer === 'daily' && dailyOk) page = 'entry-new-daily';
+        else if (hourlyOk) page = 'entry-new-hourly';
+        else if (dailyOk) page = 'entry-new-daily';
+      } else {
+        if (prefer === 'daily' && dailyOk) page = 'my-entries-daily';
+        else if (hourlyOk) page = 'my-entries-hourly';
+        else if (dailyOk) page = 'my-entries-daily';
+      }
+    }
+  }
+
   const SECTION_ALIAS = {
     'entry-new-hourly': 'entry-new',
-    'entry-new-daily': 'entry-new',
     'my-entries-hourly': 'my-entries',
-    'my-entries-daily': 'my-entries',
   };
   const sectionPage = SECTION_ALIAS[page] || page;
 
@@ -1496,18 +1541,28 @@ function setupMenuByRole(session) {
   const role        = session ? session.role : '';
   const hasApprover = Auth.hasApprover(session);      // staff에서 승인자 지정 여부
   const isStaffWithApprover  = Auth.isStaff(session) && hasApprover;
+  const isStaffTimesheetTarget = Auth.isStaff(session) && (
+    Auth.preferredSheetType(session) === 'daily' || session.is_timesheet_target !== false
+  );
   const isStaffNoApprover    = Auth.isStaff(session) && !hasApprover;
   const canApprove           = Auth.canApprove(session);        // manager
   const canViewDeptScope     = Auth.canViewDeptScope(session);  // manager+director+admin
   const canViewAll           = Auth.canViewAll(session);        // admin only
   const canAnalysis          = Auth.canViewAnalysis(session);   // director+admin
   const isMaster             = Auth.canManageMaster(session);   // admin only
+  const canProjectReg        = Auth.canManageProjectRegister(session);
 
   // ── Time Sheet 섹션 ────────────────────────────────────────
-  const isManagerTimesheetTarget = Auth.isManager(session) && session.is_timesheet_target !== false;
-  const baseTs = isStaffWithApprover || isManagerTimesheetTarget;
+  const isManagerTimesheetTarget = Auth.isManager(session) && (
+    Auth.preferredSheetType(session) === 'daily' || session.is_timesheet_target !== false
+  );
+  const isDirectorTimesheetTarget = Auth.isDirector(session)
+    && session.is_timesheet_target !== false
+    && Auth.preferredSheetType(session) === 'daily';
+  const baseTs = (isStaffWithApprover && isStaffTimesheetTarget) || isManagerTimesheetTarget || isDirectorTimesheetTarget;
   const hourlyOk = Auth.timesheetHourlyEnabled(session);
   const dailyOk = Auth.timesheetDailyEnabled(session);
+  const preferredSheet = Auth.preferredSheetType(session);
   const showTS = baseTs && (hourlyOk || dailyOk);
   const tsSection = document.getElementById('menu-timesheet-section');
   if (tsSection) tsSection.style.display = showTS ? '' : 'none';
@@ -1515,10 +1570,16 @@ function setupMenuByRole(session) {
   const mDailyNew = document.getElementById('menu-entry-new-daily');
   const mHourlyMy = document.getElementById('menu-my-entries-hourly');
   const mDailyMy = document.getElementById('menu-my-entries-daily');
-  if (mHourlyNew) mHourlyNew.style.display = showTS && hourlyOk ? '' : 'none';
-  if (mDailyNew) mDailyNew.style.display = showTS && dailyOk ? '' : 'none';
-  if (mHourlyMy) mHourlyMy.style.display = showTS && hourlyOk ? '' : 'none';
-  if (mDailyMy) mDailyMy.style.display = showTS && dailyOk ? '' : 'none';
+  let showHourlyMenu = showTS && hourlyOk;
+  let showDailyMenu = showTS && dailyOk;
+  if (showTS) {
+    if (preferredSheet === 'daily' && dailyOk) showHourlyMenu = false;
+    if (preferredSheet === 'hourly' && hourlyOk) showDailyMenu = false;
+  }
+  if (mHourlyNew) mHourlyNew.style.display = showHourlyMenu ? '' : 'none';
+  if (mDailyNew) mDailyNew.style.display = showDailyMenu ? '' : 'none';
+  if (mHourlyMy) mHourlyMy.style.display = showHourlyMenu ? '' : 'none';
+  if (mDailyMy) mDailyMy.style.display = showDailyMenu ? '' : 'none';
 
   const delivMenu = document.getElementById('menu-deliverables');
   if (delivMenu) delivMenu.style.display = Auth.canViewProjectDeliverables(session) ? '' : 'none';
@@ -1552,10 +1613,12 @@ function setupMenuByRole(session) {
   const canRefData  = Auth.canManageRefData(session);
   const refDataMenus = document.querySelectorAll('.menu-ref-data');
   refDataMenus.forEach(m => m.style.display = canRefData ? '' : 'none');
+  const projectRegMenu = document.querySelector('.nav-item[data-page="project-register"]');
+  if (projectRegMenu) projectRegMenu.style.display = canProjectReg ? '' : 'none';
 
   // ── Settings 섹션 타이틀: admin 또는 기준정보 권한 있을 때 ───
   const settingsSection = document.querySelector('.menu-settings-section');
-  if (settingsSection) settingsSection.style.display = (isMaster || canRefData) ? '' : 'none';
+  if (settingsSection) settingsSection.style.display = (isMaster || canRefData || canProjectReg) ? '' : 'none';
 
   // ── 승인자 없는 staff 안내 배너 표시 ──────────────────────
   _showNoApproverBanner(isStaffNoApprover);
@@ -1670,10 +1733,18 @@ async function updateApprovalBadge(session, force = false) {
         const preApproved = r.data.filter(e =>
           e.status === 'pre_approved' && scopeIds.has(String(e.user_id)) && _needsSecondApprovalByCategory(e)
         ).length;
-        const managerDirect = r.data.filter(e =>
-          e.status === 'submitted' && String(e.approver_id) === String(session.id) && _needsSecondApprovalByCategory(e)
+        const ccbFirst = r.data.filter(e =>
+          e.status === 'submitted' &&
+          String(e.approver_id) === String(session.id) &&
+          String(e && e.dept_name || '').trim().toUpperCase().includes('CCB')
         ).length;
-        count = preApproved + managerDirect;
+        const managerDirect = r.data.filter(e =>
+          e.status === 'submitted' &&
+          String(e.approver_id) === String(session.id) &&
+          _needsSecondApprovalByCategory(e) &&
+          !String(e && e.dept_name || '').trim().toUpperCase().includes('CCB')
+        ).length;
+        count = preApproved + managerDirect + ccbFirst;
       }
       const badge = document.getElementById('approval-badge');
       if (badge) {

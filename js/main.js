@@ -50,6 +50,16 @@ window.addEventListener('DOMContentLoaded', async () => {
         is_timesheet_target: freshUser.is_timesheet_target !== false,
         timesheet_hourly: freshUser.timesheet_hourly !== false,
         timesheet_daily: freshUser.timesheet_daily === true,
+        sheet_type: (
+          String(freshUser.dept_name || '').toUpperCase().includes('CCB')
+            ? 'daily'
+            : (
+              String(freshUser.dept_name || '').toUpperCase().includes('CRB') ||
+              String(freshUser.dept_name || '').toUpperCase().includes('COB')
+            )
+              ? 'hourly'
+              : (String(freshUser.sheet_type || '').toLowerCase() === 'daily' ? 'daily' : 'hourly')
+        ),
         // 역할도 최신 값 사용 — DB 값이 반드시 우선 (null·빈값이면 기존 세션 유지)
         role:      (freshUser.role && freshUser.role.trim()) ? freshUser.role : _session.role,
         is_active: freshUser.is_active !== undefined ? freshUser.is_active : _session.is_active,
@@ -421,10 +431,10 @@ const PAGE_TITLES = {
   dashboard: 'Dashboard',
   'entry-new': 'New Entry',
   'entry-new-hourly': '업무 등록 (시간제)',
-  'entry-new-daily': '업무 등록 (일일)',
+  'entry-new-daily': '업무 등록 (일일 · 분리모듈)',
   'my-entries': 'My Time Sheet',
   'my-entries-hourly': 'My Time Sheet',
-  'my-entries-daily': '내 타임시트 (일일)',
+  'my-entries-daily': 'Daily Time Sheet (분리모듈)',
   'project-deliverables': '프로젝트 산출물',
   approval: 'Approval',
   analysis: 'Analysis',
@@ -445,10 +455,10 @@ const PAGE_INIT_MAP = {
   'dashboard': 'init_dashboard',
   'entry-new': 'init_entry_new',
   'entry-new-hourly': 'init_entry_new',
-  'entry-new-daily': 'init_entry_new',
+  'entry-new-daily': 'init_entry_new_daily',
   'my-entries': 'init_my_entries',
   'my-entries-hourly': 'init_my_entries',
-  'my-entries-daily': 'init_my_entries',
+  'my-entries-daily': 'init_my_entries_daily',
   'project-deliverables': 'init_project_deliverables',
   'approval': 'init_approval',
   'analysis': 'init_analysis',

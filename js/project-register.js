@@ -354,7 +354,7 @@ async function init_project_register() {
   const session = getSession();
   if (!Auth.canManageProjectRegister(session)) {
     navigateTo('dashboard');
-    Toast.warning('프로젝트 등록은 팀장 이상(manager·director·top_mgr·admin)만 사용할 수 있습니다.');
+    Toast.warning('프로젝트 등록 권한이 없습니다. (CCB 소속 또는 팀장 이상 권한 필요)');
     return;
   }
   projRegBindClientSearch();
@@ -716,7 +716,7 @@ function projRegRenderList() {
       <td style="font-size:12px">${Utils.escHtml(cd)}</td>
       <td style="text-align:center">${actionHtml}</td>
     </tr>`;
-  });
+  }).join('');
 }
 
 function _projRegClearBilling() {
@@ -1084,11 +1084,18 @@ async function projRegSubmitForApproval() {
   const snap = await _projRegRegistrantSnapshot(session);
   const has1 = !!snap.pa1Id;
   const has2 = !!snap.pa2Id;
-  const autoApprove = !has1 && !has2;
+  const isCcbAutoApprove =
+    (session.role === 'director' || session.role === 'top_mgr') &&
+    typeof Auth !== 'undefined' &&
+    typeof Auth.preferredSheetType === 'function' &&
+    Auth.preferredSheetType(session) === 'daily';
+  const autoApprove = isCcbAutoApprove || (!has1 && !has2);
 
   if (autoApprove && !_projRegFormWillHaveContract(f, prev)) {
     Toast.warning(
-      '승인자가 지정되어 있지 않아 제출 즉시 최종 승인됩니다. 이 경우 계약서(파일명)를 먼저 첨부한 뒤 다시 시도하세요.'
+      isCcbAutoApprove
+        ? 'CCB 본부장/사업부장 등록은 제출 즉시 최종 승인됩니다. 이 경우 계약서(파일명)를 먼저 첨부한 뒤 다시 시도하세요.'
+        : '승인자가 지정되어 있지 않아 제출 즉시 최종 승인됩니다. 이 경우 계약서(파일명)를 먼저 첨부한 뒤 다시 시도하세요.'
     );
     return;
   }
@@ -1167,6 +1174,9 @@ async function projRegSubmitForApproval() {
 
   if (autoApprove) {
     basePayload.registration_status = 'approved';
+    basePayload.first_approved_at = now;
+    basePayload.first_approved_by = String(session.id || '');
+    basePayload.first_approved_by_name = session.name || '';
     basePayload.final_approved_at = now;
     basePayload.final_approved_by = String(session.id || '');
     basePayload.final_approved_by_name = session.name || '';
@@ -1247,10 +1257,6 @@ async function projRegSaveApproved() {
 
 async function projRegApprove(id) {
   const session = getSession();
-  if (!Auth.canManageProjectRegister(session)) {
-    Toast.warning('권한이 없습니다.');
-    return;
-  }
   const row = _projRegRows.find((x) => x.id === id);
   if (!row || _projRegNormStatus(row) !== 'pending') return;
   if (!_projRegCanApproveRow(session, row)) {
@@ -1315,10 +1321,6 @@ async function projRegApprove(id) {
 
 async function projRegReject(id) {
   const session = getSession();
-  if (!Auth.canManageProjectRegister(session)) {
-    Toast.warning('권한이 없습니다.');
-    return;
-  }
   const row = _projRegRows.find((x) => x.id === id);
   if (!row || _projRegNormStatus(row) !== 'pending') return;
   if (!_projRegCanApproveRow(session, row)) {

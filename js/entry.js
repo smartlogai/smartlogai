@@ -1018,12 +1018,12 @@ async function init_entry_new() {
   if (entryFormSheetType() === 'daily') {
     if (!Auth.timesheetDailyEnabled(session)) {
       navigateTo('dashboard');
-      Toast.warning('Daily Time Sheet 대상으로 등록되지 않았습니다. Staff 관리에서 권한을 요청하세요.');
+      Toast.warning('현재 소속은 Daily 대상이 아니거나 타임시트 작성 대상이 아닙니다. 사업부/대상자 설정을 확인하세요.');
       return;
     }
   } else if (!Auth.timesheetHourlyEnabled(session)) {
     navigateTo('dashboard');
-    Toast.warning('Hourly Time Sheet 대상으로 등록되지 않았습니다. Staff 관리에서 권한을 요청하세요.');
+    Toast.warning('현재 소속은 Hourly 대상이 아니거나 타임시트 작성 대상이 아닙니다. 사업부/대상자 설정을 확인하세요.');
     return;
   }
 
@@ -1286,8 +1286,8 @@ function updateClientSection() {
   const isProject = catNameTrim === '프로젝트업무';
   const isDailyProject = isDaily && isProject;
   const isDailyInternalCo = isDaily && isCompanyInternal;
-  /** 일일: ②③④는 「일반자문업무」일 때만 (마스터 category_type이 client로 잘못돼도 프로젝트/내부는 ①만) */
-  const showFourConsultPanels = isDaily ? (catNameTrim === '일반자문업무') : isClient;
+  /** hourly/daily 공통: ②③④는 「일반자문업무」일 때만 */
+  const showFourConsultPanels = catNameTrim === '일반자문업무';
 
   const metaPanel      = document.querySelector('.entry-panel-meta');
   const descPanel      = document.querySelector('.entry-panel-desc');
@@ -2554,6 +2554,12 @@ async function saveEntryDraft() {
 
 async function saveEntry(status) {
   const session = getSession();
+  const isCcbAutoApprove =
+    status === 'submitted' &&
+    (session.role === 'director' || session.role === 'top_mgr') &&
+    typeof Auth !== 'undefined' &&
+    typeof Auth.preferredSheetType === 'function' &&
+    Auth.preferredSheetType(session) === 'daily';
 
   // 변환 중인 파일 있으면 대기
   if (_pendingFiles.some(pf => pf._loading)) {
@@ -2571,64 +2577,68 @@ async function saveEntry(status) {
     reviewer2_id:   session.reviewer2_id   || '',
     reviewer2_name: session.reviewer2_name || ''
   };
-  try {
-    const userRecord = await API.get('users', session.id);
-    if (!userRecord) throw new Error('userRecord null');
+  if (isCcbAutoApprove) {
+    approverInfo = { approver_id: '', approver_name: '', reviewer2_id: '', reviewer2_name: '' };
+  } else {
+    try {
+      const userRecord = await API.get('users', session.id);
+      if (!userRecord) throw new Error('userRecord null');
 
-    if (session.role === 'manager') {
-      // manager 본인 건: reviewer2_id(director)를 approver_id로 저장
-      // → approval.js에서 director가 String(e.approver_id)===String(session.id) 로 조회
-      if (userRecord.reviewer2_id) {
-        approverInfo = {
-          approver_id:    userRecord.reviewer2_id,
-          approver_name:  userRecord.reviewer2_name || '',
-          reviewer2_id:   userRecord.reviewer2_id,
-          reviewer2_name: userRecord.reviewer2_name || ''
-        };
-      } else {
-        // fallback: 소속 범위의 director 자동 탐색
-        const allUsers = await Master.users();
-        const myDirector = allUsers.find(u =>
-          u.role === 'director' &&
-          u.is_active !== false &&
-          Auth.scopeMatch(u, userRecord)
-        ) || allUsers.find(u =>
-          u.role === 'director' && u.is_active !== false &&
-          u.dept_id && userRecord.dept_id && String(u.dept_id) === String(userRecord.dept_id)
-        );
-        if (myDirector) {
+      if (session.role === 'manager') {
+        // manager 본인 건: reviewer2_id(director)를 approver_id로 저장
+        // → approval.js에서 director가 String(e.approver_id)===String(session.id) 로 조회
+        if (userRecord.reviewer2_id) {
           approverInfo = {
-            approver_id:    myDirector.id,
-            approver_name:  myDirector.name || '',
-            reviewer2_id:   myDirector.id,
-            reviewer2_name: myDirector.name || ''
+            approver_id:    userRecord.reviewer2_id,
+            approver_name:  userRecord.reviewer2_name || '',
+            reviewer2_id:   userRecord.reviewer2_id,
+            reviewer2_name: userRecord.reviewer2_name || ''
+          };
+        } else {
+          // fallback: 소속 범위의 director 자동 탐색
+          const allUsers = await Master.users();
+          const myDirector = allUsers.find(u =>
+            u.role === 'director' &&
+            u.is_active !== false &&
+            Auth.scopeMatch(u, userRecord)
+          ) || allUsers.find(u =>
+            u.role === 'director' && u.is_active !== false &&
+            u.dept_id && userRecord.dept_id && String(u.dept_id) === String(userRecord.dept_id)
+          );
+          if (myDirector) {
+            approverInfo = {
+              approver_id:    myDirector.id,
+              approver_name:  myDirector.name || '',
+              reviewer2_id:   myDirector.id,
+              reviewer2_name: myDirector.name || ''
+            };
+          }
+        }
+      } else {
+        // staff: 등록된 승인자(manager) 사용
+        // ★ userRecord에 approver_id가 있으면 우선 사용, 없으면 session 캐시값 유지
+        if (userRecord.approver_id) {
+          approverInfo = {
+            approver_id:    userRecord.approver_id,
+            approver_name:  userRecord.approver_name  || '',
+            reviewer2_id:   userRecord.reviewer2_id   || '',
+            reviewer2_name: userRecord.reviewer2_name || ''
           };
         }
+        // approver_id가 여전히 없으면 제출 차단
+        if (!approverInfo.approver_id && status === 'submitted') {
+          Toast.warning('승인자가 지정되지 않았습니다. 관리자에게 승인자 지정을 요청하세요.');
+          return;
+        }
       }
-    } else {
-      // staff: 등록된 승인자(manager) 사용
-      // ★ userRecord에 approver_id가 있으면 우선 사용, 없으면 session 캐시값 유지
-      if (userRecord.approver_id) {
-        approverInfo = {
-          approver_id:    userRecord.approver_id,
-          approver_name:  userRecord.approver_name  || '',
-          reviewer2_id:   userRecord.reviewer2_id   || '',
-          reviewer2_name: userRecord.reviewer2_name || ''
-        };
-      }
-      // approver_id가 여전히 없으면 제출 차단
-      if (!approverInfo.approver_id && status === 'submitted') {
-        Toast.warning('승인자가 지정되지 않았습니다. 관리자에게 승인자 지정을 요청하세요.');
+    } catch (err) {
+      console.warn('[saveEntry] approverInfo 조회 실패, session 캐시 사용:', err);
+      // session 캐시 fallback 이미 적용됨 — approverInfo 유지
+      // manager인데 reviewer2_id가 없으면 경고
+      if (session.role === 'manager' && !approverInfo.reviewer2_id && status === 'submitted') {
+        Toast.warning('2차 승인자(Director)가 지정되지 않았습니다. 관리자에게 요청하세요.');
         return;
       }
-    }
-  } catch (err) {
-    console.warn('[saveEntry] approverInfo 조회 실패, session 캐시 사용:', err);
-    // session 캐시 fallback 이미 적용됨 — approverInfo 유지
-    // manager인데 reviewer2_id가 없으면 경고
-    if (session.role === 'manager' && !approverInfo.reviewer2_id && status === 'submitted') {
-      Toast.warning('2차 승인자(Director)가 지정되지 않았습니다. 관리자에게 요청하세요.');
-      return;
     }
   }
 
@@ -2787,21 +2797,21 @@ async function saveEntry(status) {
       const sensitiveResults = await _detectSensitiveInfo(combinedText);
       if (sensitiveResults.length > 0) {
         // 팝업 표시 — [저장 진행] 클릭 시 저장 계속
-        _showSensitiveWarning(sensitiveResults, () => _doSaveEntry(status, approverInfo));
+        _showSensitiveWarning(sensitiveResults, () => _doSaveEntry(status, approverInfo, isCcbAutoApprove));
         return; // 사용자 선택 대기
       }
     }
   }
 
   // 민감정보 없거나 internal → 바로 저장 실행
-  await _doSaveEntry(status, approverInfo);
+  await _doSaveEntry(status, approverInfo, isCcbAutoApprove);
 }
 
 /**
  * 실제 저장 로직 (민감정보 팝업 통과 후 호출)
  * saveEntry()의 하위 함수로 분리하여 팝업 콜백에서도 재사용
  */
-async function _doSaveEntry(status, approverInfo) {
+async function _doSaveEntry(status, approverInfo, autoApprove = false) {
   // 저장에 필요한 값 재수집 (saveEntry에서 이미 검증 완료)
   const session    = getSession();
   // approverInfo fallback (민감정보 팝업 콜백 등에서 누락될 경우 대비)
@@ -2904,6 +2914,18 @@ async function _doSaveEntry(status, approverInfo) {
       work_location:  isProjSave ? work_location : '',
     };
 
+    // CCB 본부장/사업부장(Director/Top Mgr) 제출 → 승인자 없이 즉시 승인 완료 처리
+    if (isSubmit && autoApprove) {
+      entryData.status = 'approved';
+      entryData.approver_id = '';
+      entryData.approver_name = '';
+      entryData.reviewer2_id = '';
+      entryData.reviewer2_name = '';
+      entryData.reviewed_at = Date.now();
+      entryData.reviewer_id = session.id;
+      entryData.reviewer_name = session.name || '';
+    }
+
     let entry;
     if (_editEntryId) {
       // 수정: doc_no는 기존 값을 유지 (비어있을 때만 생성)
@@ -2957,7 +2979,7 @@ async function _doSaveEntry(status, approverInfo) {
     }
 
     // ── ★ 알림 생성 (제출 시만) ─────────────────────────────
-    if (status === 'submitted' && typeof createNotification === 'function') {
+    if (status === 'submitted' && !autoApprove && typeof createNotification === 'function') {
       const catLabel   = catType === 'client' ? (clientName || '고객사') : catName;
       const summary    = `${catLabel} | ${subName || catName}`;
       const dateStr    = startAt ? new Date(startAt).toLocaleDateString('ko-KR', { month:'2-digit', day:'2-digit' }) : '';
@@ -2979,7 +3001,11 @@ async function _doSaveEntry(status, approverInfo) {
       }
     }
 
-    Toast.success(status === 'submitted' ? '타임시트가 제출되었습니다.' : '임시저장되었습니다.');
+    Toast.success(
+      status === 'submitted'
+        ? (autoApprove ? '승인 완료되었습니다.' : '타임시트가 제출되었습니다.')
+        : '임시저장되었습니다.'
+    );
     window._dashNeedsRefresh = true; // 대시보드 재진입 시 캐시 갱신
     _editEntryId  = null;
     _pendingFiles = [];
@@ -3084,6 +3110,98 @@ function _entryBindQuickRangeButtons() {
   _entrySyncRangeButtonState();
 }
 
+let _entryProjectCodeTypeRows = null;
+let _entryProjectMainByCode = null;
+
+function _entrySelectedFilterCategoryName() {
+  const catEl = document.getElementById('filter-entry-category');
+  if (!catEl) return '';
+  const opt = catEl.options[catEl.selectedIndex];
+  return String(opt ? opt.textContent : '').trim();
+}
+
+function _entryIsProjectFilterCategorySelected() {
+  return _entrySelectedFilterCategoryName() === '프로젝트업무';
+}
+
+async function _entryEnsureProjectCodeTypes() {
+  if (_entryProjectCodeTypeRows) return _entryProjectCodeTypeRows;
+  try {
+    _entryProjectCodeTypeRows = await API.listAllPages('project_code_types', { limit: 500, maxPages: 10, sort: 'main_code' });
+  } catch (e) {
+    console.warn('[entry] project_code_types load failed', e);
+    _entryProjectCodeTypeRows = [];
+  }
+  _entryProjectMainByCode = {};
+  (_entryProjectCodeTypeRows || []).forEach((r) => {
+    const mc = String(r.main_code || '').trim();
+    if (!mc || _entryProjectMainByCode[mc]) return;
+    _entryProjectMainByCode[mc] = String(r.main_category || '').trim();
+  });
+  return _entryProjectCodeTypeRows;
+}
+
+function _entryFilterIsProjectMainValue(v) {
+  return String(v || '').startsWith('pcmain:');
+}
+
+function _entryFilterProjectMainCode(v) {
+  return String(v || '').replace(/^pcmain:/, '').trim();
+}
+
+function _entryRestoreNormalSubcategoryFilterOptions(catId) {
+  const subEl = document.getElementById('filter-entry-subcategory');
+  if (!subEl) return;
+  let rows = [];
+  try {
+    rows = JSON.parse(subEl.dataset.baseRows || '[]');
+  } catch (_) {
+    rows = [];
+  }
+  subEl.innerHTML = '<option value="">전체 소분류</option>';
+  rows.forEach((s) => {
+    if (catId && String(s.category_id || '') !== String(catId)) return;
+    const opt = document.createElement('option');
+    opt.value = String(s.id || '');
+    opt.textContent = String(s.sub_category_name || '');
+    opt.dataset.categoryId = String(s.category_id || '');
+    subEl.appendChild(opt);
+  });
+  subEl.dataset.filterMode = 'subcategory';
+}
+
+async function _entryUseProjectMainFilterOptions() {
+  const subEl = document.getElementById('filter-entry-subcategory');
+  if (!subEl) return;
+  await _entryEnsureProjectCodeTypes();
+  const uniq = new Map();
+  (_entryProjectCodeTypeRows || []).forEach((r) => {
+    const mc = String(r.main_code || '').trim();
+    const mcat = String(r.main_category || '').trim();
+    if (!mc || !mcat || uniq.has(mc)) return;
+    uniq.set(mc, mcat);
+  });
+  const rows = [...uniq.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  subEl.innerHTML = '<option value="">전체 프로젝트 대분류</option>';
+  rows.forEach(([mc, mcat]) => {
+    const opt = document.createElement('option');
+    opt.value = `pcmain:${mc}`;
+    opt.textContent = mcat;
+    subEl.appendChild(opt);
+  });
+  subEl.dataset.filterMode = 'project-main';
+}
+
+function _entryAttachProjectMainFields(entries) {
+  const map = _entryProjectMainByCode || {};
+  (entries || []).forEach((e) => {
+    const pcode = String(e.project_code || '').trim();
+    const mainCode = pcode ? pcode.split('_')[0] : '';
+    e._project_main_code = mainCode;
+    e._project_main_category = mainCode ? String(map[mainCode] || '') : '';
+  });
+}
+
 async function init_my_entries() {
   const session = getSession();
   const isAdminAll = Auth.canViewAll(session);
@@ -3148,22 +3266,27 @@ async function init_my_entries() {
     opt.dataset.categoryId = s.category_id;
     subEl.appendChild(opt);
   });
+  subEl.dataset.baseRows = JSON.stringify((subcategories || []).map((s) => ({
+    id: s.id,
+    category_id: s.category_id,
+    sub_category_name: s.sub_category_name,
+  })));
+  subEl.dataset.filterMode = 'subcategory';
 
   await loadMyEntries();
 }
 
 // 대분류 변경 시 소분류 동적 필터
-function onEntryFilterCategoryChange() {
+async function onEntryFilterCategoryChange() {
   const catId = document.getElementById('filter-entry-category').value;
   const subEl = document.getElementById('filter-entry-subcategory');
+  if (!subEl) return;
   subEl.value = '';
-  Array.from(subEl.options).forEach(opt => {
-    if (!opt.value) return; // "전체 소분류" 유지
-    opt.style.display = (!catId || opt.dataset.categoryId === catId) ? '' : 'none';
-  });
-  // 숨겨진 옵션이 선택돼 있으면 초기화
-  const selected = subEl.options[subEl.selectedIndex];
-  if (selected && selected.style.display === 'none') subEl.value = '';
+  if (_entryIsProjectFilterCategorySelected()) {
+    await _entryUseProjectMainFilterOptions();
+    return;
+  }
+  _entryRestoreNormalSubcategoryFilterOptions(catId);
 }
 
 /** Staff 업무 기록/엑셀: 최신 500건만 보면 상태·기간 필터가 어긋남 → 페이지 순회·필요 시 user_id/status 서버 필터 */
@@ -3228,8 +3351,25 @@ async function loadMyEntries() {
 
     if (clientId)      entries = entries.filter(e => e.client_id === clientId);
     if (categoryId)    entries = entries.filter(e => e.work_category_id === categoryId);
-    if (subcategoryId) entries = entries.filter(e => e.work_subcategory_id === subcategoryId);
+    if (subcategoryId) {
+      if (_entryFilterIsProjectMainValue(subcategoryId)) {
+        await _entryEnsureProjectCodeTypes();
+        _entryAttachProjectMainFields(entries);
+        const mainCode = _entryFilterProjectMainCode(subcategoryId);
+        entries = entries.filter((e) => String(e._project_main_code || '') === mainCode);
+      } else {
+        entries = entries.filter(e => e.work_subcategory_id === subcategoryId);
+      }
+    }
     if (status)        entries = entries.filter(e => String(e.status) === String(status));
+
+    const hasProjectRows = entries.some((e) =>
+      String(e.work_category_name || '').trim() === '프로젝트업무' && String(e.project_code || '').trim()
+    );
+    if (hasProjectRows) {
+      await _entryEnsureProjectCodeTypes();
+      _entryAttachProjectMainFields(entries);
+    }
 
     const sheetF = myEntriesSheetFilter(session);
     if (sheetF) entries = entries.filter(e => _rowSheetType(e) === sheetF);
@@ -3326,7 +3466,11 @@ async function loadMyEntries() {
         const allowMutate = !isAdminAll || isOwnEntry;
         const B = 'width:30px;height:30px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;background:transparent;border:none;cursor:pointer;transition:background 0.15s;';
         const btns = [];
-        btns.push(`<button style="${B}" onclick="openApprovalModal('${e.id}')" title="상세보기"><i class="fas fa-eye" style="font-size:13px;color:#94a3b8"></i></button>`);
+        if (isAdminAll) {
+          btns.push(`<button style="${B}" onclick="openEntryDetailModal('${e.id}')" title="상세보기"><i class="fas fa-eye" style="font-size:13px;color:#94a3b8"></i></button>`);
+        } else {
+          btns.push(`<button style="${B}" onclick="openApprovalModal('${e.id}')" title="상세보기"><i class="fas fa-eye" style="font-size:13px;color:#94a3b8"></i></button>`);
+        }
         if (canEdit && allowMutate)            btns.push(`<button style="${B}" onclick="editEntry('${e.id}')" title="수정"><i class="fas fa-edit" style="font-size:13px;color:#94a3b8"></i></button>`);
         if (e.status==='draft' && allowMutate) btns.push(`<button style="${B}" onclick="submitSingleEntry('${e.id}')" title="제출"><i class="fas fa-paper-plane" style="font-size:13px;color:var(--primary)"></i></button>`);
         if (canEdit && allowMutate)            btns.push(`<button style="${B}" onclick="deleteEntry('${e.id}')" title="삭제"><i class="fas fa-trash" style="font-size:13px;color:#f87171"></i></button>`);
@@ -3347,11 +3491,17 @@ async function loadMyEntries() {
           ? `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12px;color:${isInternalRow ? 'var(--text-muted)' : 'var(--text-secondary)'}" title="${Utils.escHtml(teamLabel)}">${Utils.escHtml(teamLabel)}</span>`
           : `<span style="color:var(--text-muted);font-size:11px">—</span>`;
 
-        // 소분류 (첨부배지 제거 — 상세보기에서 확인 가능)
+        // 소분류 + 프로젝트 코드 대분류(프로젝트업무일 때)
+        const isProjRow = String(e.work_category_name || '').trim() === '프로젝트업무';
+        const projMain = String(e._project_main_category || '').trim();
+        const subMainLabel = Utils.escHtml(e.work_subcategory_name || '—');
+        const projMainHtml = (isProjRow && projMain)
+          ? `<span style="display:block;font-size:11px;color:var(--text-muted);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${Utils.escHtml(projMain)}">${Utils.escHtml(projMain)}</span>`
+          : '';
         const subHtml = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12.5px"
-              title="${Utils.escHtml(e.work_subcategory_name||'')}">
-          ${Utils.escHtml(e.work_subcategory_name||'—')}
-        </span>`;
+              title="${subMainLabel}">
+          ${subMainLabel}
+        </span>${projMainHtml}`;
 
         // 대분류
         const catHtml = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12.5px"
@@ -4334,9 +4484,7 @@ function resetEntryFilter() {
   document.getElementById('filter-entry-status').value       = '';
   _entrySyncRangeButtonState();
 
-  // 소분류 전체 옵션 다시 표시
-  const subEl = document.getElementById('filter-entry-subcategory');
-  Array.from(subEl.options).forEach(opt => { opt.style.display = ''; });
+  _entryRestoreNormalSubcategoryFilterOptions('');
 
   loadMyEntries();
 }
@@ -4809,7 +4957,16 @@ async function exportEntriesToExcel() {
     const subcategoryId = (document.getElementById('filter-entry-subcategory') || {}).value || '';
     if (clientId)      entries = entries.filter(e => e.client_id === clientId);
     if (categoryId)    entries = entries.filter(e => e.work_category_id === categoryId);
-    if (subcategoryId) entries = entries.filter(e => e.work_subcategory_id === subcategoryId);
+    if (subcategoryId) {
+      if (_entryFilterIsProjectMainValue(subcategoryId)) {
+        await _entryEnsureProjectCodeTypes();
+        _entryAttachProjectMainFields(entries);
+        const mainCode = _entryFilterProjectMainCode(subcategoryId);
+        entries = entries.filter((e) => String(e._project_main_code || '') === mainCode);
+      } else {
+        entries = entries.filter(e => e.work_subcategory_id === subcategoryId);
+      }
+    }
     if (statusVal)     entries = entries.filter(e => String(e.status) === String(statusVal));
 
     const sheetF = myEntriesSheetFilter(session);

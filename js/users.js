@@ -21,13 +21,14 @@
 function _onUserRoleChange(role) {
   const isStaff       = role === 'staff';
   const isManager     = role === 'manager';
-  const isStaffLike   = isStaff || isManager; // 타임시트 작성 가능 역할
+  const isDirector    = role === 'director';
+  const isStaffLike   = isStaff || isManager || isDirector; // 타임시트 작성 가능 역할
 
-  // 1차 승인자 드롭다운: staff만 (팀장에게 1차 승인받음)
+  // 1차 승인자 드롭다운: staff/director (CCB director 타임시트 승인 라인 지정)
   const approverWrap = document.getElementById('approver-select-wrap');
-  if (approverWrap) approverWrap.style.display = isStaff ? '' : 'none';
+  if (approverWrap) approverWrap.style.display = (isStaff || isDirector) ? '' : 'none';
 
-  // 2차 승인자 드롭다운: staff + manager 모두 (본부장에게 최종 승인받음)
+  // 2차 승인자 드롭다운: staff + manager + director
   const reviewer2Wrap = document.getElementById('reviewer2-select-wrap');
   if (reviewer2Wrap) reviewer2Wrap.style.display = isStaffLike ? '' : 'none';
 
@@ -36,12 +37,10 @@ function _onUserRoleChange(role) {
   if (csTeamWrap) csTeamWrap.style.display = isStaffLike ? '' : 'none';
 
   const tsTargetWrap = document.getElementById('timesheet-target-wrap');
-  const tsH = document.getElementById('user-timesheet-hourly-input');
-  const tsD = document.getElementById('user-timesheet-daily-input');
+  const tsTargetEl = document.getElementById('user-timesheet-target-input');
   if (tsTargetWrap) tsTargetWrap.style.display = isStaffLike ? '' : 'none';
   if (!isStaffLike) {
-    if (tsH) tsH.checked = false;
-    if (tsD) tsD.checked = false;
+    if (tsTargetEl) tsTargetEl.checked = false;
   }
 
   // 사업부/본부는 항상 표시
@@ -55,6 +54,40 @@ function _resetAffiliationUI() {
     const el = document.getElementById(id);
     if (el) { el.innerHTML = ''; el.disabled = false; }
   });
+}
+
+function _userSheetTypeByDeptName(deptName = '') {
+  const token = String(deptName || '').trim().toUpperCase();
+  if (token.includes('CCB')) return 'daily';
+  if (token.includes('CRB') || token.includes('COB')) return 'hourly';
+  return 'hourly';
+}
+
+function _userSheetTypeLabel(sheetType = 'hourly') {
+  return sheetType === 'daily'
+    ? 'Daily (CCB 기준 자동 분기)'
+    : 'Hourly (CRB/COB 기준 자동 분기)';
+}
+
+function _updateUserSheetTypeByDeptSelection() {
+  const deptEl = document.getElementById('user-dept-input');
+  const sheetTypeEl = document.getElementById('user-sheet-type-input');
+  const sheetTypeViewEl = document.getElementById('user-sheet-type-display');
+  const tsTargetEl = document.getElementById('user-timesheet-target-input');
+  const deptName = deptEl && deptEl.value
+    ? (deptEl.options[deptEl.selectedIndex]?.dataset.name || '')
+    : '';
+  const computed = _userSheetTypeByDeptName(deptName);
+  if (sheetTypeEl) sheetTypeEl.value = computed;
+  if (sheetTypeViewEl) sheetTypeViewEl.textContent = _userSheetTypeLabel(computed);
+  if (tsTargetEl) {
+    if (computed === 'daily') {
+      tsTargetEl.checked = true;
+      tsTargetEl.disabled = true;
+    } else {
+      tsTargetEl.disabled = false;
+    }
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -138,8 +171,16 @@ async function _fillUserCsTeamSelect(selectedId = '', deptId = '', hqId = '') {
 async function onUserDeptChange() {
   const deptEl = document.getElementById('user-dept-input');
   const deptId = deptEl ? deptEl.value : '';
+  const deptName = deptId && deptEl
+    ? (deptEl.options[deptEl.selectedIndex]?.dataset.name || '')
+    : '';
   await _fillUserHqSelect('', deptId);
   await _fillUserCsTeamSelect('', deptId, '');
+  const userId = document.getElementById('user-edit-id')?.value || '';
+  const approverEl = document.getElementById('user-approver-input');
+  const selectedApprover = approverEl ? approverEl.value : '';
+  await fillApproverSelect(userId, selectedApprover, deptName);
+  _updateUserSheetTypeByDeptSelection();
 }
 
 // 본부 선택 시 → 고객지원팀 필터 연동
@@ -332,15 +373,17 @@ async function loadUsers() {
 }
 
 // ─────────────────────────────────────────────
-// 1차 승인자(Manager) 드롭다운 채우기 — staff 전용
+// 1차 승인자 드롭다운 채우기 — staff 전용
+// CCB 소속은 Manager + Director 선택 가능
 // ─────────────────────────────────────────────
-async function fillApproverSelect(excludeUserId = '', selectedApproverId = '') {
+async function fillApproverSelect(excludeUserId = '', selectedApproverId = '', targetDeptName = '') {
   const el = document.getElementById('user-approver-input');
   if (!el) return;
 
   const users = await Master.users();
+  const isCcb = String(targetDeptName || '').trim().toUpperCase().includes('CCB');
   const approvers = users.filter(u =>
-    u.role === 'manager' &&
+    (u.role === 'manager' || (isCcb && u.role === 'director')) &&
     u.is_active !== false &&
     u.id !== excludeUserId
   );
@@ -349,7 +392,7 @@ async function fillApproverSelect(excludeUserId = '', selectedApproverId = '') {
   approvers.forEach(u => {
     const opt = document.createElement('option');
     opt.value = u.id;
-    opt.textContent = `${u.name} (팀장)`;
+    opt.textContent = `${u.name} (${u.role === 'director' ? '본부장' : '팀장'})`;
     opt.dataset.name = u.name;
     if (u.id === selectedApproverId) opt.selected = true;
     el.appendChild(opt);
@@ -396,10 +439,10 @@ async function openUserModal(userId = '') {
   if (jobTitleEl) jobTitleEl.value = '';
   const delivEl = document.getElementById('user-deliverables-view-input');
   if (delivEl) delivEl.checked = false;
-  const tsH0 = document.getElementById('user-timesheet-hourly-input');
-  const tsD0 = document.getElementById('user-timesheet-daily-input');
-  if (tsH0) tsH0.checked = true;
-  if (tsD0) tsD0.checked = false;
+  const tsTarget0 = document.getElementById('user-timesheet-target-input');
+  const sheetType0 = document.getElementById('user-sheet-type-input');
+  if (tsTarget0) tsTarget0.checked = true;
+  if (sheetType0) sheetType0.value = 'hourly';
   document.getElementById('userModalError').style.display = 'none';
   _onUserRoleChange('staff');
   _resetAffiliationUI();
@@ -410,7 +453,8 @@ async function openUserModal(userId = '') {
   if (hqEl) { hqEl.innerHTML = '<option value="">사업부 선택 후 본부 선택 가능</option>'; hqEl.disabled = true; }
   const csEl = document.getElementById('user-csteam-input');
   if (csEl) csEl.innerHTML = '<option value="">고객지원팀 선택</option>';
-  await fillApproverSelect('', '');
+  _updateUserSheetTypeByDeptSelection();
+  await fillApproverSelect('', '', '');
   await fillReviewer2Select('', '');
 
   if (userId) {
@@ -438,14 +482,18 @@ async function openUserModal(userId = '') {
         await _fillUserCsTeamSelect(user.cs_team_id || '', deptId, hqId);
 
         // 1차 승인자 (staff만 표시이지만 데이터는 항상 로드)
-        await fillApproverSelect(userId, user.approver_id || '');
+        await fillApproverSelect(userId, user.approver_id || '', user.dept_name || '');
         // 2차 승인자 (staff·manager 공통)
         await fillReviewer2Select(userId, user.reviewer2_id || '');
 
-        const tsH = document.getElementById('user-timesheet-hourly-input');
-        const tsD = document.getElementById('user-timesheet-daily-input');
-        if (tsH) tsH.checked = user.timesheet_hourly !== false;
-        if (tsD) tsD.checked = user.timesheet_daily === true;
+        const tsTargetEl = document.getElementById('user-timesheet-target-input');
+        const sheetTypeEl = document.getElementById('user-sheet-type-input');
+        if (tsTargetEl) tsTargetEl.checked = user.is_timesheet_target !== false;
+        if (sheetTypeEl) {
+          const deptName = user.dept_name || '';
+          sheetTypeEl.value = _userSheetTypeByDeptName(deptName);
+        }
+        _updateUserSheetTypeByDeptSelection();
         if (jobTitleEl) jobTitleEl.value = user.job_title || '';
         if (delivEl) delivEl.checked = user.can_view_project_deliverables === true;
       }
@@ -472,7 +520,8 @@ async function saveUser() {
   const pwConfirm = document.getElementById('user-pw-confirm-input').value;
   const role    = document.getElementById('user-role-input').value;
   const isActive = document.getElementById('user-active-input').value === 'true';
-  const isStaffLike = role === 'staff' || role === 'manager';
+  const isStaffLike = role === 'staff' || role === 'manager' || role === 'director';
+  const isDeptClassifiedRole = role === 'staff' || role === 'manager' || role === 'director';
 
   const approverEl   = document.getElementById('user-approver-input');
   const approverId   = approverEl ? approverEl.value : '';
@@ -486,11 +535,10 @@ async function saveUser() {
     ? (reviewer2El.options[reviewer2El.selectedIndex]?.dataset.name || '')
     : '';
 
-  const tsHourlyEl = document.getElementById('user-timesheet-hourly-input');
-  const tsDailyEl = document.getElementById('user-timesheet-daily-input');
-  const tsHourly = !!(tsHourlyEl && tsHourlyEl.checked);
-  const tsDaily = !!(tsDailyEl && tsDailyEl.checked);
-  const isTimesheetTarget = tsHourly || tsDaily;
+  const tsTargetEl = document.getElementById('user-timesheet-target-input');
+  const sheetTypeEl = document.getElementById('user-sheet-type-input');
+  let isTimesheetTarget = !!(tsTargetEl && tsTargetEl.checked);
+  let sheetType = String(sheetTypeEl && sheetTypeEl.value ? sheetTypeEl.value : 'hourly').toLowerCase() === 'daily' ? 'daily' : 'hourly';
 
   const jobTitleInput = document.getElementById('user-job-title-input');
   const jobTitle = jobTitleInput ? String(jobTitleInput.value || '').trim() : '';
@@ -509,8 +557,8 @@ async function saveUser() {
   if (pw && pw.length < 8) { showErr('비밀번호는 8자 이상이어야 합니다.'); return; }
   if (pw && !pwConfirm) { showErr('비밀번호 확인란을 입력하세요.'); return; }
   if (pw && pw !== pwConfirm) { showErr('비밀번호가 일치하지 않습니다.'); return; }
-  if (isStaffLike && !tsHourly && !tsDaily) {
-    showErr('Hourly 또는 Daily Time Sheet 중 최소 하나를 선택하세요.');
+  if (isStaffLike && !isTimesheetTarget) {
+    showErr('타임시트 작성 대상 여부를 선택하세요.');
     return;
   }
 
@@ -532,6 +580,12 @@ async function saveUser() {
   const deptName = deptId && deptEl
     ? (deptEl.options[deptEl.selectedIndex]?.dataset.name || '')
     : '';
+  if (isDeptClassifiedRole && !deptId) {
+    showErr('담당자/매니저/디렉터는 사업부를 반드시 지정해야 합니다.');
+    return;
+  }
+  sheetType = _userSheetTypeByDeptName(deptName);
+  if (sheetType === 'daily') isTimesheetTarget = true;
 
   // 2) 본부
   const hqEl   = document.getElementById('user-hq-input');
@@ -546,6 +600,8 @@ async function saveUser() {
   const csName = csId && csEl
     ? (csEl.options[csEl.selectedIndex]?.dataset.name || '')
     : '';
+  const tsHourly = isTimesheetTarget && sheetType === 'hourly';
+  const tsDaily = isTimesheetTarget && sheetType === 'daily';
 
   try {
     const data = {
@@ -558,6 +614,7 @@ async function saveUser() {
       is_timesheet_target:  isTimesheetTarget,
       timesheet_hourly:     tsHourly,
       timesheet_daily:      tsDaily,
+      sheet_type:           sheetType,
       approver_id:          approverId,
       approver_name:        approverName,
       reviewer2_id:         reviewer2Id,
@@ -575,15 +632,28 @@ async function saveUser() {
       data.pw_changed_at = Date.now();
     }
 
-    if (id) {
-      // PUT 대신 PATCH 사용 — password 등 미포함 필드가 덮어씌워지는 문제 방지
-      await API.patch('users', id, data);
-      Toast.success('직원 정보가 수정되었습니다.');
-    } else {
-      data.pw_changed_at = Date.now();
-      await API.create('users', data);
-      Toast.success('직원이 추가되었습니다.');
-    }
+    const saveWithFallback = async () => {
+      try {
+        if (id) {
+          await API.patch('users', id, data);
+        } else {
+          data.pw_changed_at = Date.now();
+          await API.create('users', data);
+        }
+      } catch (err) {
+        const msg = String(err && err.message || '');
+        if (data.sheet_type && msg.toLowerCase().includes('sheet_type')) {
+          // DB 마이그레이션 이전 환경 호환: sheet_type 컬럼이 아직 없으면 제외 후 1회 재시도
+          delete data.sheet_type;
+          if (id) await API.patch('users', id, data);
+          else await API.create('users', data);
+          return;
+        }
+        throw err;
+      }
+    };
+    await saveWithFallback();
+    Toast.success(id ? '직원 정보가 수정되었습니다.' : '직원이 추가되었습니다.');
     closeModal('userModal');
     Master.invalidate('users');
     await loadUsers();

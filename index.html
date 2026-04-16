@@ -791,6 +791,16 @@
         is_timesheet_target: user.is_timesheet_target !== false,
         timesheet_hourly: user.timesheet_hourly !== false,
         timesheet_daily: user.timesheet_daily === true,
+        sheet_type: (
+          String(user.dept_name || '').toUpperCase().includes('CCB')
+            ? 'daily'
+            : (
+              String(user.dept_name || '').toUpperCase().includes('CRB') ||
+              String(user.dept_name || '').toUpperCase().includes('COB')
+            )
+              ? 'hourly'
+              : (String(user.sheet_type || '').toLowerCase() === 'daily' ? 'daily' : 'hourly')
+        ),
         can_view_project_deliverables: user.can_view_project_deliverables === true,
         job_title:    user.job_title || '',
         // 팀명 (레거시 호환)

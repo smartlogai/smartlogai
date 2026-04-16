@@ -11,11 +11,13 @@ let _approvalPage = 1;
 const APPROVAL_PER_PAGE = 20;
 let _approvalModalAtts = []; // 승인 모달 첨부파일 임시 저장 (index 기반 다운로드용)
 
-// 프로젝트 코드 유형(프로젝트 소분류 라벨) 캐시
-let _apvProjCodeTypeMap = null; // key: "MAIN|SUB" -> { sub_category, ... }
+// 프로젝트 코드 유형 캐시
+let _apvProjCodeTypeMap = null; // key: "MAIN|SUB" -> row
+let _apvProjMainCategoryByCode = null; // key: MAIN -> main_category
 async function _apvEnsureProjCodeTypes() {
   if (_apvProjCodeTypeMap) return _apvProjCodeTypeMap;
   _apvProjCodeTypeMap = {};
+  _apvProjMainCategoryByCode = {};
   try {
     const rows = typeof API !== 'undefined' && API.listAllPages
       ? await API.listAllPages('project_code_types', { limit: 500, maxPages: 10, sort: 'main_code' })
@@ -26,6 +28,9 @@ async function _apvEnsureProjCodeTypes() {
       const sc = String(t.sub_code || '').trim();
       if (!mc || !sc) return;
       _apvProjCodeTypeMap[`${mc}|${sc}`] = t;
+      if (!_apvProjMainCategoryByCode[mc]) {
+        _apvProjMainCategoryByCode[mc] = String(t.main_category || '').trim();
+      }
     });
   } catch (e) {
     console.warn('[approval] project_code_types load failed', e);
@@ -48,7 +53,81 @@ async function _apvAttachProjectSubcategory(entry) {
   const map = await _apvEnsureProjCodeTypes();
   const { main, sub } = _apvParseProjectCodeMainSub(pcode);
   const typ = (main && sub) ? map[`${main}|${sub}`] : null;
+  entry._project_main_code = main || '';
+  entry._project_main_category_label = main ? String((_apvProjMainCategoryByCode || {})[main] || '') : '';
   entry._project_subcategory_label = typ ? String(typ.sub_category || '').trim() : '';
+}
+
+function _approvalSelectedCategoryName() {
+  const catEl = document.getElementById('filter-approval-category');
+  if (!catEl) return '';
+  const opt = catEl.options[catEl.selectedIndex];
+  return String(opt ? opt.textContent : '').trim();
+}
+
+function _approvalIsProjectCategorySelected() {
+  return _approvalSelectedCategoryName() === '프로젝트업무';
+}
+
+function _approvalFilterIsProjectMainValue(v) {
+  return String(v || '').startsWith('pcmain:');
+}
+
+function _approvalFilterProjectMainCode(v) {
+  return String(v || '').replace(/^pcmain:/, '').trim();
+}
+
+function _approvalRestoreSubcategoryOptions(catId) {
+  const subEl = document.getElementById('filter-approval-subcategory');
+  if (!subEl) return;
+  let rows = [];
+  try {
+    rows = JSON.parse(subEl.dataset.baseRows || '[]');
+  } catch (_) {
+    rows = [];
+  }
+  subEl.innerHTML = '<option value="">전체 소분류</option>';
+  rows.forEach((s) => {
+    if (catId && String(s.category_id || '') !== String(catId)) return;
+    const opt = document.createElement('option');
+    opt.value = String(s.id || '');
+    opt.textContent = String(s.sub_category_name || '');
+    opt.dataset.categoryId = String(s.category_id || '');
+    subEl.appendChild(opt);
+  });
+  subEl.dataset.filterMode = 'subcategory';
+}
+
+async function _approvalUseProjectMainOptions() {
+  const subEl = document.getElementById('filter-approval-subcategory');
+  if (!subEl) return;
+  await _apvEnsureProjCodeTypes();
+  const uniq = new Map();
+  Object.entries(_apvProjMainCategoryByCode || {}).forEach(([mainCode, mainCategory]) => {
+    if (!mainCode || !mainCategory) return;
+    uniq.set(mainCode, mainCategory);
+  });
+  const rows = [...uniq.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  subEl.innerHTML = '<option value="">전체 프로젝트 대분류</option>';
+  rows.forEach(([mainCode, mainCategory]) => {
+    const opt = document.createElement('option');
+    opt.value = `pcmain:${mainCode}`;
+    opt.textContent = mainCategory;
+    subEl.appendChild(opt);
+  });
+  subEl.dataset.filterMode = 'project-main';
+}
+
+async function _approvalOnCategoryChange() {
+  const catEl = document.getElementById('filter-approval-category');
+  const subEl = document.getElementById('filter-approval-subcategory');
+  if (!catEl || !subEl) return;
+  subEl.value = '';
+  if (_approvalIsProjectCategorySelected()) {
+    await _approvalUseProjectMainOptions();
+    return;
+  }
+  _approvalRestoreSubcategoryOptions(catEl.value);
 }
 
 function _approvalParseTs(raw) {
@@ -196,11 +275,36 @@ async function _scopeTimeEntriesForApproval(entries, session, teamFilterForAdmin
   return entries.filter(e => String(e.approver_id) === myId);
 }
 
-/** Director(2차 승인자): 상태 필터에서 「1차 검토 대기」 제외 — Manager·Admin은 유지 */
+function _approvalIsCcbEntry(entry) {
+  return String(entry && entry.dept_name || '').trim().toUpperCase().includes('CCB');
+}
+
+function _approvalIsAutoApproved(entry) {
+  if (!entry) return false;
+  if (String(entry.status || '') !== 'approved') return false;
+  if (!_approvalIsCcbEntry(entry)) return false;
+  // CCB 본부장/사업부장 즉시승인: 승인자 필드가 비어있고 reviewer_id가 작성자와 동일
+  const noApprover = !String(entry.approver_id || '').trim() && !String(entry.reviewer2_id || '').trim();
+  const selfReviewed = String(entry.reviewer_id || '').trim() && String(entry.reviewer_id) === String(entry.user_id);
+  return noApprover && selfReviewed;
+}
+
+function _approvalCanDoFirst(session, entry) {
+  if (!session || !entry) return false;
+  const myId = String(session.id || '');
+  if (!myId || entry.status !== 'submitted') return false;
+  if (String(entry.approver_id || '') !== myId) return false;
+  if (Auth.canApprove1st(session)) return true;
+  // CCB 소속은 Director도 1차 승인자로 지정/처리 가능
+  return Auth.isDirector(session) && _approvalIsCcbEntry(entry);
+}
+
+/** 상태 필터 동기화 */
 function _syncApprovalStatusDropdown(session) {
   const sel = document.getElementById('filter-approval-status');
   if (!sel) return;
-  const hide1st = Auth.canApprove2nd(session) && !Auth.isAdmin(session);
+  // CCB에서 Director가 1차 승인자로 동작할 수 있으므로 submitted 옵션은 항상 노출
+  const hide1st = false;
   const prev = sel.value;
   const rows = [
     ['', '전체'],
@@ -314,28 +418,24 @@ async function init_approval() {
     }
   } catch(e) { console.warn('approval category filter load error', e); }
 
-  // 업무 소분류 드롭다운 — time_entries에서 수집
+  // 업무 소분류 드롭다운(기본: work_subcategories)
   try {
-    const er = { data: await API.listAllPages('time_entries', { filter: 'status=neq.draft', limit: 400, maxPages: 30 }) };
-    const entries = (er && er.data) ? er.data : [];
-    const catSet = [...new Set(entries.map(e => e.work_category_name).filter(Boolean))].sort();
-    const subSet = [...new Set(entries.map(e => e.work_subcategory_name).filter(Boolean))].sort();
-    const catEl = document.getElementById('filter-approval-category');
-    if (catEl) {
-      catEl.innerHTML = '<option value="">전체 대분류</option>';
-      catSet.forEach(c => {
-        const opt = document.createElement('option');
-        opt.value = c; opt.textContent = c;
-        catEl.appendChild(opt);
-      });
-    }
+    const subs = await Master.subcategories();
     const subEl = document.getElementById('filter-approval-subcategory');
     if (subEl) {
-      subEl.innerHTML = '<option value="">전체 소분류</option>';
-      subSet.forEach(s => {
-        const opt = document.createElement('option');
-        opt.value = s; opt.textContent = s;
-        subEl.appendChild(opt);
+      subEl.dataset.baseRows = JSON.stringify((subs || []).map((s) => ({
+        id: s.id,
+        category_id: s.category_id,
+        sub_category_name: s.sub_category_name,
+      })));
+      _approvalRestoreSubcategoryOptions('');
+    }
+    const catEl = document.getElementById('filter-approval-category');
+    if (catEl && !catEl.dataset.changeBind) {
+      catEl.dataset.changeBind = '1';
+      catEl.addEventListener('change', () => {
+        _approvalPage = 1;
+        _approvalOnCategoryChange().catch((e) => console.warn('[approval] category change sync failed', e));
       });
     }
   } catch(e) { console.warn('approval subcategory filter load error', e); }
@@ -343,8 +443,8 @@ async function init_approval() {
   // director/admin 모드 안내 배너 (읽기 전용)
   const readonlyBanner = document.getElementById('approval-readonly-banner');
   if (readonlyBanner) {
-    // manager는 승인/반려 가능, director/admin은 읽기 전용
-    readonlyBanner.style.display = Auth.canViewDeptScope(session) && !Auth.canApprove(session) ? '' : 'none';
+    // manager는 승인/반려 가능, admin은 읽기 전용, director는 CCB 건 1차 승인 가능
+    readonlyBanner.style.display = Auth.isAdmin(session) ? '' : 'none';
   }
 
   await loadApprovalList();
@@ -420,13 +520,31 @@ async function loadApprovalList() {
     if (categoryFilter) entries = entries.filter(e => String(e.work_category_id || '') === String(categoryFilter));
 
     // 업무 소분류 필터
-    if (subFilter) entries = entries.filter(e => (e.work_subcategory_name || '') === subFilter);
+    if (subFilter) {
+      if (_approvalFilterIsProjectMainValue(subFilter)) {
+        await _apvEnsureProjCodeTypes();
+        for (const e of entries) await _apvAttachProjectSubcategory(e);
+        const mainCode = _approvalFilterProjectMainCode(subFilter);
+        entries = entries.filter((e) => String(e._project_main_code || '') === mainCode);
+      } else {
+        entries = entries.filter(e => String(e.work_subcategory_id || '') === String(subFilter));
+      }
+    }
 
     // 상태 필터 (전체='' 이면 draft 제외한 전체, 그 외 선택값으로 필터)
     if (status) {
       entries = entries.filter(e => e.status === status);
     } else {
       entries = entries.filter(e => e.status !== 'draft');
+    }
+
+    // 목록 표시용 프로젝트 코드 메타 부착
+    const hasProjectRows = entries.some((e) =>
+      String(e.work_category_name || '').trim() === '프로젝트업무' && String(e.project_code || '').trim()
+    );
+    if (hasProjectRows) {
+      await _apvEnsureProjCodeTypes();
+      for (const e of entries) await _apvAttachProjectSubcategory(e);
     }
 
     // 2차 승인자(director) 화면: 본인이 처리/처리해야 하는 건만 노출
@@ -531,11 +649,17 @@ async function loadApprovalList() {
         (String(e.approver_id) === myId2 || String(e.pre_approver_id) === myId2)
       ).length;
     } else if (Auth.canApprove2nd(session2)) {
+      const ccbFirst = pendingScoped.filter(e =>
+        e.status === 'submitted' &&
+        _approvalIsCcbEntry(e) &&
+        String(e.approver_id || '') === myId2
+      ).length;
       waitCount = pendingScoped.filter(e =>
         needsSecondApproval(e) &&
         (e.status === 'pre_approved' || e.status === 'submitted') &&
-        (String(e.reviewer2_id) === myId2 || String(e.approver_id) === myId2)
-      ).length;
+        (String(e.reviewer2_id) === myId2 || String(e.approver_id) === myId2) &&
+        !(e.status === 'submitted' && _approvalIsCcbEntry(e) && String(e.approver_id || '') === myId2)
+      ).length + ccbFirst;
     } else {
       waitCount = pendingScoped.filter(e =>
         (e.status === 'submitted' || e.status === 'pre_approved') &&
@@ -603,15 +727,31 @@ async function loadApprovalList() {
           ${Utils.escHtml(e.work_category_name||'—')}
         </span>`;
 
-        // 소분류
+        // 소분류 + 프로젝트 코드 대분류(프로젝트업무일 때)
+        const isProjRow = String(e.work_category_name || '').trim() === '프로젝트업무';
+        const projMain = String(e._project_main_category_label || '').trim();
+        const subMainLabel = Utils.escHtml(e.work_subcategory_name || '—');
+        const projMainHtml = (isProjRow && projMain)
+          ? `<span style="display:block;font-size:11px;color:var(--text-muted);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${Utils.escHtml(projMain)}">${Utils.escHtml(projMain)}</span>`
+          : '';
         const subHtml = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12.5px"
-              title="${Utils.escHtml(e.work_subcategory_name||'')}">
-          ${Utils.escHtml(e.work_subcategory_name||'—')}
-        </span>`;
+              title="${subMainLabel}">
+          ${subMainLabel}
+        </span>${projMainHtml}`;
 
         // 관리 버튼 — 상세보기만 (승인/반려는 상세 모달에서 품질 평가 후 처리)
         const btns = [];
         btns.push(`<button style="${B}" onclick="openApprovalModal('${e.id}')" title="상세보기"><i class="fas fa-eye" style="font-size:13px;color:#94a3b8"></i></button>`);
+
+        const autoApprovedBadge = _approvalIsAutoApproved(e)
+          ? `<div style="margin-top:3px">
+               <span style="display:inline-flex;align-items:center;gap:4px;
+                            background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;
+                            border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700">
+                 <i class="fas fa-bolt" style="font-size:10px"></i> 자동 승인
+               </span>
+             </div>`
+          : '';
 
         return `<tr>
           <td style="text-align:center;color:var(--text-muted);font-size:12px;font-variant-numeric:tabular-nums">${rowNo}</td>
@@ -631,7 +771,7 @@ async function loadApprovalList() {
           <td style="text-align:center;padding:0 6px">${fmtDatetime(e.work_start_at)}</td>
           <td style="text-align:center;padding:0 6px">${fmtDatetime(e.work_end_at)}</td>
           <td style="text-align:center;font-size:12.5px;font-weight:600;color:var(--text-secondary)">${Utils.formatDuration(e.duration_minutes)}</td>
-          <td style="text-align:center">${Utils.statusBadge(e.status)}</td>
+          <td style="text-align:center">${Utils.statusBadge(e.status)}${autoApprovedBadge}</td>
           <td style="text-align:center;padding:0 4px">
             <div style="display:flex;gap:4px;justify-content:center;align-items:center">${btns.join('')}</div>
           </td>
@@ -670,6 +810,7 @@ function resetApprovalFilter() {
   if (catEl) catEl.value = '';
   const subEl = document.getElementById('filter-approval-subcategory');
   if (subEl) subEl.value = '';
+  _approvalRestoreSubcategoryOptions('');
   _approvalPage = 1;
   loadApprovalList();
 }
@@ -1099,7 +1240,7 @@ async function openApprovalModal(entryId, focusReject = false) {
     const session = getSession ? getSession() : null;
 
     // ── 분기: 1차(manager) vs 2차(director/admin 열람) vs 상세보기
-    const is1st = Auth.canApprove1st(session) && entry.status === 'submitted';
+    const is1st = _approvalCanDoFirst(session, entry);
     // director: pre_approved 건 OR reviewer2_id로 지정된 submitted 건 (2차 대상 대분류만)
     const is2nd = Auth.canApprove2nd(session) && needsSecondApproval(entry) && (
       entry.status === 'pre_approved' ||
@@ -1371,6 +1512,14 @@ function _openApprovalModal2nd(entry, atts, session) {
 // ── 읽기 전용 모달 (director 열람 / admin) ───────────────────
 function _openApprovalModalReadonly(entry, atts, session) {
   document.getElementById('approvalModalTitle').textContent = '업무기록 상세보기';
+  const autoApproveNote = _approvalIsAutoApproved(entry)
+    ? `<div style="margin-bottom:12px;display:flex;align-items:flex-start;gap:10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:10px 14px;color:#166534">
+         <i class="fas fa-bolt" style="margin-top:2px"></i>
+         <div style="font-size:12.5px;line-height:1.6">
+           <strong>자동 승인</strong> — CCB 본부장/사업부장이 작성한 건은 승인자 없이 즉시 승인 처리됩니다.
+         </div>
+       </div>`
+    : '';
   const prevEvalHtml = entry.quality_rating ? `
     <div style="margin-bottom:12px;padding:10px 14px;background:#f8fafc;border-radius:8px;border:1px solid var(--border-light)">
       <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center">
@@ -1393,7 +1542,7 @@ function _openApprovalModalReadonly(entry, atts, session) {
     : '';
 
   document.getElementById('approvalModalBody').innerHTML =
-    _buildEntryDetailHtml(entry, atts) + prevEvalHtml + prevCommentHtml;
+    autoApproveNote + _buildEntryDetailHtml(entry, atts) + prevEvalHtml + prevCommentHtml;
   _renderApprovalDescView(entry);
 
   document.getElementById('editEntryBtn').style.display  = 'none';
@@ -1402,7 +1551,7 @@ function _openApprovalModalReadonly(entry, atts, session) {
 }
 
 // ══════════════════════════════════════════════
-// 1차 승인 처리 (manager)
+// 1차 승인 처리 (manager + CCB director)
 // ══════════════════════════════════════════════
 async function processApproval1st(decision) {
   if (!_approvalTarget) return;
