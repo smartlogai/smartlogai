@@ -507,7 +507,7 @@ async function loadApprovalList() {
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12px;color:var(--text-secondary)" title="${Utils.escHtml(e.team_name||'')}">${Utils.escHtml(e.team_name||'—')}</span>
           </td>
           <td style="padding:0 10px">${clientHtml}</td>
-          <td style="padding:0 10px">${catHtml}</td>
+          <td class="td-category" style="padding:0 10px">${catHtml}</td>
           <td style="padding:0 10px">${subHtml}</td>
           <td style="text-align:center;padding:0 6px">${fmtDatetime(e.work_start_at)}</td>
           <td style="text-align:center;padding:0 6px">${fmtDatetime(e.work_end_at)}</td>

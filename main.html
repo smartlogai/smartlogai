@@ -26,7 +26,7 @@
   <script src="https://cdn.jsdelivr.net/npm/turndown/dist/turndown.js" defer></script>
   <!-- turndown-plugin-gfm: 테이블 등 GFM 확장 지원 -->
   <script src="https://cdn.jsdelivr.net/npm/turndown-plugin-gfm/dist/turndown-plugin-gfm.js" defer></script>
-  <link rel="stylesheet" href="css/style.css?v=20260409g" />
+  <link rel="stylesheet" href="css/style.css?v=20260416s" />
   <!-- Chart.js: 대시보드/분석에서 사용 → defer로 DOM 파싱 차단 방지 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
   <!-- ★ 무거운 라이브러리는 필요한 시점에 동적으로 로드 (초기 blocking 제거) -->
@@ -690,7 +690,7 @@
 
         <div class="card">
           <div class="card-header">
-            <h2>타임시트 목록</h2>
+            <h2>Time Log</h2>
             <div class="card-actions">
               <span id="entry-total-badge" style="font-size:12px;color:var(--text-muted);font-weight:500">전체 0건</span>
               <span style="color:var(--border);font-size:11px">|</span>
@@ -706,9 +706,9 @@
                   <col class="my-entries-col-author" style="width:88px">  <!-- Staff (admin만 표시) -->
                   <col style="width:94px">   <!-- 작성일자 -->
                   <col style="width:150px">  <!-- 고객사 -->
-                  <col class="my-entries-col-team" style="width:110px">  <!-- 업무팀 -->
-                  <col style="width:120px">  <!-- 대분류 -->
-                  <col style="width:220px">  <!-- 소분류 (너무 넓어지는 문제 방지) -->
+                  <col class="my-entries-col-team" style="width:130px">  <!-- 업무팀 -->
+                  <col style="width:130px">  <!-- 대분류 -->
+                  <col style="width:145px">  <!-- 소분류 (너무 넓어지는 문제 방지) -->
                   <col style="width:110px">  <!-- 시작일시 -->
                   <col style="width:110px">  <!-- 종료일시 -->
                   <col style="width:68px">   <!-- 업무시간 -->
@@ -722,7 +722,7 @@
                     <th class="th-written">작성일자</th>
                     <th class="th-client">고객사</th>
                     <th class="my-entries-col-team th-team">업무팀</th>
-                    <th class="th-cat">대분류</th>
+                    <th class="th-category">대분류</th>
                     <th class="th-subcat">소분류</th>
                     <th class="th-start" style="text-align:center">시작일시</th>
                     <th class="th-end" style="text-align:center">종료일시</th>
@@ -808,7 +808,7 @@
 
         <div class="card">
           <div class="card-header">
-            <h2>승인 대기 목록</h2>
+            <h2>Aporoval Status</h2>
             <div class="card-actions">
               <span id="approval-count-badge" style="font-size:12px;color:var(--text-muted);font-weight:400">0건 검토 대기</span>
             </div>
@@ -839,7 +839,7 @@
                     <th>승인자</th>
                     <th>업무팀</th>
                     <th>고객사</th>
-                    <th>대분류</th>
+                    <th class="th-category">대분류</th>
                     <th>소분류</th>
                     <th style="text-align:center">시작일시</th>
                     <th style="text-align:center">종료일시</th>
@@ -2855,12 +2855,12 @@
 <script src="js/llm-proxy.js?v=20260409a"></script>
 <script src="js/notify.js?v=20260402a"></script>
 <script src="js/dashboard.js?v=20260410a"></script>
-<script src="js/entry.js?v=20260410a"></script>
-<script src="js/approval.js?v=20260410c"></script>
+<script src="js/entry.js?v=20260416entryCat1"></script>
+<script src="js/approval.js?v=20260416apvCat2"></script>
 <script src="js/analysis.js?v=20260410a"></script>
 <script src="js/archive.js?v=20260410d"></script>
 <!-- master.js / users.js: Settings 메뉴 진입 시 동적 로드 (초기 81KB 절감) -->
-<script src="js/main.js?v=20260409q"></script>
+<script src="js/main.js?v=20260416-title1"></script>
 
 
 </body>

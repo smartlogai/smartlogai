@@ -2600,18 +2600,7 @@ async function loadMyEntries() {
     const attMap = await loadAttachmentsMap(paged.map(e => e.id));
 
     const tbody = document.getElementById('my-entries-body');
-    // 회사내부업무 전용 화면에서는 "업무팀" 컬럼을 숨김 처리
-    const isCompanyInternalOnly = paged.length > 0 && paged.every(e => String(e.work_category_name || '').trim() === '회사내부업무');
-    // col/th 제어 (thead + colgroup)
-    try {
-      document.querySelectorAll('#my-entries-table .my-entries-col-team').forEach(el => {
-        el.style.display = isCompanyInternalOnly ? 'none' : '';
-      });
-    } catch {}
-
-    // 컬럼 수:
-    // No | (admin:Staff) | 작성일자 | 고객사 | 대분류 | (조건부:업무팀) | 소분류 | 시작 | 종료 | 업무시간 | 상태 | 관리
-    const emptyCols = (isAdminAll ? 12 : 11) - (isCompanyInternalOnly ? 1 : 0);
+    const emptyCols = isAdminAll ? 12 : 11;
     if (paged.length === 0) {
       tbody.innerHTML = `<tr><td colspan="${emptyCols}" class="table-empty"><i class="fas fa-inbox"></i><p>조회된 데이터가 없습니다.</p></td></tr>`;
     } else {
@@ -2699,8 +2688,8 @@ async function loadMyEntries() {
           ${authorCell}
           <td class="td-written" style="font-size:12px;white-space:nowrap;color:var(--text-secondary)">${writtenAt}${docNoHtml}</td>
           <td class="td-client" style="padding:0 10px">${clientHtml}</td>
-          ${isCompanyInternalOnly ? '' : `<td class="td-team" style="padding:0 10px">${teamHtml}</td>`}
-          <td class="td-cat" style="padding:0 10px">${catHtml}</td>
+          <td class="td-team" style="padding:0 10px">${teamHtml}</td>
+          <td class="td-category" style="padding:0 10px">${catHtml}</td>
           <td class="td-subcat" style="padding:0 10px">${subHtml}</td>
           <td class="td-start" style="text-align:center;padding:0 6px">${fmtDatetime(e.work_start_at)}</td>
           <td class="td-end" style="text-align:center;padding:0 6px">${fmtDatetime(e.work_end_at)}</td>
