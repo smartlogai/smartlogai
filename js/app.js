@@ -355,6 +355,41 @@ const API = {
     return result;
   },
 
+  /** 스키마 캐시에 없는 컬럼 에러를 파싱해 컬럼명 반환 */
+  _extractMissingColumnName(err) {
+    const msg = String(err?.message || '');
+    const m = msg.match(/Could not find the '([^']+)' column/i);
+    return m ? String(m[1] || '').trim() : '';
+  },
+
+  /**
+   * 운영/개발 스키마 드리프트 방어:
+   * PostgREST가 "없는 컬럼" 에러를 반환하면 해당 키를 payload에서 제거 후 재시도.
+   */
+  async _writeWithSchemaFallback(method, table, id, data) {
+    const payload = { ...(data || {}) };
+    if (method !== 'POST') payload.updated_at = Date.now();
+    const tried = new Set();
+
+    while (true) {
+      const qs = (method === 'POST') ? '' : `?id=eq.${id}`;
+      const url = `${SUPABASE_URL}/rest/v1/${table}${qs}`;
+      try {
+        const result = await this._fetch(url, {
+          method,
+          body: JSON.stringify(payload),
+        });
+        return this._singleRowResult(result);
+      } catch (err) {
+        const missingCol = this._extractMissingColumnName(err);
+        if (!missingCol || !(missingCol in payload) || tried.has(missingCol)) throw err;
+        tried.add(missingCol);
+        delete payload[missingCol];
+        console.warn(`[API] ${table} write fallback: removed missing column "${missingCol}" and retried.`);
+      }
+    }
+  },
+
   // 목록 조회 (GET) — Genspark: { data:[], total:N } 형식으로 변환
   async list(table, params = {}) {
     const limit  = params.limit  || 200;
@@ -456,35 +491,18 @@ const API = {
       created_at: data.created_at || now,
       updated_at: data.updated_at || now,
     };
-    const url    = `${SUPABASE_URL}/rest/v1/${table}`;
-    const result = await this._fetch(url, {
-      method: 'POST',
-      body:   JSON.stringify(payload),
-    });
-    return this._singleRowResult(result);
+    return this._writeWithSchemaFallback('POST', table, null, payload);
   },
 
 
   // 전체 수정 (PUT → PATCH로 처리)
   async update(table, id, data) {
-    const payload = { ...data, updated_at: Date.now() };
-    const url     = `${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`;
-    const result  = await this._fetch(url, {
-      method: 'PATCH',
-      body:   JSON.stringify(payload),
-    });
-    return this._singleRowResult(result);
+    return this._writeWithSchemaFallback('PATCH', table, id, data);
   },
 
   // 부분 수정 (PATCH)
   async patch(table, id, data) {
-    const payload = { ...data, updated_at: Date.now() };
-    const url     = `${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`;
-    const result  = await this._fetch(url, {
-      method: 'PATCH',
-      body:   JSON.stringify(payload),
-    });
-    return this._singleRowResult(result);
+    return this._writeWithSchemaFallback('PATCH', table, id, data);
   },
 
   // 삭제 (Hard Delete)
