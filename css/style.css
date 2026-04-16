@@ -4216,6 +4216,19 @@ select.ep-ctrl {
   display: table-cell;
 }
 
+/* 관리자 Staff 업무 기록: 한 화면 밀도 최적화 (가로 스크롤 최소화) */
+#page-my-entries.admin-all-entries #my-entries-table thead th {
+  padding: 8px 6px;
+  font-size: 11px;
+}
+#page-my-entries.admin-all-entries #my-entries-table td {
+  padding: 7px 6px;
+  font-size: 11.5px;
+}
+#page-my-entries.admin-all-entries #my-entries-table td.td-written {
+  font-size: 11px;
+}
+
 /* ── 반응형 ── */
 @media (max-width: 768px) {
   .arch-search-panel { padding: 12px 14px; gap: 10px; }
