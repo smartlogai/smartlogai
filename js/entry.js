@@ -3326,12 +3326,15 @@ async function loadMyEntries() {
         const allowMutate = !isAdminAll || isOwnEntry;
         const B = 'width:30px;height:30px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;background:transparent;border:none;cursor:pointer;transition:background 0.15s;';
         const btns = [];
-        btns.push(`<button style="${B}" onclick="openApprovalModal('${e.id}')" title="상세보기"><i class="fas fa-eye" style="font-size:13px;color:#94a3b8"></i></button>`);
-        if (canEdit && allowMutate)            btns.push(`<button style="${B}" onclick="editEntry('${e.id}')" title="수정"><i class="fas fa-edit" style="font-size:13px;color:#94a3b8"></i></button>`);
-        if (e.status==='draft' && allowMutate) btns.push(`<button style="${B}" onclick="submitSingleEntry('${e.id}')" title="제출"><i class="fas fa-paper-plane" style="font-size:13px;color:var(--primary)"></i></button>`);
-        if (canEdit && allowMutate)            btns.push(`<button style="${B}" onclick="deleteEntry('${e.id}')" title="삭제"><i class="fas fa-trash" style="font-size:13px;color:#f87171"></i></button>`);
-        if (e.status==='rejected' && e.reviewer_comment)
-          btns.push(`<button style="${B}" onclick="showRejectReason('${(e.reviewer_comment||'').replace(/'/g,"\\'")}') " title="반려사유"><i class="fas fa-comment-alt" style="font-size:13px;color:#e07b3a"></i></button>`);
+        const detailBtn = `<button style="${B}" onclick="openApprovalModal('${e.id}')" title="상세보기"><i class="fas fa-eye" style="font-size:13px;color:#94a3b8"></i></button>`;
+        btns.push(detailBtn);
+        if (!isAdminAll) {
+          if (canEdit && allowMutate)            btns.push(`<button style="${B}" onclick="editEntry('${e.id}')" title="수정"><i class="fas fa-edit" style="font-size:13px;color:#94a3b8"></i></button>`);
+          if (e.status==='draft' && allowMutate) btns.push(`<button style="${B}" onclick="submitSingleEntry('${e.id}')" title="제출"><i class="fas fa-paper-plane" style="font-size:13px;color:var(--primary)"></i></button>`);
+          if (canEdit && allowMutate)            btns.push(`<button style="${B}" onclick="deleteEntry('${e.id}')" title="삭제"><i class="fas fa-trash" style="font-size:13px;color:#f87171"></i></button>`);
+          if (e.status==='rejected' && e.reviewer_comment)
+            btns.push(`<button style="${B}" onclick="showRejectReason('${(e.reviewer_comment||'').replace(/'/g,"\\'")}') " title="반려사유"><i class="fas fa-comment-alt" style="font-size:13px;color:#e07b3a"></i></button>`);
+        }
 
         // 고객사 (내부업무는 회색 '내부' 표시)
         const clientHtml = e.client_name
