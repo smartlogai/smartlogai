@@ -783,6 +783,18 @@ textarea.form-control {
   overflow: visible;
   padding: 9px 6px;
 }
+/* 관리자 Staff 업무 기록에서 우측 관리열이 가려지지 않도록 고정 */
+#my-entries-table th.th-action,
+#my-entries-table td.td-action {
+  position: sticky;
+  right: 0;
+  background: #fff;
+  z-index: 2;
+}
+#my-entries-table thead th.th-action {
+  background: #f7f9fc;
+  z-index: 3;
+}
 
 /* 소분류 열: 내용이 길어도 좌우 균형 있게 */
 #my-entries-table th.th-subcat,
