@@ -677,16 +677,38 @@ function entryDailyCategoryName() {
 function _entryOmitTeamFromFormPick(catNameTrim) {
   const nm = String(catNameTrim || '').trim();
   if (nm === '회사내부업무') return true;
-  if (entryFormSheetType() === 'daily' && nm === '프로젝트업무') return true;
+  /** 프로젝트업무: 유상 프로젝트 — 업무팀 비용배부 없음, 팀 선택 생략 */
+  if (nm === '프로젝트업무') return true;
   return false;
 }
 
-/** 일일 시트: 저장·검증용 time_category (대분류 이름 우선 — DB category_type이 client로 잘못된 경우 보정) */
+/**
+ * 프로젝트·회사내부: 폼에서 수행팀을 고르지 않지만, 목록/승인에서 식별용으로
+ * 작성자 소속(고객지원팀 우선 → 일반 team_name)을 team_name에 저장.
+ */
+function _entryStampOrgTeamForDisplaySave(catNameTrim, session, teamId, teamName) {
+  const nm = String(catNameTrim || '').trim();
+  if (nm !== '프로젝트업무' && nm !== '회사내부업무') {
+    return { team_id: teamId || '', team_name: teamName || '' };
+  }
+  const csN = String(session.cs_team_name || '').trim();
+  const tN = String(session.team_name || '').trim();
+  if (csN) {
+    return { team_id: String(session.cs_team_id || '').trim(), team_name: csN };
+  }
+  if (tN) {
+    return { team_id: String(session.team_id || '').trim(), team_name: tN };
+  }
+  return { team_id: teamId || '', team_name: (teamName || '').trim() || '내부' };
+}
+
+/** 저장·검증용 time_category (대분류 이름 우선 — DB category_type이 client로 잘못된 경우 보정) */
 function _entryEffectiveTimeCategory(catType, catName) {
   const nm = String(catName || '').trim();
+  /** 시간제·일일 공통: 프로젝트/내부는 메인 고객사·Quill·키워드 검증 제외, 고객은 프로젝트 선택값으로 저장 */
+  if (nm === '프로젝트업무' || nm === '회사내부업무') return 'internal';
   if (entryFormSheetType() !== 'daily') return catType || 'client';
   if (nm === '일반자문업무') return 'client';
-  if (nm === '프로젝트업무' || nm === '회사내부업무') return 'internal';
   return catType || 'client';
 }
 
@@ -1144,7 +1166,7 @@ async function init_entry_new() {
     const catOk = preserveCatId && catsForForm.some((c) => String(c.id) === String(preserveCatId));
     if (catOk) {
       catEl.value = preserveCatId;
-      onCategoryChange();
+      await onCategoryChange();
       if (preserveSubId && subEl) {
         const subOk = _allSubcategories.some(s =>
           String(s.id) === String(preserveSubId) && String(s.category_id) === String(preserveCatId));
@@ -1167,12 +1189,13 @@ async function init_entry_new() {
     });
     document.getElementById('entry-client').value = '';
 
+    ClientSearchSelect.init('entry-daily-proj-client-wrap', clients, {
+      placeholder: '고객사로 필터…',
+      onSelect: () => { _entryRefreshDailyProjectList(); },
+    });
+    ClientSearchSelect.clear('entry-daily-proj-client-wrap');
+
     if (entryFormSheetType() === 'daily') {
-      ClientSearchSelect.init('entry-daily-proj-client-wrap', clients, {
-        placeholder: '고객사로 필터…',
-        onSelect: () => { _entryRefreshDailyProjectList(); },
-      });
-      ClientSearchSelect.clear('entry-daily-proj-client-wrap');
       const modeSel = document.getElementById('entry-daily-period-mode-select');
       if (modeSel) modeSel.value = 'by_day_span';
       onDailyPeriodModeChange();
@@ -1230,7 +1253,54 @@ async function init_entry_new() {
 // ─────────────────────────────────────────────
 // 대분류 변경 → 소분류 필터, 고객 섹션 토글
 // ─────────────────────────────────────────────
-function onCategoryChange() {
+
+/**
+ * 시간제·프로젝트업무: 소분류 = project_code_types의 **대분류만** (값: pcmake:대분류코드, 표시: 대분류명).
+ * work_subcategories 일반 소분류는 드롭다운에 넣지 않습니다.
+ */
+async function _entryFillHourlyProjectSubcategoryFromProjectTypes() {
+  const subEl = document.getElementById('entry-subcategory');
+  if (!subEl) return;
+  await _entryEnsureProjectCodeTypes();
+  const uniq = new Map();
+  (_entryProjectCodeTypeRows || []).forEach((r) => {
+    const mc = String(r.main_code || '').trim();
+    const mcat = String(r.main_category || '').trim();
+    if (!mc || !mcat || uniq.has(mc)) return;
+    uniq.set(mc, mcat);
+  });
+  const rows = [...uniq.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'ko'));
+  rows.forEach(([mainCode, mainCat]) => {
+    const opt = document.createElement('option');
+    opt.value = `pcmain:${mainCode}`;
+    opt.textContent = mainCat;
+    opt.dataset.mainCode = mainCode;
+    opt.dataset.mainCategory = mainCat;
+    subEl.appendChild(opt);
+  });
+  if (!rows.length) {
+    try {
+      Toast.warning('등록된 프로젝트 Code 대분류가 없습니다. Settings → 프로젝트 Code 관리에서 대분류를 등록하세요.');
+    } catch (_) {}
+  }
+}
+
+/** 시간제·프로젝트업무: 소분류(프로젝트 대분류) 선택 → 프로젝트 목록의 대분류 필터 동기화 */
+function _entrySyncHourlyProjectSubcategoryToProjectMainFilter() {
+  const subEl = document.getElementById('entry-subcategory');
+  const sel = document.getElementById('entry-daily-proj-filter-main');
+  if (!subEl || !sel) return;
+  const opt = subEl.options[subEl.selectedIndex];
+  let mc = (opt && opt.dataset && opt.dataset.mainCode) ? String(opt.dataset.mainCode).trim() : '';
+  if (!mc && opt && opt.value && _entryFilterIsProjectMainValue(opt.value)) {
+    mc = _entryFilterProjectMainCode(opt.value);
+  }
+  if (mc && [...sel.options].some((o) => String(o.value) === mc)) sel.value = mc;
+  else sel.value = '';
+  try { _entryRefreshDailyProjectList(); } catch (_) {}
+}
+
+async function onCategoryChange() {
   const catEl = document.getElementById('entry-category');
   const selectedOpt = catEl.options[catEl.selectedIndex];
   const catId  = catEl.value;
@@ -1245,12 +1315,16 @@ function onCategoryChange() {
   const subs = _allSubcategories.filter(s => String(s.category_id) === String(catId));
   const subEl = document.getElementById('entry-subcategory');
   subEl.innerHTML = '<option value="">소분류 선택</option>';
-  subs.forEach(s => {
-    const opt = document.createElement('option');
-    opt.value = s.id;
-    opt.textContent = s.sub_category_name;
-    subEl.appendChild(opt);
-  });
+  if (catNm === '프로젝트업무' && entryFormSheetType() !== 'daily') {
+    await _entryFillHourlyProjectSubcategoryFromProjectTypes();
+  } else {
+    subs.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = s.sub_category_name;
+      subEl.appendChild(opt);
+    });
+  }
 
   if (entryFormSheetType() === 'daily' && catNm === '프로젝트업무' && subEl.options.length > 1) {
     let picked = false;
@@ -1262,6 +1336,10 @@ function onCategoryChange() {
       }
     }
     if (!picked) subEl.selectedIndex = 1;
+  }
+
+  if (catNm === '프로젝트업무' && entryFormSheetType() !== 'daily') {
+    _entrySyncHourlyProjectSubcategoryToProjectMainFilter();
   }
 
   updateClientSection();
@@ -1311,11 +1389,12 @@ function updateClientSection() {
     if (locWrap) locWrap.style.display = 'none';
   };
 
-  // 회사내부: 팀 숨김 / 일일 프로젝트업무: 팀·Staff 행 숨김(세션 팀명으로 자동 매칭)
-  const hideTeamRow = (isCompanyInternal && !isDailyProject) || isDailyProject;
+  // 회사내부: 팀 숨김 / 프로젝트업무(시간제·일일): 팀·Staff 숨김(작성자·프로젝트로 식별)
+  const hideTeamRow = (isCompanyInternal && !isDailyProject) || isDailyProject || isProject;
   if (teamRow) teamRow.style.display = hideTeamRow ? 'none' : '';
   if (hideTeamRow && teamEl) {
     if (isCompanyInternal && !isDailyProject) teamEl.value = '';
+    if (isProject) teamEl.value = '';
     try { teamEl.removeAttribute('required'); } catch (_) {}
   } else if (teamEl) {
     try { teamEl.setAttribute('required', ''); } catch (_) {}
@@ -1377,6 +1456,36 @@ function updateClientSection() {
     }
     const locWrapProj = document.getElementById('entry-daily-work-location-wrap');
     if (locWrapProj) locWrapProj.style.display = '';
+
+  } else if (isProject && !isDaily) {
+    if (metaPanel) metaPanel.classList.add('span-full');
+    if (descPanel) descPanel.style.display = 'none';
+    if (filePanel) { filePanel.style.display = 'none'; filePanel.classList.remove('span-full'); }
+    if (kwSection) kwSection.style.display = 'none';
+    if (clientSection) clientSection.style.display = 'none';
+    if (attachRequired) attachRequired.style.display = 'none';
+    if (attachOptional) attachOptional.style.display = 'none';
+    if (memoSection) memoSection.style.display = '';
+    if (memoTitle) memoTitle.textContent = '수행 내역';
+    if (memoOpt) memoOpt.style.display = 'none';
+    if (memoReq) memoReq.style.display = '';
+    if (memoTa) {
+      memoTa.setAttribute('required', 'required');
+      memoTa.placeholder = '프로젝트 수행 내역을 간단히 입력하세요.';
+    }
+    if (dpWrap) {
+      dpWrap.style.display = 'block';
+      const afterProjList = () => {
+        try { _entrySyncHourlyProjectSubcategoryToProjectMainFilter(); } catch (_) {}
+      };
+      if (!_dailyOpenProjectRows.length) {
+        _entryLoadDailyOpenProjects().then(afterProjList).catch(() => {});
+      } else {
+        _entryFillDailyProjMainFilter().then(afterProjList).catch(afterProjList);
+      }
+    }
+    const locWrapProjH = document.getElementById('entry-daily-work-location-wrap');
+    if (locWrapProjH) locWrapProjH.style.display = '';
 
   } else {
     if (metaPanel)  metaPanel.classList.add('span-full');
@@ -1445,6 +1554,13 @@ function _entrySyncDailyProjectSubGrid(catNameTrim, isDailyProject, isCompanyInt
 
 // ─── 소분류 변경 → 자문자료실과 동일 예시 태그 칩 ──────────────
 function onSubcategoryChange() {
+  const catEl = document.getElementById('entry-category');
+  const catNm = (catEl && catEl.selectedIndex >= 0)
+    ? String(catEl.options[catEl.selectedIndex]?.textContent || '').trim()
+    : '';
+  if (entryFormSheetType() !== 'daily' && catNm === '프로젝트업무') {
+    _entrySyncHourlyProjectSubcategoryToProjectMainFilter();
+  }
   _entryUpdateExampleTags();
 }
 
@@ -2713,6 +2829,13 @@ async function saveEntry(status) {
     description   = memoEl ? memoEl.value.trim() : '';
     descriptionMd = description;
   }
+  // 프로젝트업무는 "업무수행내용"을 텍스트(메모) 그대로 저장/출력
+  if (catNameTrimSaveEntry === '프로젝트업무') {
+    const memoEl = document.getElementById('entry-memo');
+    const memoTxt = memoEl ? memoEl.value.trim() : '';
+    description = memoTxt;
+    descriptionMd = memoTxt;
+  }
 
   // 유효성 검사
   if (!catId || !subId)   { Toast.warning('대분류와 소분류를 선택하세요.'); return; }
@@ -2832,9 +2955,23 @@ async function _doSaveEntry(status, approverInfo, autoApprove = false) {
   const catTypeEff = _entryEffectiveTimeCategory(catType, catName);
   const subId      = subEl.value;
   const subName    = subEl.options[subEl.selectedIndex]?.textContent || '';
+  let persistSubId = subId;
+  let persistSubName = subName;
+  if (entryFormSheetType() !== 'daily' && String(catName || '').trim() === '프로젝트업무' && subId && _entryFilterIsProjectMainValue(subId)) {
+    const mc = _entryFilterProjectMainCode(subId);
+    await _entryEnsureProjectCodeTypes();
+    const row = (_entryProjectCodeTypeRows || []).find((r) => String(r.main_code || '').trim() === mc);
+    persistSubName = row ? String(row.main_category || '').trim() : String(subName || '').trim();
+    const subs = (_allSubcategories || []).filter((s) => String(s.category_id) === String(catId));
+    const exact = subs.find((s) => String(s.sub_category_name || '').trim() === persistSubName);
+    persistSubId = exact ? String(exact.id) : '';
+  }
   const omitTeamPickSave = _entryOmitTeamFromFormPick(catName.trim());
-  const teamId     = omitTeamPickSave ? '' : teamEl.value;
-  const teamName   = omitTeamPickSave ? '' : (teamEl.options[teamEl.selectedIndex]?.textContent || '');
+  let teamId     = omitTeamPickSave ? '' : teamEl.value;
+  let teamName   = omitTeamPickSave ? '' : (teamEl.options[teamEl.selectedIndex]?.textContent || '');
+  const stampedTeam = _entryStampOrgTeamForDisplaySave(catName.trim(), session, teamId, teamName);
+  teamId = stampedTeam.team_id;
+  teamName = stampedTeam.team_name;
   const csVal      = ClientSearchSelect.getValue('entry-client-wrap');
   const clientId   = csVal.id || document.getElementById('entry-client').value || '';
   const clientName = csVal.name || '';
@@ -2852,6 +2989,13 @@ async function _doSaveEntry(status, approverInfo, autoApprove = false) {
     const memoEl = document.getElementById('entry-memo');
     description   = memoEl ? memoEl.value.trim() : '';
     descriptionMd = description;
+  }
+  // 프로젝트업무는 "업무수행내용"을 텍스트(메모) 그대로 저장/출력
+  if (catName.trim() === '프로젝트업무') {
+    const memoEl = document.getElementById('entry-memo');
+    const memoTxt = memoEl ? memoEl.value.trim() : '';
+    description = memoTxt;
+    descriptionMd = memoTxt;
   }
 
   // ★ 제출 / 임시저장 버튼 로딩
@@ -2891,8 +3035,8 @@ async function _doSaveEntry(status, approverInfo, autoApprove = false) {
       client_name: effClientName,
       work_category_id:   catId,
       work_category_name: catName,
-      work_subcategory_id:   subId,
-      work_subcategory_name: subName,
+      work_subcategory_id:   persistSubId || null,
+      work_subcategory_name: persistSubName,
       time_category:  catTypeEff,
       work_start_at:  new Date(startAt).getTime(),
       work_end_at:    new Date(endAt).getTime(),
@@ -3491,17 +3635,17 @@ async function loadMyEntries() {
           ? `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12px;color:${isInternalRow ? 'var(--text-muted)' : 'var(--text-secondary)'}" title="${Utils.escHtml(teamLabel)}">${Utils.escHtml(teamLabel)}</span>`
           : `<span style="color:var(--text-muted);font-size:11px">—</span>`;
 
-        // 소분류 + 프로젝트 코드 대분류(프로젝트업무일 때)
+        // 소분류: 프로젝트업무+프로젝트코드면 DB 소분류명 대신 project_code_types 대분류명을 1줄로 표시
         const isProjRow = String(e.work_category_name || '').trim() === '프로젝트업무';
         const projMain = String(e._project_main_category || '').trim();
-        const subMainLabel = Utils.escHtml(e.work_subcategory_name || '—');
-        const projMainHtml = (isProjRow && projMain)
-          ? `<span style="display:block;font-size:11px;color:var(--text-muted);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${Utils.escHtml(projMain)}">${Utils.escHtml(projMain)}</span>`
-          : '';
+        const hasPcode = String(e.project_code || '').trim() !== '';
+        const legacySub = String(e.work_subcategory_name || '').trim();
+        const primarySub = (isProjRow && hasPcode && projMain) ? projMain : (legacySub || '—');
+        const subMainLabel = Utils.escHtml(primarySub);
         const subHtml = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12.5px"
               title="${subMainLabel}">
           ${subMainLabel}
-        </span>${projMainHtml}`;
+        </span>`;
 
         // 대분류
         const catHtml = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12.5px"
@@ -4518,11 +4662,33 @@ async function editEntry(id) {
     // ④ 대분류 세팅 → 소분류 목록 갱신 (onCategoryChange 동기 실행)
     const catEl = document.getElementById('entry-category');
     catEl.value = entry.work_category_id || '';
-    onCategoryChange();   // 소분류 드롭다운을 entry의 category 기준으로 재구성
+    await onCategoryChange();   // 소분류 드롭다운을 entry의 category 기준으로 재구성
 
     // ⑤ 소분류 세팅 (onCategoryChange 직후 바로 가능 — setTimeout 불필요)
     const subEl = document.getElementById('entry-subcategory');
-    subEl.value = entry.work_subcategory_id || '';
+    if (sheetNorm !== 'daily' && String(entry.work_category_name || '').trim() === '프로젝트업무') {
+      await _entryEnsureProjectCodeTypes();
+      const pcode = String(entry.project_code || '').trim();
+      const mcFromCode = pcode ? String(pcode.split('_')[0] || '').trim() : '';
+      const wantVal = mcFromCode ? `pcmain:${mcFromCode}` : '';
+      if (wantVal && [...subEl.options].some((o) => String(o.value) === wantVal)) {
+        subEl.value = wantVal;
+      } else {
+        const nm = String(entry.work_subcategory_name || '').trim();
+        const byText = [...subEl.options].find((o) => (o.textContent || '').trim() === nm);
+        subEl.value = byText ? byText.value : '';
+      }
+      _entrySyncHourlyProjectSubcategoryToProjectMainFilter();
+    } else {
+      const wantSubId = entry.work_subcategory_id || '';
+      if (wantSubId && [...subEl.options].some((o) => String(o.value) === String(wantSubId))) {
+        subEl.value = wantSubId;
+      } else if (subEl.options.length > 1) {
+        subEl.selectedIndex = 1;
+      } else {
+        subEl.value = '';
+      }
+    }
 
     // ⑥ 팀 세팅
     const teamEl = document.getElementById('entry-team');
@@ -4609,7 +4775,30 @@ async function editEntry(id) {
           .toISOString().slice(0, 16);
         document.getElementById('entry-end').value = localEnd;
       }
-      calcDuration();
+      await calcDuration();
+      if (String(entry.work_category_name || '').trim() === '프로젝트업무') {
+        await _entryLoadDailyOpenProjects();
+        const cEl = document.getElementById('entry-daily-project-code');
+        const nEl = document.getElementById('entry-daily-project-name');
+        const ciEl = document.getElementById('entry-daily-project-client-id');
+        const cnEl = document.getElementById('entry-daily-project-client-name');
+        if (cEl) cEl.value = entry.project_code || '';
+        if (nEl) nEl.value = entry.project_name || '';
+        if (ciEl) ciEl.value = entry.client_id || '';
+        if (cnEl) cnEl.value = entry.client_name || '';
+        const selBox = document.getElementById('entry-daily-project-selected');
+        const selTxt = document.getElementById('entry-daily-project-selected-text');
+        if (entry.project_code && selBox && selTxt) {
+          selBox.style.display = '';
+          selTxt.textContent = `${entry.project_code} — ${entry.project_name || ''}`;
+        }
+        try { ClientSearchSelect.setValue('entry-daily-proj-client-wrap', entry.client_id || '', entry.client_name || ''); } catch (_) {}
+        _entrySyncHourlyProjectSubcategoryToProjectMainFilter();
+      } else {
+        _entryClearDailyProjectPick();
+      }
+      const wlH = document.getElementById('entry-work-location');
+      if (wlH) wlH.value = entry.work_location || '';
     }
 
     updateClientSection();
@@ -4972,6 +5161,27 @@ async function exportEntriesToExcel() {
     const sheetF = myEntriesSheetFilter(session);
     if (sheetF) entries = entries.filter(e => _rowSheetType(e) === sheetF);
 
+    const hasProjExcel = entries.some((e) =>
+      String(e.work_category_name || '').trim() === '프로젝트업무' && String(e.project_code || '').trim()
+    );
+    if (hasProjExcel) {
+      await _entryEnsureProjectCodeTypes();
+      _entryAttachProjectMainFields(entries);
+    }
+
+    const descToPlain = (raw) => {
+      const s = String(raw || '').trim();
+      if (!s) return '';
+      if (s.indexOf('<') === -1) return s.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
+      try {
+        const el = document.createElement('div');
+        el.innerHTML = s;
+        return (el.textContent || el.innerText || '').replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
+      } catch {
+        return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      }
+    };
+
     console.log('[Excel] entries count:', entries.length);
     if (!entries.length) {
       Toast.info('내보낼 데이터가 없습니다.');
@@ -5017,6 +5227,10 @@ async function exportEntriesToExcel() {
           return `${hh}:${mi}`;
         } catch { return ''; }
       };
+      const isProjR = String(e.work_category_name || '').trim() === '프로젝트업무';
+      const pMain = String(e._project_main_category || '').trim();
+      const hasPc = String(e.project_code || '').trim() !== '';
+      const subCol = (isProjR && hasPc && pMain) ? pMain : (e.work_subcategory_name || '');
       return {
         'No':        i + 1,
         '작성일자':  toDateOnly(e.created_at || e.work_start_at),
@@ -5024,7 +5238,8 @@ async function exportEntriesToExcel() {
         '업무팀':    e.team_name  || '',
         '고객사':    e.client_name || '내부업무',
         '대분류':    e.work_category_name    || '',
-        '소분류':    e.work_subcategory_name || '',
+        '소분류':    subCol,
+        '수행내용':  descToPlain(e.work_description),
         '시작일자':  toDateOnly(e.work_start_at),
         '시작시간':  toTimeOnly(e.work_start_at),
         '종료일자':  toDateOnly(e.work_end_at),
@@ -5046,6 +5261,7 @@ async function exportEntriesToExcel() {
       {wch:16},  // 고객사
       {wch:16},  // 대분류
       {wch:20},  // 소분류
+      {wch:48},  // 수행내용
       {wch:12},  // 시작일자
       {wch:8},   // 시작시간
       {wch:12},  // 종료일자

@@ -199,22 +199,26 @@ function _approvalSyncFilterLayoutClass(showTeam) {
   bar.classList.toggle('approval-layout--team-hidden', !showTeam);
 }
 
-/** 기간 필터 — Admin: 업무일·수정일·등록일 중 하나라도 범위 안이면 통과 (대기 건 누락 완화) */
-function _approvalEntryInDateRange(e, dateFrom, dateTo, session) {
+/**
+ * 기간 필터 — 업무일만 보면「어제 근무 → 오늘 최종승인」이 ‘당일’에서 빠짐.
+ * 업무 시작·종료, 수정·등록, 1차·최종 승인 시각 중 하나라도 범위 안이면 통과 (승인자·Admin 공통).
+ */
+function _approvalEntryInDateRange(e, dateFrom, dateTo) {
   if (!dateFrom && !dateTo) return true;
   const fromMs = dateFrom ? new Date(dateFrom + 'T00:00:00').getTime() : 0;
   const toMs = dateTo ? new Date(dateTo + 'T23:59:59').getTime() : Infinity;
-  if (Auth.canViewAll(session)) {
-    for (const raw of [e.work_start_at, e.updated_at, e.created_at]) {
-      const ts = _approvalParseTs(raw);
-      if (!isNaN(ts) && ts >= fromMs && ts <= toMs) return true;
-    }
-    return false;
+  for (const raw of [
+    e.work_start_at,
+    e.work_end_at,
+    e.updated_at,
+    e.created_at,
+    e.reviewed_at,
+    e.pre_approved_at,
+  ]) {
+    const ts = _approvalParseTs(raw);
+    if (!isNaN(ts) && ts >= fromMs && ts <= toMs) return true;
   }
-  const raw = e.work_start_at ?? null;
-  const ts = _approvalParseTs(raw);
-  if (isNaN(ts)) return false;
-  return ts >= fromMs && ts <= toMs;
+  return false;
 }
 
 function _mergeTimeEntriesById(arrays) {
@@ -505,7 +509,7 @@ async function loadApprovalList() {
     }
 
     if (dateFrom || dateTo) {
-      entries = entries.filter(e => _approvalEntryInDateRange(e, dateFrom, dateTo, session));
+      entries = entries.filter(e => _approvalEntryInDateRange(e, dateFrom, dateTo));
     }
 
     // Staff 이름 필터
@@ -727,17 +731,17 @@ async function loadApprovalList() {
           ${Utils.escHtml(e.work_category_name||'—')}
         </span>`;
 
-        // 소분류 + 프로젝트 코드 대분류(프로젝트업무일 때)
+        // 소분류: 프로젝트업무+프로젝트코드면 DB 소분류명 대신 project_code_types 대분류명을 1줄로 표시
         const isProjRow = String(e.work_category_name || '').trim() === '프로젝트업무';
         const projMain = String(e._project_main_category_label || '').trim();
-        const subMainLabel = Utils.escHtml(e.work_subcategory_name || '—');
-        const projMainHtml = (isProjRow && projMain)
-          ? `<span style="display:block;font-size:11px;color:var(--text-muted);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${Utils.escHtml(projMain)}">${Utils.escHtml(projMain)}</span>`
-          : '';
+        const hasPcode = String(e.project_code || '').trim() !== '';
+        const legacySub = String(e.work_subcategory_name || '').trim();
+        const primarySub = (isProjRow && hasPcode && projMain) ? projMain : (legacySub || '—');
+        const subMainLabel = Utils.escHtml(primarySub);
         const subHtml = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12.5px"
               title="${subMainLabel}">
           ${subMainLabel}
-        </span>${projMainHtml}`;
+        </span>`;
 
         // 관리 버튼 — 상세보기만 (승인/반려는 상세 모달에서 품질 평가 후 처리)
         const btns = [];
@@ -833,6 +837,26 @@ function isClientConsultEntry(e) {
 /** 일일 시트 — 시간제와 동일 승인 단계이나 수행방식(1차) 생략 */
 function isDailySheetEntry(e) {
   return String(e && e.sheet_type || '').toLowerCase() === 'daily';
+}
+
+/** 2차(본부장) 승인 절차가 적용되는 대분류 (배지·목록 스코프와 동일) */
+function needsSecondApproval(e) {
+  if (!e) return false;
+  const n = String(e.work_category_name || '').trim();
+  return n === '일반자문업무' || n === '프로젝트업무';
+}
+
+/**
+ * 품질평가·자문분류·자료실 저장 UI 대상.
+ * 프로젝트업무는 2차에서 승인만 하고 품질 블록을 쓰지 않음.
+ */
+function needsSecondApprovalQuality(e) {
+  if (!e) return false;
+  if (!needsSecondApproval(e)) return false;
+  const n = String(e.work_category_name || '').trim();
+  if (n === '프로젝트업무') return false;
+  if (n.includes('내부')) return false;
+  return isClientConsultEntry(e);
 }
 
 /** 품질평가 + 수행방식 → 전문성 별점/등급 자동 계산
@@ -1038,10 +1062,13 @@ function _buildEntryDetailHtml(entry, atts) {
 
   const isProjEntry = String(entry.work_category_name || '').trim() === '프로젝트업무' && String(entry.project_code || '').trim() !== '';
   const showDailyProjBanner = isDaily && String(entry.project_code || '').trim() !== '';
-  const teamLabel = isProjEntry ? '프로젝트 코드' : '수행팀';
-  const teamValue = isProjEntry ? (entry.project_code || '—') : (entry.team_name || '-');
+  const catNmModal = String(entry.work_category_name || '').trim();
+  /** 목록에 대분류·소분류·(일일)배너에 프로젝트 코드가 있으므로, 여기서는 소속 팀만 표시 */
+  const teamLabel = (catNmModal === '프로젝트업무' || catNmModal === '회사내부업무') ? '소속 팀' : '수행팀';
+  const teamValue = (entry.team_name || '').trim() || '—';
   const subLabel = isProjEntry ? '프로젝트 소분류' : '소분류';
   const subValue = isProjEntry ? (entry._project_subcategory_label || '—') : (entry.work_subcategory_name || '');
+  const showHourlyProjStrip = isProjEntry && !showDailyProjBanner && String(entry.project_code || '').trim();
 
   return `
     ${showDailyProjBanner ? `<div style="margin-bottom:12px;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;font-size:12px;line-height:1.5">
@@ -1056,6 +1083,11 @@ function _buildEntryDetailHtml(entry, atts) {
         <div style="grid-column:1/-1"><span style="font-size:11px;color:var(--text-muted)">수행장소</span>
           <div style="font-weight:600;margin-top:2px">${Utils.escHtml(entry.work_location || '—')}</div></div>
       </div>
+    </div>` : ''}
+    ${showHourlyProjStrip ? `<div style="margin-bottom:10px;padding:8px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;font-size:12px;line-height:1.5">
+      <span style="color:var(--text-muted)">프로젝트 코드</span>
+      <strong style="color:#166534;margin-left:6px">${Utils.escHtml(String(entry.project_code || '').trim())}</strong>
+      ${entry.project_name ? `<span style="color:#64748b;margin-left:6px">· ${Utils.escHtml(String(entry.project_name))}</span>` : ''}
     </div>` : ''}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
       <div><span style="font-size:11px;color:var(--text-muted)">문서번호</span>
@@ -1353,6 +1385,7 @@ function _openApprovalModal1st(entry, atts, session) {
 
 // ── 2차 승인 모달 (director용) ────────────────────────────────
 function _openApprovalModal2nd(entry, atts, session) {
+  const showQuality = needsSecondApprovalQuality(entry);
   const isManagerDirect = entry.status === 'submitted'; // manager 본인 건
   const showMgrPerf = isManagerDirect && isClientConsultEntry(entry) && !isDailySheetEntry(entry); // 2차는 client만 — 방어적 분기
   const perfType = entry.performance_type || '';
@@ -1559,7 +1592,6 @@ async function processApproval1st(decision) {
   const comment = document.getElementById('approval-comment')?.value.trim() || '';
   const entry0 = _approvalTarget;
   const needs2nd = needsSecondApproval(entry0);
-  const needs2ndQuality = needsSecondApprovalQuality(entry0);
 
   if (decision === 'rejected' && !comment) {
     Toast.warning('반려 사유를 입력해주세요.');
@@ -1568,7 +1600,9 @@ async function processApproval1st(decision) {
   }
 
   const perfType = document.querySelector('input[name="performance_type"]:checked')?.value || null;
-  if (decision === 'pre_approved' && needsSecondApproval && !perfType && !isDailySheetEntry(entry0)) {
+  const requirePerf1st =
+    needs2nd && isClientConsultEntry(entry0) && !isDailySheetEntry(entry0);
+  if (decision === 'pre_approved' && requirePerf1st && !perfType) {
     const pw = document.getElementById('perf-warn');
     if (pw) pw.style.display = '';
     document.querySelectorAll('.perf-btn').forEach(b => { b.style.border = '2px solid #ef4444'; });

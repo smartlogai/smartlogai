@@ -557,10 +557,7 @@ async function saveUser() {
   if (pw && pw.length < 8) { showErr('비밀번호는 8자 이상이어야 합니다.'); return; }
   if (pw && !pwConfirm) { showErr('비밀번호 확인란을 입력하세요.'); return; }
   if (pw && pw !== pwConfirm) { showErr('비밀번호가 일치하지 않습니다.'); return; }
-  if (isStaffLike && !isTimesheetTarget) {
-    showErr('타임시트 작성 대상 여부를 선택하세요.');
-    return;
-  }
+  /** 타임시트 작성 대상: 체크=대상, 미체크=비대상 (COB 디렉터 등 비대상 허용) */
 
   // 이메일 중복 체크 (신규만)
   if (!id) {

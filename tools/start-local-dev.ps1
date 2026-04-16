@@ -56,8 +56,16 @@ if (Test-Path $devCfg) {
 }
 
 if (-not $SkipSyntax) {
-  Write-Step "Running JS syntax check..."
-  & "$root\tools\check-js-syntax.ps1"
+  $syntaxScript = Join-Path $root "tools\check-js-syntax.ps1"
+  if (Test-Path $syntaxScript) {
+    Write-Step "Running JS syntax check..."
+    & $syntaxScript
+  } else {
+    Write-Host ""
+    Write-Host "[NOTE] Missing tools/check-js-syntax.ps1 — skipping JS syntax check." -ForegroundColor Yellow
+    Write-Host "  Tip: pull latest repo or restore tools/check-js-syntax.ps1" -ForegroundColor DarkYellow
+    Write-Host ""
+  }
 } else {
   Write-Step "Skipping JS syntax check (-SkipSyntax)"
 }
