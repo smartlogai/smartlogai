@@ -11,6 +11,149 @@ let _approvalPage = 1;
 const APPROVAL_PER_PAGE = 20;
 let _approvalModalAtts = []; // 승인 모달 첨부파일 임시 저장 (index 기반 다운로드용)
 
+/** Approval 상단 탭: timesheet | project (main.js lazy 버전과 맞출 것) */
+let _approvalMainTab = 'timesheet';
+const APPROVAL_PROJ_REG_SCRIPT_VER = '20260417realUploadContractModal1';
+
+function _approvalSetMainTabVisual(tab) {
+  _approvalMainTab = tab === 'project' ? 'project' : 'timesheet';
+  const isTs = _approvalMainTab === 'timesheet';
+  const tsBtn = document.getElementById('approval-tab-timesheet');
+  const pjBtn = document.getElementById('approval-tab-project');
+  const tsPanel = document.getElementById('approval-panel-timesheet');
+  const pjPanel = document.getElementById('approval-panel-project');
+  if (tsBtn) {
+    tsBtn.classList.toggle('is-active', isTs);
+    tsBtn.setAttribute('aria-selected', isTs ? 'true' : 'false');
+  }
+  if (pjBtn) {
+    pjBtn.classList.toggle('is-active', !isTs);
+    pjBtn.setAttribute('aria-selected', !isTs ? 'true' : 'false');
+  }
+  if (tsPanel) tsPanel.style.display = isTs ? '' : 'none';
+  if (pjPanel) pjPanel.style.display = isTs ? 'none' : '';
+}
+
+async function _approvalEnsureProjRegScript() {
+  if (typeof window !== 'undefined' && window.SmartlogProjReg) return;
+  if (document.querySelector('script[src*="project-register.js"]')) {
+    await new Promise((resolve, reject) => {
+      let n = 0;
+      const t = setInterval(() => {
+        if (window.SmartlogProjReg) {
+          clearInterval(t);
+          resolve();
+        } else if (++n > 250) {
+          clearInterval(t);
+          reject(new Error('SmartlogProjReg timeout'));
+        }
+      }, 40);
+    });
+    return;
+  }
+  await new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = `js/project-register.js?v=${APPROVAL_PROJ_REG_SCRIPT_VER}`;
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('project-register load failed'));
+    document.body.appendChild(s);
+  });
+  if (!window.SmartlogProjReg) {
+    throw new Error('SmartlogProjReg not exported');
+  }
+}
+
+async function switchApprovalMainTab(tab) {
+  if (tab !== 'project' && tab !== 'timesheet') return;
+  _approvalSetMainTabVisual(tab);
+  if (tab === 'timesheet') await loadApprovalList();
+  else await loadApprovalProjectList();
+}
+
+function _approvalProjStepLabel(row, P) {
+  const st = P.normStatus(row);
+  if (st !== 'pending') return '—';
+  const step = P.pendingStep(row);
+  const base = step === 1 ? '1차 승인 대기' : (step === 2 ? '2차 승인 대기' : '승인 대기');
+  if (row && row.contract_exception_required === true) return base + ' · 조건부';
+  return base;
+}
+
+async function loadApprovalProjectList() {
+  const tbody = document.getElementById('approval-project-list-body');
+  if (!tbody) return;
+  const session = getSession();
+  tbody.innerHTML = '<tr><td colspan="9" class="table-empty"><i class="fas fa-spinner fa-spin"></i><p>불러오는 중…</p></td></tr>';
+  try {
+    await _approvalEnsureProjRegScript();
+  } catch (e) {
+    console.warn('[approval] project-register load', e);
+    tbody.innerHTML = '<tr><td colspan="9" class="table-empty"><i class="fas fa-exclamation-triangle"></i><p>프로젝트 모듈을 불러오지 못했습니다. 새로고침 후 다시 시도하세요.</p></td></tr>';
+    return;
+  }
+  const P = window.SmartlogProjReg;
+  if (!P || !P.normStatus) {
+    tbody.innerHTML = '<tr><td colspan="9" class="table-empty"><i class="fas fa-exclamation-triangle"></i><p>프로젝트 승인 모듈이 준비되지 않았습니다.</p></td></tr>';
+    return;
+  }
+  let rows = [];
+  try {
+    rows = await API.listAllPages('registered_projects', {
+      limit: 500,
+      maxPages: 10,
+      sort: 'created_at',
+      filter: 'registration_status=eq.pending',
+    });
+  } catch (err) {
+    console.error(err);
+    tbody.innerHTML = '<tr><td colspan="9" class="table-empty"><i class="fas fa-exclamation-triangle"></i><p>목록을 불러오지 못했습니다.</p></td></tr>';
+    return;
+  }
+  rows = (rows || []).filter((r) => P.normStatus(r) === 'pending');
+  if (!Auth.isAdmin(session)) {
+    rows = rows.filter((r) => P.canApproveRow(session, r));
+  }
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="table-empty"><i class="fas fa-check-circle" style="color:var(--success)"></i><p>승인 대기 중인 프로젝트가 없습니다.</p></td></tr>';
+    return;
+  }
+  const B = 'width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;background:transparent;border:none;cursor:pointer;';
+  tbody.innerHTML = rows.map((r, i) => {
+    const st = P.normStatus(r);
+    const codeDisp = (r.project_code && String(r.project_code).trim()) ? String(r.project_code) : '—';
+    const cd = r.created_at && Utils.formatDate ? Utils.formatDate(r.created_at) : (r.created_at || '—');
+    const stepLab = _approvalProjStepLabel(r, P);
+    const canDo = P.canApproveRow(session, r);
+    const contribRaw = String(r.order_contributors_text || '');
+    const contribCount = typeof P.contribCount === 'function' ? P.contribCount(contribRaw) : 0;
+    const contribLabel = String(r.project_code || r.project_name || `프로젝트 ${i + 1}`).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const contribBtn = (contribCount && typeof P.openContribModal === 'function')
+      ? `<button type="button" class="btn btn-sm btn-outline" onclick="SmartlogProjReg.openContribModal(decodeURIComponent('${encodeURIComponent(contribRaw)}'),'${contribLabel}')" title="수주 참여자 보기">보기 (${contribCount})</button>`
+      : '<span style="font-size:12px;color:var(--text-muted)">-</span>';
+    const act = canDo
+      ? `<div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+          <button type="button" style="${B}" class="btn btn-sm btn-success" onclick="SmartlogProjReg.approve('${r.id}')" title="승인"><i class="fas fa-check"></i></button>
+          <button type="button" style="${B}" class="btn btn-sm btn-danger" onclick="SmartlogProjReg.reject('${r.id}')" title="반려"><i class="fas fa-times"></i></button>
+        </div>`
+      : `<span style="font-size:12px;color:var(--text-muted)">—</span>`;
+    return `<tr>
+      <td style="text-align:center;color:var(--text-muted)">${i + 1}</td>
+      <td><span class="${P.statusBadgeClass(st, r)}">${Utils.escHtml(P.statusLabel(st, r))}</span></td>
+      <td><strong>${Utils.escHtml(codeDisp)}</strong></td>
+      <td>${Utils.escHtml(r.project_name || '')}</td>
+      <td>${Utils.escHtml(r.client_name || '')}</td>
+      <td style="text-align:center">${contribBtn}</td>
+      <td style="font-size:12px">${Utils.escHtml(stepLab)}</td>
+      <td style="font-size:12px">${Utils.escHtml(String(cd))}</td>
+      <td style="text-align:center">${act}</td>
+    </tr>`;
+  }).join('');
+}
+
+window.switchApprovalMainTab = switchApprovalMainTab;
+window.loadApprovalProjectList = loadApprovalProjectList;
+
 // 프로젝트 코드 유형 캐시
 let _apvProjCodeTypeMap = null; // key: "MAIN|SUB" -> row
 let _apvProjMainCategoryByCode = null; // key: MAIN -> main_category
@@ -451,6 +594,11 @@ async function init_approval() {
     readonlyBanner.style.display = Auth.isAdmin(session) ? '' : 'none';
   }
 
+  const pjTabBtn = document.getElementById('approval-tab-project');
+  if (pjTabBtn) {
+    pjTabBtn.style.display = Auth.canManageProjectRegister(session) ? '' : 'none';
+  }
+  _approvalSetMainTabVisual('timesheet');
   await loadApprovalList();
 }
 
@@ -794,6 +942,7 @@ async function loadApprovalList() {
 
 function resetApprovalFilter() {
   const session = getSession();
+  _approvalSetMainTabVisual('timesheet');
   const now = new Date();
   const y = now.getFullYear(), mo = now.getMonth();
   document.getElementById('filter-approval-date-from').value =

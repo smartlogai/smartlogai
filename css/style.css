@@ -455,6 +455,29 @@ body {
 .btn-icon { padding: 3px 6px; font-size: 11px; height: 24px; line-height: 1; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+.proj-reg-contrib-remove-btn {
+  background: #f8fafc;
+  color: #94a3b8;
+  border-color: #e2e8f0;
+  opacity: 0.45;
+  transform: scale(0.96);
+  transition: opacity .16s ease, color .16s ease, border-color .16s ease, background-color .16s ease, transform .16s ease;
+}
+
+.proj-reg-contrib-row:hover .proj-reg-contrib-remove-btn,
+.proj-reg-contrib-row:focus-within .proj-reg-contrib-remove-btn {
+  opacity: 1;
+  transform: scale(1);
+  color: #64748b;
+  border-color: #cbd5e1;
+}
+
+.proj-reg-contrib-remove-btn:hover {
+  background: #fee2e2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
 /* ============================================
    폼 요소
    ============================================ */
@@ -1972,6 +1995,83 @@ textarea.form-control {
   user-select: none;
 }
 
+/* 프로젝트 목록 — 관리 열: 삭제 버튼 유무와 관계없이 수정 아이콘 세로 정렬 */
+.proj-reg-list-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.proj-reg-list-act-row {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+.proj-reg-list-act-row--second {
+  margin-top: 1px;
+}
+
+#page-project-register .proj-reg-list-filters-card {
+  padding: 8px 12px !important;
+}
+#page-project-register .proj-reg-list-filters {
+  margin-bottom: 0;
+}
+#page-project-register .proj-reg-list-filters-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(98px, 1fr));
+  gap: 4px 8px;
+  align-items: end;
+}
+#page-project-register .proj-reg-list-filters-grid .form-group {
+  margin-bottom: 0 !important;
+}
+#page-project-register .proj-reg-list-filters-grid .form-label {
+  font-size: 10px;
+  margin-bottom: 2px;
+  line-height: 1.15;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: -0.02em;
+}
+#page-project-register .proj-reg-list-filters-grid .form-control {
+  min-height: 28px;
+  font-size: 12px;
+  padding: 3px 8px;
+  line-height: 1.2;
+  border-radius: 6px;
+}
+#page-project-register .proj-reg-list-filters-grid input[type="date"].form-control {
+  min-height: 28px;
+  padding: 2px 6px;
+}
+@media (max-width: 1280px) {
+  #page-project-register .proj-reg-list-filters-grid {
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
+  }
+}
+@media (max-width: 720px) {
+  #page-project-register .proj-reg-list-filters-grid {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+}
+#page-project-register .proj-reg-list-filters-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+  padding-top: 2px;
+}
+#page-project-register .proj-reg-list-filters-actions .btn {
+  padding: 3px 10px;
+  font-size: 11px;
+  min-height: 26px;
+  border-radius: 6px;
+}
+#page-project-register .proj-reg-list-filters-actions .btn i {
+  font-size: 10px;
+}
+
 /* 프로젝트 등록 청구표: data-table 기본 ellipsis·max-width:0 제거 (조건 textarea 표시) */
 .proj-reg-bill-wrap {
   overflow-x: auto;
@@ -2558,6 +2658,37 @@ input[type=date].filter-control {
   flex: 1 1 0;
   min-width: 154px;
   width: auto !important;
+}
+#page-approval .approval-main-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+#page-approval .approval-main-tab {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+#page-approval .approval-main-tab:hover {
+  color: #374151;
+  border-color: #cbd5e1;
+  background: #f9fafb;
+}
+#page-approval .approval-main-tab.is-active {
+  color: #1d4ed8;
+  border-color: #93c5fd;
+  background: #eff6ff;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.12);
 }
 #page-approval .approval-quick-range-group {
   display: flex;

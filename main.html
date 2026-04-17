@@ -26,7 +26,7 @@
   <script src="https://cdn.jsdelivr.net/npm/turndown/dist/turndown.js" defer></script>
   <!-- turndown-plugin-gfm: 테이블 등 GFM 확장 지원 -->
   <script src="https://cdn.jsdelivr.net/npm/turndown-plugin-gfm/dist/turndown-plugin-gfm.js" defer></script>
-  <link rel="stylesheet" href="css/style.css?v=20260416q" />
+  <link rel="stylesheet" href="css/style.css?v=20260416projRegFilterTopOnly1" />
   <!-- Chart.js: 대시보드/분석에서 사용 → defer로 DOM 파싱 차단 방지 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
   <!-- ★ 무거운 라이브러리는 필요한 시점에 동적으로 로드 (초기 blocking 제거) -->
@@ -145,7 +145,7 @@
       <!-- ── Time Sheet (Staff 전용) ───────────────── -->
       <div class="nav-section-title" id="menu-timesheet-section">Time Sheet</div>
       <div class="nav-item menu-entry-sheet" id="menu-entry-new-hourly" data-page="entry-new-hourly" onclick="navigateTo('entry-new-hourly')" style="display:none">
-        <i class="fas fa-clock nav-icon"></i> 등록 (시간제)
+        <i class="fas fa-clock nav-icon"></i> Time Entry
       </div>
       <div class="nav-item menu-entry-sheet" id="menu-entry-new-daily" data-page="entry-new-daily" onclick="navigateTo('entry-new-daily')" style="display:none">
         <i class="fas fa-calendar-day nav-icon"></i> 등록 (일일)
@@ -155,6 +155,20 @@
       </div>
       <div class="nav-item menu-my-entries-sheet" id="menu-my-entries-daily" data-page="my-entries-daily" onclick="navigateTo('my-entries-daily')" style="display:none">
         <i class="fas fa-list-alt nav-icon"></i> 내 타임시트 (일일)
+      </div>
+
+      <!-- 등록정보: 타임시트 업무와 연계 (고객·업무분류·프로젝트 등록) — Settings에서 이동 -->
+      <div class="nav-group-label menu-ref-data" id="nav-ref-data-ts-label" style="display:none">
+        <i class="fas fa-database" style="font-size:10px;opacity:0.6"></i> 등록정보
+      </div>
+      <div class="nav-item nav-item-sub menu-ref-data" data-page="project-register" onclick="navigateTo('project-register')" style="display:none">
+        <i class="fas fa-clipboard-list nav-icon"></i> 프로젝트 등록
+      </div>
+      <div class="nav-item nav-item-sub menu-ref-data" data-page="master-clients" onclick="navigateTo('master-clients')" style="display:none">
+        <i class="fas fa-building nav-icon"></i> 고객등록
+      </div>
+      <div class="nav-item nav-item-sub menu-ref-data" data-page="master-categories" onclick="navigateTo('master-categories')" style="display:none">
+        <i class="fas fa-tags nav-icon"></i> 업무분류등록
       </div>
 
       <!-- ── Management (Manager / Director / Admin) ── -->
@@ -171,7 +185,7 @@
         <i class="fas fa-table nav-icon"></i> Staff 업무 기록
       </div>
 
-      <!-- ── Settings (Admin 전용 + 기준정보는 manager·director도) ── -->
+      <!-- ── Settings (Admin: 조직·직원·프로젝트 코드 마스터) ── -->
       <div class="nav-section-title menu-settings-section" style="display:none">Settings</div>
 
       <!-- 조직구성 그룹 -->
@@ -186,20 +200,6 @@
       </div>
       <div class="nav-item nav-item-sub menu-master" data-page="master-csteams" onclick="navigateTo('master-csteams')" style="display:none">
         <i class="fas fa-headset nav-icon"></i> 고객지원팀 관리
-      </div>
-
-      <!-- 기준정보 그룹: 고객사·업무분류는 manager+director+admin 접근 가능 -->
-      <div class="nav-group-label menu-ref-data" style="display:none">
-        <i class="fas fa-database" style="font-size:10px;opacity:0.6"></i> 기준정보
-      </div>
-      <div class="nav-item nav-item-sub menu-ref-data" data-page="master-clients" onclick="navigateTo('master-clients')" style="display:none">
-        <i class="fas fa-building nav-icon"></i> 고객사
-      </div>
-      <div class="nav-item nav-item-sub menu-ref-data" data-page="master-categories" onclick="navigateTo('master-categories')" style="display:none">
-        <i class="fas fa-tags nav-icon"></i> 업무분류
-      </div>
-      <div class="nav-item nav-item-sub menu-ref-data" data-page="project-register" onclick="navigateTo('project-register')" style="display:none">
-        <i class="fas fa-clipboard-list nav-icon"></i> 프로젝트 등록
       </div>
 
       <!-- 프로젝트 기준정보 (admin 전용) -->
@@ -875,6 +875,15 @@
           <i class="fas fa-sitemap" style="font-size:15px;color:#64748b"></i>
           <span><strong>소속 자동분기 정책</strong> — CCB 사업부는 Daily, CRB/COB 사업부는 Hourly로 자동 분기됩니다.</span>
         </div>
+        <div class="approval-main-tabs" id="approval-main-tabs" role="tablist" aria-label="승인 구분">
+          <button type="button" role="tab" id="approval-tab-timesheet" class="approval-main-tab is-active" aria-selected="true" onclick="switchApprovalMainTab('timesheet')">
+            <i class="fas fa-clock" style="margin-right:6px"></i>타임시트 승인
+          </button>
+          <button type="button" role="tab" id="approval-tab-project" class="approval-main-tab" aria-selected="false" onclick="switchApprovalMainTab('project')" style="display:none">
+            <i class="fas fa-folder-open" style="margin-right:6px"></i>프로젝트 승인
+          </button>
+        </div>
+        <div id="approval-panel-timesheet">
         <div class="filter-bar approval-layout--team-hidden">
           <div class="filter-group filter-group-period filter-group-modern-period">
             <span class="filter-label">기간</span>
@@ -934,7 +943,7 @@
 
         <div class="card">
           <div class="card-header">
-            <h2>Aporoval Status</h2>
+            <h2>Approval Status</h2>
             <div class="card-actions">
               <span id="approval-count-badge" style="font-size:12px;color:var(--text-muted);font-weight:400">0건 검토 대기</span>
             </div>
@@ -980,6 +989,44 @@
               </table>
             </div>
             <div id="approval-pagination"></div>
+          </div>
+        </div>
+        </div>
+
+        <div id="approval-panel-project" style="display:none">
+          <div class="card">
+            <div class="card-header">
+              <h2>프로젝트 승인</h2>
+              <div class="card-actions">
+                <button type="button" class="btn btn-ghost btn-sm" onclick="loadApprovalProjectList()" title="새로고침"><i class="fas fa-redo"></i></button>
+              </div>
+            </div>
+            <div class="card-body" style="padding:0">
+              <p style="margin:0;padding:12px 16px;font-size:12.5px;color:var(--text-muted);border-bottom:1px solid var(--border-light)">
+                <i class="fas fa-info-circle" style="color:var(--primary)"></i>
+                등록·수정은 <strong>Settings → 프로젝트 등록</strong>에서 하고, 여기서는 <strong>승인·반려</strong>만 처리합니다.
+              </p>
+              <div class="table-wrapper" style="border:none;border-radius:0;overflow-x:auto">
+                <table class="data-table" id="approval-project-list-table" style="width:100%;min-width:720px;table-layout:fixed">
+                  <thead>
+                    <tr>
+                      <th style="width:44px;text-align:center">No</th>
+                      <th style="width:100px">상태</th>
+                      <th style="width:160px">프로젝트 코드</th>
+                      <th>프로젝트명</th>
+                      <th style="width:160px">고객사</th>
+                      <th style="width:120px">수주참여자</th>
+                      <th style="width:120px">단계</th>
+                      <th style="width:100px">등록일</th>
+                      <th style="width:140px;text-align:center">관리</th>
+                    </tr>
+                  </thead>
+                  <tbody id="approval-project-list-body">
+                    <tr><td colspan="9" class="table-empty"><i class="fas fa-inbox"></i><p>탭을 선택하면 목록을 불러옵니다.</p></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -1720,7 +1767,7 @@
       </section>
 
       <!-- ──────────────────────────
-           프로젝트 Code 관리 (admin)
+           프로젝트 Code 관리 (관리자: 유형 추가·수정·삭제·엑셀)
       ────────────────────────── -->
       <section class="page-section" id="page-master-project-codes">
         <div class="card">
@@ -1742,7 +1789,7 @@
               <button type="button" class="btn btn-secondary btn-sm" onclick="loadProjectCodeTypes()"><i class="fas fa-sync-alt"></i> 새로고침</button>
             </div>
             <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">
-              최종 프로젝트 코드는 프로젝트 등록 시 <strong>대분류Code_소분류Code_YYMM_일련(2자리)</strong> 로 자동 부여됩니다. 이 화면은 유형 마스터(A~E열)만 관리합니다.
+              최종 프로젝트 코드는 프로젝트 등록 시 <strong>대분류Code_소분류Code_YYMM_일련(2자리)</strong> 로 자동 부여됩니다. 이 화면은 유형 마스터(A~E열)만 관리합니다. <strong>유형 추가·수정·삭제·엑셀 업로드는 관리자만</strong> 가능합니다.
             </p>
           </div>
           <div class="card-body" style="padding:0">
@@ -1777,20 +1824,62 @@
           <div class="card">
             <div class="card-header" style="align-items:flex-start">
               <div style="min-width:0">
-                <h2 style="margin:0">프로젝트 등록</h2>
+                <h2 style="margin:0">프로젝트 목록</h2>
                 <p style="margin:6px 0 0;font-size:12.5px;color:var(--text-secondary);font-weight:400;line-height:1.45;max-width:520px">
-                  등록된 프로젝트 코드·발주처·수행기간을 조회하고, <strong style="font-weight:600">새 프로젝트(Create Project)</strong>를 추가합니다.
+                  등록된 프로젝트를 조회하고 프로젝트를 새로 등록합니다.
                 </p>
               </div>
               <div class="card-actions">
-                <button type="button" class="btn btn-sm btn-primary" onclick="projRegShowForm()"><i class="fas fa-plus"></i> 새 프로젝트 등록</button>
+                <button type="button" class="btn btn-sm btn-primary" onclick="projRegShowForm()"><i class="fas fa-plus"></i> Create Project</button>
                 <button type="button" class="btn btn-sm btn-secondary" onclick="projRegLoadList()"><i class="fas fa-sync-alt"></i> 새로고침</button>
+                <button type="button" class="btn btn-sm btn-outline" onclick="projRegOpenContractDocModal()"><i class="fas fa-file-contract"></i> 계약서 관리현황</button>
               </div>
             </div>
-            <div class="card-body" style="padding:12px 16px">
-              <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px">
-                <input type="search" id="proj-reg-filter-q" class="form-control" style="max-width:280px;flex:1;min-width:160px"
-                       placeholder="코드·프로젝트명·발주처 검색" oninput="projRegRenderList()" />
+            <div class="card-body proj-reg-list-filters-card">
+              <div class="proj-reg-list-filters" id="proj-reg-list-filters">
+                <div class="proj-reg-list-filters-grid">
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label" for="proj-reg-filter-main">대분류</label>
+                    <select id="proj-reg-filter-main" class="form-control" title="프로젝트 코드 대분류"></select>
+                  </div>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label" for="proj-reg-filter-sub">소분류</label>
+                    <select id="proj-reg-filter-sub" class="form-control" title="프로젝트 코드 소분류(유형)"></select>
+                  </div>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label" for="proj-reg-filter-client">고객사</label>
+                    <input type="search" id="proj-reg-filter-client" class="form-control" placeholder="고객사 검색" title="고객사명 검색" />
+                  </div>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label" for="proj-reg-filter-status">상태</label>
+                    <select id="proj-reg-filter-status" class="form-control" title="등록 상태">
+                      <option value="">전체</option>
+                      <option value="draft">임시저장</option>
+                      <option value="pending">승인대기</option>
+                      <option value="approved">승인완료</option>
+                      <option value="rejected">반려</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label" for="proj-reg-filter-period-from">등록일 시작</label>
+                    <input type="date" id="proj-reg-filter-period-from" class="form-control" title="등록일 기준 시작일" />
+                  </div>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label" for="proj-reg-filter-period-to">등록일 종료</label>
+                    <input type="date" id="proj-reg-filter-period-to" class="form-control" title="등록일 기준 종료일" />
+                  </div>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label" for="proj-reg-filter-registrant">등록자</label>
+                    <input type="search" id="proj-reg-filter-registrant" class="form-control" placeholder="이름·ID" title="등록자" />
+                  </div>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label" for="proj-reg-filter-cpm">총괄 PM</label>
+                    <select id="proj-reg-filter-cpm" class="form-control" title="CPM"></select>
+                  </div>
+                </div>
+                <div class="proj-reg-list-filters-actions">
+                  <button type="button" class="btn btn-sm btn-outline" onclick="projRegResetListFilters()"><i class="fas fa-undo"></i> 조건 초기화</button>
+                </div>
               </div>
             </div>
             <div class="card-body" style="padding:0">
@@ -1802,8 +1891,8 @@
                       <th style="width:96px">상태</th>
                       <th>프로젝트 코드</th>
                       <th>프로젝트명</th>
-                      <th>발주처</th>
-                      <th>수행기간</th>
+                      <th>고객사</th>
+                      <th style="width:110px">수주참여자</th>
                       <th>CPM</th>
                       <th>등록일</th>
                       <th style="min-width:120px;text-align:center">관리</th>
@@ -1820,17 +1909,9 @@
 
         <div id="proj-reg-form" style="display:none">
           <div class="proj-reg-create-wrap">
-            <nav style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
-              <span style="cursor:pointer;color:var(--primary)" onclick="projRegShowList()" role="button">프로젝트 목록</span>
-              <span style="margin:0 6px;opacity:0.5">/</span>
-              <span id="proj-reg-form-crumb" style="color:var(--text-secondary);font-weight:600">Create Project</span>
-            </nav>
-
             <div class="proj-reg-create-header">
               <div style="min-width:0">
-                <p class="proj-reg-eyebrow">Create Project</p>
-                <h2 class="proj-reg-create-title" id="proj-reg-form-title">새 프로젝트 등록</h2>
-                <p class="proj-reg-create-sub" id="proj-reg-form-subtitle">유형·연월·발주 정보를 입력한 뒤 저장하면 프로젝트 코드가 자동으로 부여됩니다.</p>
+                <h2 class="proj-reg-create-title" id="proj-reg-form-title">Create Project</h2>
               </div>
               <div style="display:flex;gap:8px;flex-shrink:0">
                 <button type="button" class="btn btn-sm btn-ghost" onclick="projRegShowList()"><i class="fas fa-arrow-left"></i> 목록으로</button>
@@ -1839,7 +1920,6 @@
 
             <div class="proj-reg-progress-track">
               <div class="proj-reg-progress" aria-hidden="true"><div class="proj-reg-progress-bar" id="proj-reg-progress-bar"></div></div>
-              <p class="proj-reg-progress-label" id="proj-reg-progress-label" role="status" aria-live="polite">필수 입력 0/2</p>
             </div>
             <div id="proj-reg-status-banner" class="proj-reg-status-banner" hidden style="margin:12px 0 0;padding:10px 12px;border-radius:8px;background:#f8fafc;border:1px solid var(--border-light);font-size:13px;line-height:1.5"></div>
 
@@ -1855,7 +1935,7 @@
                 <span class="proj-reg-step-num" data-step-num="2">2</span>
                 <span>
                   <span class="proj-reg-step-t">발주·수주</span>
-                  <span class="proj-reg-step-d">발주처·CPM 등</span>
+                  <span class="proj-reg-step-d">고객사·CPM 등</span>
                 </span>
               </button>
               <button type="button" class="proj-reg-step" data-proj-step="3" onclick="projRegScrollToSection(3)">
@@ -1877,7 +1957,7 @@
             <button type="button" class="btn btn-sm btn-outline proj-reg-aside-toggle" id="proj-reg-aside-toggle"
                     onclick="projRegToggleAside()" aria-expanded="false" aria-controls="proj-reg-aside-panel">
               <i class="fas fa-info-circle"></i>
-              <span id="proj-reg-aside-toggle-text">도움말·필수 요약 보기</span>
+              <span id="proj-reg-aside-toggle-text">도움말·유의사항 보기</span>
             </button>
 
             <div class="proj-reg-create-layout">
@@ -1890,7 +1970,6 @@
                     <span class="proj-reg-section-badge">1</span>
                     <div>
                       <div class="proj-reg-section-title">프로젝트 코드·명칭</div>
-                      <div class="proj-reg-section-desc">대·소분류 유형과 연월을 선택합니다. <strong>승인 요청</strong> 시 프로젝트 코드가 채번되며, 직원등록에 지정된 1·2차 승인자가 순서대로 승인합니다.</div>
                     </div>
                   </div>
                   <div class="proj-reg-section-body">
@@ -1898,12 +1977,10 @@
                       <div class="form-group" style="margin:0">
                         <label class="form-label">유형 선택 (대·소분류) <span class="required">*</span></label>
                         <select id="proj-reg-code-type" class="form-control" onchange="projRegOnCodeTypeChange()"></select>
-                        <p style="font-size:11px;color:var(--text-muted);margin:4px 0 0">Settings → 프로젝트 Code 관리에 등록된 행에서 선택합니다.</p>
                       </div>
                       <div class="form-group" style="margin:0">
                         <label class="form-label">연월 (YYMM 기준) <span class="required">*</span></label>
                         <input type="month" id="proj-reg-yymm" class="form-control" />
-                        <p style="font-size:11px;color:var(--text-muted);margin:4px 0 0"><code style="font-size:10px">대분류Code_소분류Code_YYMM_일련</code> 형식으로 자동 부여</p>
                       </div>
                     </div>
                     <div class="form-group" id="proj-reg-existing-code-wrap" style="display:none">
@@ -1921,46 +1998,70 @@
                   <div class="proj-reg-section-head">
                     <span class="proj-reg-section-badge">2</span>
                     <div>
-                      <div class="proj-reg-section-title">발주·수주 정보</div>
-                      <div class="proj-reg-section-desc">발주처(고객사 마스터)와 수주 경로, 내부 CPM을 지정합니다.</div>
+                      <div class="proj-reg-section-title">고객사·수주 정보</div>
                     </div>
                   </div>
                   <div class="proj-reg-section-body">
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
                       <div class="form-group proj-reg-client-wrap" style="margin:0;position:relative">
-                        <label class="form-label">발주처 <span class="required">*</span></label>
+                        <label class="form-label">고객사 <span class="required">*</span></label>
                         <input type="hidden" id="proj-reg-client" value="" />
                         <input type="text" id="proj-reg-client-search" class="form-control" placeholder="고객사명 일부 입력 후 목록에서 선택" autocomplete="off" />
                         <ul id="proj-reg-client-suggest" class="proj-reg-suggest-list" role="listbox" hidden></ul>
                       </div>
                       <div class="form-group" style="margin:0">
-                        <label class="form-label">수주자</label>
-                        <input type="text" id="proj-reg-order-owner" class="form-control" placeholder="수주자 이름" autocomplete="off" />
+                        <label class="form-label">대표 수주자</label>
+                        <input type="text" id="proj-reg-order-owner" class="form-control" placeholder="대표 수주자 이름" autocomplete="off" />
                       </div>
                       <div class="form-group" style="margin:0">
-                        <label class="form-label">
-                          수주경로
-                          <span class="proj-reg-label-sub proj-reg-label-sub--spacer" aria-hidden="true">&nbsp;</span>
-                        </label>
+                        <label class="form-label">수주경로</label>
                         <select id="proj-reg-route" class="form-control" onchange="projRegOnRouteChange()">
                           <option value="">선택</option>
-                          <option value="소개">소개</option>
-                          <option value="RFP">RFP</option>
-                          <option value="재수주">재수주</option>
-                          <option value="기타">기타</option>
+                          <option value="신규 발굴">신규 발굴 (신규 고객사 직접 영업)</option>
+                          <option value="기존 확장">기존 확장 (기존 고객사 선제적 제안)</option>
+                          <option value="단순 수주">단순 수주 (기존 고객사 자발적 의뢰)</option>
+                          <option value="외부 소개">외부 소개 (인맥 및 파트너사 추천)</option>
+                          <option value="경쟁 입찰">경쟁 입찰 (공개 RFP 및 조달 참여)</option>
+                          <option value="기타 수주">기타 수주</option>
                         </select>
                       </div>
                       <div class="form-group" style="margin:0">
-                        <label class="form-label">
-                          총괄 프로젝트 매니저 (CPM)
-                          <span class="proj-reg-label-sub">팀장·본부장·경영·관리자만 목록에 표시</span>
-                        </label>
+                        <label class="form-label">총괄 프로젝트 매니저 (CPM)</label>
                         <select id="proj-reg-cpm" class="form-control"></select>
                       </div>
                     </div>
-                    <div class="form-group" id="proj-reg-route-other-wrap" style="margin:12px 0 0;display:none">
-                      <label class="form-label">기타(직접 입력)</label>
-                      <input type="text" id="proj-reg-route-other" class="form-control" placeholder="수주 경로를 구체적으로 입력" autocomplete="off" />
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+                      <div class="form-group" style="margin:0">
+                        <label class="form-label">수주 참여자(복수)</label>
+                        <input type="hidden" id="proj-reg-order-contributors" value="" />
+                        <div id="proj-reg-contributors-rows" style="display:flex;flex-direction:column;gap:8px"></div>
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px;flex-wrap:wrap">
+                          <button type="button" class="btn btn-sm btn-outline" onclick="projRegAddContributorRow()"><i class="fas fa-plus"></i> 참여자 추가</button>
+                          <span id="proj-reg-contributors-sum" style="font-size:11px;color:var(--text-muted)">기여도 합계: 0%</span>
+                        </div>
+                      </div>
+                      <div class="form-group" style="margin:0">
+                        <label class="form-label">수주경로 세부내역</label>
+                        <textarea id="proj-reg-route-detail" class="form-control" rows="3" placeholder="수주경로 유형 선택 후 세부내역을 입력하세요."></textarea>
+                        <p id="proj-reg-route-guide" style="font-size:11px;color:var(--text-muted);margin:6px 0 0">가이드: 수주경로 유형을 선택하면 작성 포인트를 안내합니다.</p>
+                      </div>
+                    </div>
+                    <div class="form-group" style="margin:12px 0 0">
+                      <label class="form-label">수주경로 증빙 파일</label>
+                      <input type="file" id="proj-reg-route-evidence" class="form-control" accept=".pdf,.doc,.docx,.xlsx,.xls,.png,.jpg,.jpeg,.eml,.msg" onchange="projRegOnRouteEvidenceFileChange()" />
+                      <input type="hidden" id="proj-reg-route-evidence-remove" value="" />
+                      <div id="proj-reg-route-evidence-existing" class="proj-reg-contract-existing" hidden>
+                        <div class="proj-reg-contract-existing-inner">
+                          <i class="fas fa-paperclip" style="color:#0369a1;flex-shrink:0"></i>
+                          <div style="min-width:0;flex:1">
+                            <div id="proj-reg-route-evidence-existing-name" style="font-size:13px;font-weight:600;word-break:break-all"></div>
+                            <div id="proj-reg-route-evidence-existing-meta" style="font-size:11px;color:var(--text-muted);margin-top:2px"></div>
+                          </div>
+                          <a id="proj-reg-route-evidence-existing-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline" style="display:none;flex-shrink:0">열기</a>
+                          <button type="button" class="btn btn-sm btn-outline btn-danger" style="flex-shrink:0;border-color:#fecaca;color:#b91c1c" onclick="projRegMarkRouteEvidenceRemove()" title="저장 시 파일 연결이 해제되고 기존 업로드 파일은 삭제됩니다">파일 제거</button>
+                        </div>
+                      </div>
+                      <p id="proj-reg-route-evidence-remove-hint" hidden style="font-size:11px;color:#b45309;margin:8px 0 0">저장하면 수주경로 증빙 파일 연결이 해제되며 기존 업로드 파일 삭제를 시도합니다. 취소하려면 취소 후 다시 수정 화면을 여세요.</p>
                     </div>
                   </div>
                 </div>
@@ -1970,7 +2071,6 @@
                     <span class="proj-reg-section-badge">3</span>
                     <div>
                       <div class="proj-reg-section-title">수주금액·청구 일정</div>
-                      <div class="proj-reg-section-desc">금액은 원 단위이며 천 단위 구분(콤마)으로 표시됩니다. 청구·입금 예정일은 선택 입력입니다.</div>
                     </div>
                   </div>
                   <div class="proj-reg-section-body" style="padding-top:12px">
@@ -2026,17 +2126,16 @@
                     <span class="proj-reg-section-badge">4</span>
                     <div>
                       <div class="proj-reg-section-title">수행 기간·계약서</div>
-                      <div class="proj-reg-section-desc">프로젝트 수행 기간과 계약서 파일을 연결합니다. (파일은 메타만 1차 저장)</div>
                     </div>
                   </div>
                   <div class="proj-reg-section-body">
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
                       <div class="form-group" style="margin:0">
-                        <label class="form-label">수행 시작일</label>
+                        <label class="form-label">예상수행시작일</label>
                         <input type="date" id="proj-reg-period-start" class="form-control" />
                       </div>
                       <div class="form-group" style="margin:0">
-                        <label class="form-label">수행 종료일</label>
+                        <label class="form-label">예상수행종료일</label>
                         <input type="date" id="proj-reg-period-end" class="form-control" />
                       </div>
                     </div>
@@ -2052,11 +2151,28 @@
                             <div id="proj-reg-contract-existing-meta" style="font-size:11px;color:var(--text-muted);margin-top:2px"></div>
                           </div>
                           <a id="proj-reg-contract-existing-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline" style="display:none;flex-shrink:0">열기</a>
-                          <button type="button" class="btn btn-sm btn-outline btn-danger" style="flex-shrink:0;border-color:#fecaca;color:#b91c1c" onclick="projRegMarkContractRemove()" title="저장 시 파일명·링크·시각 메타만 삭제됩니다">메타 삭제</button>
+                          <button type="button" class="btn btn-sm btn-outline btn-danger" style="flex-shrink:0;border-color:#fecaca;color:#b91c1c" onclick="projRegMarkContractRemove()" title="저장 시 파일 연결이 해제되고 기존 업로드 파일은 삭제됩니다">파일 제거</button>
                         </div>
                       </div>
-                      <p id="proj-reg-contract-remove-hint" class="proj-reg-contract-remove-hint" hidden style="font-size:11px;color:#b45309;margin:8px 0 0">저장하면 계약서 메타가 삭제됩니다. 취소하려면 취소 후 다시 수정 화면을 여세요.</p>
-                      <p style="font-size:11px;color:var(--text-muted);margin:4px 0 0">1차: 파일명·업로드 시각만 저장합니다(실제 파일 바이너리는 Storage 연동 시). 새 파일을 고르면 메타가 갱신됩니다.</p>
+                      <p id="proj-reg-contract-remove-hint" class="proj-reg-contract-remove-hint" hidden style="font-size:11px;color:#b45309;margin:8px 0 0">저장하면 계약서 파일 연결이 해제되며 기존 업로드 파일 삭제를 시도합니다. 취소하려면 취소 후 다시 수정 화면을 여세요.</p>
+                    </div>
+                    <div class="form-group" style="margin:12px 0 0">
+                      <label class="form-label">고객 합의 근거 파일 (예외 시)</label>
+                      <input type="file" id="proj-reg-evidence" class="form-control" accept=".pdf,.doc,.docx,.xlsx,.xls,.png,.jpg,.jpeg,.eml,.msg" onchange="projRegOnEvidenceFileChange()" />
+                      <input type="hidden" id="proj-reg-evidence-remove" value="" />
+                      <div id="proj-reg-evidence-existing" class="proj-reg-contract-existing" hidden>
+                        <div class="proj-reg-contract-existing-inner">
+                          <i class="fas fa-file-alt" style="color:#0f766e;flex-shrink:0"></i>
+                          <div style="min-width:0;flex:1">
+                            <div id="proj-reg-evidence-existing-name" style="font-size:13px;font-weight:600;word-break:break-all"></div>
+                            <div id="proj-reg-evidence-existing-meta" style="font-size:11px;color:var(--text-muted);margin-top:2px"></div>
+                          </div>
+                          <a id="proj-reg-evidence-existing-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline" style="display:none;flex-shrink:0">열기</a>
+                          <button type="button" class="btn btn-sm btn-outline btn-danger" style="flex-shrink:0;border-color:#fecaca;color:#b91c1c" onclick="projRegMarkEvidenceRemove()" title="저장 시 파일 연결이 해제되고 기존 업로드 파일은 삭제됩니다">파일 제거</button>
+                        </div>
+                      </div>
+                      <p id="proj-reg-evidence-remove-hint" hidden style="font-size:11px;color:#b45309;margin:8px 0 0">저장하면 근거 파일 연결이 해제되며 기존 업로드 파일 삭제를 시도합니다. 취소하려면 취소 후 다시 수정 화면을 여세요.</p>
+                      <textarea id="proj-reg-contract-exception-reason" class="form-control" rows="2" style="margin-top:8px" placeholder="계약서 미첨부 사유(예: 선착수 합의, 계약서 결재 대기 등)"></textarea>
                     </div>
                   </div>
                 </div>
@@ -2067,9 +2183,9 @@
                     <button type="button" class="btn btn-outline" onclick="projRegSaveDraft()"><i class="fas fa-file-alt"></i> 임시저장</button>
                     <button type="button" class="btn btn-primary" onclick="projRegSubmitForApproval()"><i class="fas fa-paper-plane"></i> 승인 요청</button>
                   </span>
-                  <span id="proj-reg-footer-approver" style="display:none;gap:8px;align-items:center">
-                    <button type="button" class="btn btn-success" onclick="projRegApproveCurrent()"><i class="fas fa-check"></i> 승인</button>
-                    <button type="button" class="btn btn-danger" onclick="projRegRejectCurrent()"><i class="fas fa-times"></i> 반려</button>
+                  <span id="proj-reg-footer-approval-redirect" style="display:none;align-items:center;gap:8px;max-width:520px;font-size:12.5px;color:#334155;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 12px">
+                    <i class="fas fa-external-link-alt" style="color:#2563eb;flex-shrink:0"></i>
+                    <span>프로젝트 <strong>승인·반려</strong>는 <strong>Approval → 프로젝트 승인</strong> 탭에서 처리합니다.</span>
                   </span>
                   <button type="button" id="proj-reg-btn-save-approved" class="btn btn-primary" style="display:none" onclick="projRegSaveApproved()"><i class="fas fa-save"></i> 저장</button>
                 </div>
@@ -2079,16 +2195,15 @@
                 <div class="proj-reg-aside-card">
                   <h4><i class="fas fa-key" style="color:var(--primary);font-size:13px"></i> 코드·승인</h4>
                   <ul>
-                    <li><strong>승인 요청</strong> 시 RPC로 코드가 채번됩니다.</li>
-                    <li>상태: 임시저장(draft) → 승인대기(pending) → 승인완료(approved) 또는 반려(rejected).</li>
-                    <li>1·2차 승인자는 등록자 본인의 직원등록(approver / reviewer2) 기준입니다.</li>
+                    <li>승인 요청 시 코드가 자동 채번됩니다.</li>
+                    <li>승인·반려는 <strong>Approval → 프로젝트 승인</strong> 탭에서 처리합니다.</li>
                   </ul>
                 </div>
                 <div class="proj-reg-aside-card">
-                  <h4><i class="fas fa-check-circle" style="color:#16a34a;font-size:13px"></i> 필수 요약</h4>
+                  <h4><i class="fas fa-exclamation-circle" style="color:#d97706;font-size:13px"></i> 유의사항</h4>
                   <ul>
-                    <li>유형·연월·프로젝트명·발주처(검색 후 선택)</li>
-                    <li>나머지는 운영에 맞게 선택</li>
+                    <li>계약서는 원칙적으로 첨부하여야 합니다.</li>
+                    <li>미첨부 시 서비스 fee에 대한 고객과의 합의 근거(메일/공문 등)를 첨부 후 조건부 승인 가능합니다.</li>
                   </ul>
                 </div>
               </aside>
@@ -2709,6 +2824,73 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('projectCodeUploadModal')">닫기</button>
       <button class="btn btn-primary" onclick="uploadProjectCodeTypes()"><i class="fas fa-upload"></i> 업로드</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="projRegContribModal">
+  <div class="modal" style="width:560px;max-width:95vw">
+    <div class="modal-header">
+      <h3 id="proj-reg-contrib-modal-title">수주 참여자</h3>
+      <button class="btn-close" onclick="closeModal('projRegContribModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="proj-reg-contrib-modal-empty" class="table-empty" style="display:none;padding:16px 8px">
+        <i class="fas fa-users"></i><p>등록된 수주 참여자 정보가 없습니다.</p>
+      </div>
+      <div id="proj-reg-contrib-modal-list" style="display:flex;flex-direction:column;gap:8px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="closeModal('projRegContribModal')">확인</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="projRegContractDocModal">
+  <div class="modal" style="width:min(1120px,96vw);max-width:96vw">
+    <div class="modal-header">
+      <h3><i class="fas fa-file-contract" style="color:var(--primary)"></i> 계약서 관리현황</h3>
+      <button class="btn-close" onclick="closeModal('projRegContractDocModal')">×</button>
+    </div>
+    <div class="modal-body" style="padding:14px 16px">
+      <div style="display:grid;grid-template-columns:minmax(240px,1fr) 180px;gap:10px;align-items:end;margin-bottom:10px">
+        <div class="form-group" style="margin:0">
+          <label class="form-label" for="proj-reg-contract-doc-filter-q">검색</label>
+          <input id="proj-reg-contract-doc-filter-q" type="search" class="form-control" placeholder="프로젝트코드, 프로젝트명, 고객사, 파일명, 등록자" />
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label" for="proj-reg-contract-doc-filter-kind">문서유형</label>
+          <select id="proj-reg-contract-doc-filter-kind" class="form-control">
+            <option value="">전체</option>
+            <option value="contract">용역계약서</option>
+            <option value="agreement">계약예외근거</option>
+            <option value="route">수주경로증빙</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-wrapper" style="border:1px solid var(--border-light);border-radius:10px">
+        <table class="data-table" style="min-width:980px">
+          <thead>
+            <tr>
+              <th style="width:44px">No</th>
+              <th style="width:116px">문서유형</th>
+              <th style="width:170px">프로젝트코드</th>
+              <th>프로젝트명</th>
+              <th style="width:160px">고객사</th>
+              <th style="width:220px">파일명</th>
+              <th style="width:104px">등록일</th>
+              <th style="width:100px">등록자</th>
+              <th style="width:190px;text-align:center">관리</th>
+            </tr>
+          </thead>
+          <tbody id="proj-reg-contract-doc-body">
+            <tr><td colspan="9" class="table-empty"><i class="fas fa-file-alt"></i><p>표시할 계약 문서가 없습니다.</p></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="closeModal('projRegContractDocModal')">닫기</button>
     </div>
   </div>
 </div>
@@ -3464,18 +3646,18 @@
 </div>
 
 <!-- JS 파일들 -->
-<script src="js/app.js?v=20260414catdedupe"></script>
+<script src="js/app.js?v=20260417storageUpload1"></script>
 <script src="js/kw-example-maps.js?v=20260407a"></script>
 <script src="js/llm-proxy.js?v=20260409a"></script>
 <script src="js/notify.js?v=20260402a"></script>
 <script src="js/dashboard.js?v=20260410a"></script>
   <script src="js/entry.js?v=20260416noDescPrev1"></script>
 <script src="js/daily-module.js?v=20260416a"></script>
-  <script src="js/approval.js?v=20260416apvDateRange1"></script>
+  <script src="js/approval.js?v=20260416approvalMainTabs1"></script>
 <script src="js/analysis.js?v=20260410a"></script>
 <script src="js/archive.js?v=20260410d"></script>
 <!-- master.js / users.js: Settings 메뉴 진입 시 동적 로드 (초기 81KB 절감) -->
-<script src="js/main.js?v=20260416tsopt1"></script>
+<script src="js/main.js?v=20260417realUploadContractModal1"></script>
 
 
 </body>

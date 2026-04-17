@@ -4,6 +4,9 @@
 let _projRegRows = [];
 let _projRegTypes = [];
 let _projRegClients = [];
+/** Master.users() 캐시 — 목록 필터(CPM)용 */
+let _projRegUsers = [];
+let _projRegListFiltersBound = false;
 
 const _PROJ_REG_AMT_IDS = [
   'proj-reg-bill-down-amt',
@@ -15,6 +18,26 @@ const _PROJ_REG_AMT_IDS = [
 
 let _projRegClientSearchBound = false;
 let _projRegAmtBound = false;
+
+const _PROJ_ROUTE_TYPES = ['신규 발굴', '기존 확장', '단순 수주', '외부 소개', '경쟁 입찰', '기타 수주'];
+const _PROJ_ROUTE_GUIDES = {
+  '신규 발굴': '가이드: 최초 접촉 경로, 영업 전개 내용, 직접 발굴 증빙(메일/미팅노트/제안서)을 작성·첨부하세요.',
+  '기존 확장': '가이드: 고객 Pain-point, 선제 제안 핵심, 제안 증빙(메일/제안서/회의록)을 작성·첨부하세요.',
+  '단순 수주': '가이드: 고객 요청 내용, 접수·대응 경로(시점/채널/담당), 요청 증빙(메일/공문/회의록)을 작성·첨부하세요.',
+  '외부 소개': '가이드: 소개자 정보, 실제 제안/영업 수행자, 소개·후속 커뮤니케이션 증빙을 작성·첨부하세요.',
+  '경쟁 입찰': '가이드: 팀원별 역할, 수주 핵심 요인(Winning Point), RFP/평가 관련 증빙을 작성·첨부하세요.',
+  '기타 수주': '가이드: 수주 배경, 진행 흐름·의사결정 포인트, 관련 근거자료를 작성·첨부하세요.',
+};
+
+let _projRegContributors = [];
+let _projRegContractDocs = [];
+let _projRegContractDocFiltersBound = false;
+
+const _PROJ_REG_STORAGE_BUCKETS = {
+  contract: 'registered-project-contracts',
+  agreement: 'registered-project-agreements',
+  route: 'registered-project-route-evidence',
+};
 
 function _projRegMonthToYymm(monthVal) {
   if (!monthVal || !/^\d{4}-\d{2}$/.test(monthVal)) return '';
@@ -58,15 +81,17 @@ function _projRegNormStatus(r) {
   return 'approved';
 }
 
-function _projRegStatusLabel(st) {
+function _projRegStatusLabel(st, row) {
+  if (st === 'approved' && row && row.conditional_approval === true) return '조건부승인';
   const m = { draft: '임시저장', pending: '승인대기', approved: '승인완료', rejected: '반려' };
   return m[st] || st || '-';
 }
 
-function _projRegStatusBadgeClass(st) {
+function _projRegStatusBadgeClass(st, row) {
   if (st === 'draft') return 'badge badge-gray';
   if (st === 'pending') return 'badge badge-yellow';
   if (st === 'rejected') return 'badge badge-red';
+  if (st === 'approved' && row && row.conditional_approval === true) return 'badge badge-amber';
   return 'badge badge-green';
 }
 
@@ -160,7 +185,7 @@ function projRegUpdateFormFooter(session, editId, row) {
   const owner = !editId || _projRegIsOwner(session, row);
   const canAp = row && st === 'pending' && _projRegCanApproveRow(session, row);
   const footDraft = document.getElementById('proj-reg-footer-draft');
-  const footAppr = document.getElementById('proj-reg-footer-approver');
+  const footRedirect = document.getElementById('proj-reg-footer-approval-redirect');
   const btnAppr = document.getElementById('proj-reg-btn-save-approved');
   const banner = document.getElementById('proj-reg-status-banner');
   if (banner) {
@@ -168,12 +193,15 @@ function projRegUpdateFormFooter(session, editId, row) {
     if (!banner.hidden) {
       banner.textContent = '';
       const badge = document.createElement('span');
-      badge.className = _projRegStatusBadgeClass(st);
-      badge.textContent = _projRegStatusLabel(st);
+      badge.className = _projRegStatusBadgeClass(st, row);
+      badge.textContent = _projRegStatusLabel(st, row);
       banner.appendChild(badge);
       const step = st === 'pending' ? _projRegPendingStep(row) : null;
       if (st === 'pending' && step === 1) banner.appendChild(document.createTextNode(' (1차 승인 대기)'));
       else if (st === 'pending' && step === 2) banner.appendChild(document.createTextNode(' (2차 승인 대기)'));
+      if (row && row.contract_exception_required === true) {
+        banner.appendChild(document.createTextNode(' · 조건부 승인 심사'));
+      }
       const rr = String(row.rejection_reason || '').trim();
       if (st === 'rejected' && rr) {
         banner.appendChild(document.createTextNode(' · 사유: ' + rr));
@@ -181,7 +209,7 @@ function projRegUpdateFormFooter(session, editId, row) {
     }
   }
   if (footDraft) footDraft.style.display = 'none';
-  if (footAppr) footAppr.style.display = 'none';
+  if (footRedirect) footRedirect.style.display = 'none';
   if (btnAppr) btnAppr.style.display = 'none';
 
   if (!editId) {
@@ -209,7 +237,7 @@ function projRegUpdateFormFooter(session, editId, row) {
     return;
   }
   if (st === 'pending' && canAp) {
-    if (footAppr) footAppr.style.display = 'inline-flex';
+    if (footRedirect) footRedirect.style.display = 'inline-flex';
     projRegSetFormFieldsDisabled(true);
     return;
   }
@@ -317,37 +345,189 @@ function projRegBindClientSearch() {
 
 function projRegOnRouteChange() {
   const sel = document.getElementById('proj-reg-route');
-  const wrap = document.getElementById('proj-reg-route-other-wrap');
-  if (!sel || !wrap) return;
-  const isOther = sel.value === '기타';
-  wrap.style.display = isOther ? '' : 'none';
-  if (!isOther) {
-    const o = document.getElementById('proj-reg-route-other');
-    if (o) o.value = '';
+  const guide = document.getElementById('proj-reg-route-guide');
+  if (!sel) return;
+  if (guide) {
+    const g = _PROJ_ROUTE_GUIDES[sel.value] || '가이드: 수주경로 유형을 선택하면 작성 포인트를 안내합니다.';
+    guide.textContent = g;
   }
   projRegRefreshProgress();
 }
 
-function projRegApplyRouteFromStored(routeVal) {
+function _projRegNormalizeStoredRoute(v) {
+  const s = String(v || '').trim();
+  if (!s) return '';
+  if (_PROJ_ROUTE_TYPES.includes(s)) return s;
+  if (s === '소개' || s === '외부소개') return '외부 소개';
+  if (s === 'RFP') return '경쟁 입찰';
+  if (s === '고객의뢰') return '단순 수주';
+  if (s === '프로젝트제안' || s === '재수주') return '기존 확장';
+  if (s === '기타') return '기타 수주';
+  return '기타 수주';
+}
+
+function projRegApplyRouteFromStored(routeVal, detailVal) {
   const v = String(routeVal || '').trim();
   const sel = document.getElementById('proj-reg-route');
-  const other = document.getElementById('proj-reg-route-other');
+  const detail = document.getElementById('proj-reg-route-detail');
   if (!sel) return;
-  if (!v) {
-    sel.value = '';
-    if (other) other.value = '';
-    projRegOnRouteChange();
-    return;
-  }
-  const fixed = ['소개', 'RFP', '재수주', '기타'];
-  if (fixed.includes(v)) {
-    sel.value = v;
-    if (other) other.value = '';
-  } else {
-    sel.value = '기타';
-    if (other) other.value = v;
+  const normalized = _projRegNormalizeStoredRoute(v);
+  sel.value = normalized;
+  if (detail) {
+    const baseDetail = String(detailVal || '').trim();
+    if (baseDetail) detail.value = baseDetail;
+    else if (normalized === '기타 수주' && v && v !== normalized) detail.value = v;
+    else detail.value = '';
   }
   projRegOnRouteChange();
+}
+
+function _projRegContribNormalize(rows) {
+  return (rows || []).map((r) => ({
+    name: String((r && r.name) || '').trim(),
+    role: String((r && r.role) || '').trim(),
+    contribution: String((r && r.contribution) || '').replace(/[^\d.]/g, ''),
+  }));
+}
+
+function _projRegContribParse(raw) {
+  const txt = String(raw || '').trim();
+  if (!txt) return [];
+  try {
+    const j = JSON.parse(txt);
+    if (Array.isArray(j)) return _projRegContribNormalize(j);
+  } catch (_) {}
+  // 하위호환: "이름(역할,40%)" 콤마 나열 텍스트
+  return txt.split(',').map((part) => {
+    const s = String(part || '').trim();
+    const m = s.match(/^(.+?)\((.+?),\s*([\d.]+)%\)$/);
+    if (!m) return { name: s, role: '', contribution: '' };
+    return { name: m[1].trim(), role: m[2].trim(), contribution: m[3].trim() };
+  }).filter((r) => r.name || r.role || r.contribution);
+}
+
+function _projRegContribSyncHidden() {
+  const el = document.getElementById('proj-reg-order-contributors');
+  if (!el) return;
+  const rows = _projRegContributors.filter((r) => r.name || r.role || r.contribution);
+  el.value = rows.length ? JSON.stringify(rows) : '';
+}
+
+function _projRegContribSum() {
+  return _projRegContributors.reduce((acc, r) => {
+    const n = parseFloat(String(r.contribution || ''));
+    return acc + (Number.isFinite(n) ? n : 0);
+  }, 0);
+}
+
+function _projRegRefreshContribSummary() {
+  const sumEl = document.getElementById('proj-reg-contributors-sum');
+  if (sumEl) {
+    const sum = _projRegContribSum();
+    sumEl.textContent = `기여도 합계: ${sum}%`;
+    sumEl.style.color = Math.abs(sum - 100) < 0.001 ? 'var(--success, #15803d)' : 'var(--text-muted)';
+  }
+  _projRegContribSyncHidden();
+}
+
+function projRegRenderContributorRows() {
+  const box = document.getElementById('proj-reg-contributors-rows');
+  if (!box) return;
+  if (!_projRegContributors.length) _projRegContributors = [{ name: '', role: '', contribution: '' }];
+  box.innerHTML = _projRegContributors.map((r, i) => `
+    <div class="proj-reg-contrib-row" style="display:grid;grid-template-columns:1.1fr 1fr 110px 34px;gap:8px;align-items:center">
+      <input type="text" class="form-control" placeholder="이름" value="${Utils.escHtml(r.name || '')}" oninput="projRegContribUpdate(${i},'name',this)" />
+      <input type="text" class="form-control" placeholder="역할" value="${Utils.escHtml(r.role || '')}" oninput="projRegContribUpdate(${i},'role',this)" />
+      <input type="text" class="form-control" inputmode="decimal" placeholder="기여도(%)" value="${Utils.escHtml(r.contribution || '')}" oninput="projRegContribUpdate(${i},'contribution',this)" />
+      <button type="button" class="btn btn-sm btn-icon proj-reg-contrib-remove-btn" title="삭제" aria-label="참여자 삭제" onclick="projRegRemoveContributorRow(${i})"><i class="fas fa-times"></i></button>
+    </div>
+  `).join('');
+  _projRegRefreshContribSummary();
+}
+
+function projRegSetContributorsFromStored(raw) {
+  _projRegContributors = _projRegContribParse(raw);
+  projRegRenderContributorRows();
+}
+
+function projRegAddContributorRow() {
+  _projRegContributors.push({ name: '', role: '', contribution: '' });
+  projRegRenderContributorRows();
+}
+
+function projRegRemoveContributorRow(idx) {
+  _projRegContributors.splice(idx, 1);
+  projRegRenderContributorRows();
+}
+
+function projRegContribUpdate(idx, key, valueOrEl) {
+  if (!_projRegContributors[idx]) return;
+  const inputEl = valueOrEl && typeof valueOrEl === 'object' && 'value' in valueOrEl ? valueOrEl : null;
+  let value = inputEl ? inputEl.value : valueOrEl;
+  if (key === 'contribution') {
+    value = String(value || '').replace(/[^\d.]/g, '');
+    if (inputEl && inputEl.value !== value) inputEl.value = value;
+  } else {
+    value = String(value || '');
+  }
+  _projRegContributors[idx][key] = value;
+  _projRegRefreshContribSummary();
+}
+
+function _projRegValidateContributorsForApproval() {
+  const rows = _projRegContributors
+    .map((r) => ({ ...r, name: String(r.name || '').trim(), role: String(r.role || '').trim(), contribution: String(r.contribution || '').trim() }))
+    .filter((r) => r.name || r.role || r.contribution);
+  if (!rows.length) return { ok: false, message: '수주 참여자를 1명 이상 입력하세요.' };
+  for (const r of rows) {
+    if (!r.name || !r.role || !r.contribution) {
+      return { ok: false, message: '수주 참여자별 이름·역할·기여도를 모두 입력하세요.' };
+    }
+  }
+  const sum = rows.reduce((acc, r) => acc + (parseFloat(r.contribution) || 0), 0);
+  if (Math.abs(sum - 100) > 0.001) return { ok: false, message: '수주 참여자 기여도 합계는 100%여야 합니다.' };
+  return { ok: true };
+}
+
+function _projRegContribToRows(raw) {
+  return _projRegContribParse(raw).filter((r) => r.name || r.role || r.contribution);
+}
+
+function _projRegContribRowCount(raw) {
+  return _projRegContribToRows(raw).length;
+}
+
+function _projRegEscJs(v) {
+  return String(v || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r?\n/g, '\\n');
+}
+
+function projRegOpenContribModal(raw, label) {
+  const title = document.getElementById('proj-reg-contrib-modal-title');
+  const empty = document.getElementById('proj-reg-contrib-modal-empty');
+  const list = document.getElementById('proj-reg-contrib-modal-list');
+  if (!empty || !list) return;
+  if (title) title.textContent = `수주 참여자 · ${label || '프로젝트'}`;
+  const rows = _projRegContribToRows(raw);
+  if (!rows.length) {
+    empty.style.display = '';
+    list.style.display = 'none';
+    list.innerHTML = '';
+    openModal('projRegContribModal');
+    return;
+  }
+  empty.style.display = 'none';
+  list.style.display = 'flex';
+  list.innerHTML = rows.map((r, i) => `
+    <div style="border:1px solid var(--border-light);border-radius:8px;padding:10px 12px;background:#fff">
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">참여자 ${i + 1}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 100px;gap:10px;font-size:13px">
+        <div><strong>이름</strong><br>${Utils.escHtml(r.name || '-')}</div>
+        <div><strong>역할</strong><br>${Utils.escHtml(r.role || '-')}</div>
+        <div><strong>기여도</strong><br>${Utils.escHtml(r.contribution || '0')}%</div>
+      </div>
+    </div>
+  `).join('');
+  openModal('projRegContribModal');
 }
 
 async function init_project_register() {
@@ -362,8 +542,21 @@ async function init_project_register() {
   projRegShowList(false);
   projRegBindProgress();
   await projRegLoadTypes();
+  _projRegPopulateListMainSelect();
+  _projRegPopulateListSubSelect();
   await projRegFillDropdowns();
+  _projRegBindListFiltersOnce();
+  projRegBindContractDocFiltersOnce();
   await projRegLoadList();
+}
+
+function projRegBindContractDocFiltersOnce() {
+  if (_projRegContractDocFiltersBound) return;
+  const q = document.getElementById('proj-reg-contract-doc-filter-q');
+  const kind = document.getElementById('proj-reg-contract-doc-filter-kind');
+  if (q) q.addEventListener('input', () => projRegRenderContractDocModal());
+  if (kind) kind.addEventListener('change', () => projRegRenderContractDocModal());
+  _projRegContractDocFiltersBound = true;
 }
 
 function projRegShowList(reload) {
@@ -408,6 +601,7 @@ async function projRegFillDropdowns() {
   } catch (_) {
     users = [];
   }
+  _projRegUsers = users;
   const cpmSel = document.getElementById('proj-reg-cpm');
   if (cpmSel) {
     const cur = cpmSel.value;
@@ -424,6 +618,7 @@ async function projRegFillDropdowns() {
       });
     if (cur && [...cpmSel.options].some((o) => o.value === cur)) cpmSel.value = cur;
   }
+  _projRegPopulateListFilterDropdowns();
 }
 
 function projRegScrollToSection(n) {
@@ -520,7 +715,7 @@ function projRegRefreshProgress() {
   if (lab) {
     const miss = [];
     if (!step1ok) miss.push('① 코드·명칭');
-    if (!step2ok) miss.push('② 발주처');
+    if (!step2ok) miss.push('② 고객사');
     const optParts = [];
     if (step3opt) optParts.push('금액·청구');
     if (step4opt) optParts.push('기간·첨부');
@@ -637,7 +832,161 @@ function projRegMarkContractRemove() {
   if (hint) hint.hidden = false;
   const fin = document.getElementById('proj-reg-contract');
   if (fin) fin.value = '';
-  Toast.warning('저장하면 계약서 파일 메타(이름·시각·링크)가 삭제됩니다.');
+  Toast.warning('저장하면 계약서 파일 연결이 해제되고 기존 업로드 파일 삭제를 시도합니다.');
+  projRegRefreshProgress();
+}
+
+function projRegResetEvidenceUi() {
+  const ex = document.getElementById('proj-reg-evidence-existing');
+  const rem = document.getElementById('proj-reg-evidence-remove');
+  const hint = document.getElementById('proj-reg-evidence-remove-hint');
+  const link = document.getElementById('proj-reg-evidence-existing-link');
+  if (ex) ex.hidden = true;
+  if (rem) rem.value = '';
+  if (hint) hint.hidden = true;
+  if (link) {
+    link.style.display = 'none';
+    link.href = '#';
+  }
+  const n = document.getElementById('proj-reg-evidence-existing-name');
+  const m = document.getElementById('proj-reg-evidence-existing-meta');
+  if (n) n.textContent = '';
+  if (m) m.textContent = '';
+}
+
+function projRegSyncEvidenceExisting(r) {
+  projRegResetEvidenceUi();
+  if (!r) return;
+  const name = String(r.contract_evidence_file_name || '').trim();
+  if (!name) return;
+  const ex = document.getElementById('proj-reg-evidence-existing');
+  const nEl = document.getElementById('proj-reg-evidence-existing-name');
+  const mEl = document.getElementById('proj-reg-evidence-existing-meta');
+  const link = document.getElementById('proj-reg-evidence-existing-link');
+  if (nEl) nEl.textContent = name;
+  let meta = '';
+  if (r.contract_evidence_uploaded_at) {
+    try {
+      meta = Utils.formatDate ? Utils.formatDate(r.contract_evidence_uploaded_at) : String(r.contract_evidence_uploaded_at);
+      meta = '등록 시각: ' + meta;
+    } catch (_) {
+      meta = '';
+    }
+  }
+  if (mEl) mEl.textContent = meta;
+  const url = String(r.contract_evidence_file_url || '').trim();
+  if (link && url && /^https?:\/\//i.test(url)) {
+    link.href = url;
+    link.style.display = 'inline-flex';
+  }
+  if (ex) ex.hidden = false;
+}
+
+function projRegOnEvidenceFileChange() {
+  const rem = document.getElementById('proj-reg-evidence-remove');
+  const hint = document.getElementById('proj-reg-evidence-remove-hint');
+  const fileEl = document.getElementById('proj-reg-evidence');
+  if (rem) rem.value = '';
+  if (hint) hint.hidden = true;
+  const ex = document.getElementById('proj-reg-evidence-existing');
+  if (fileEl && fileEl.files && fileEl.files.length > 0 && ex) {
+    ex.hidden = true;
+  } else if (fileEl && (!fileEl.files || !fileEl.files.length)) {
+    const editId = document.getElementById('proj-reg-edit-id')?.value;
+    if (editId) {
+      const r = _projRegRows.find((x) => x.id === editId);
+      if (r && String(r.contract_evidence_file_name || '').trim()) projRegSyncEvidenceExisting(r);
+    }
+  }
+  projRegRefreshProgress();
+}
+
+function projRegMarkEvidenceRemove() {
+  document.getElementById('proj-reg-evidence-remove').value = '1';
+  const ex = document.getElementById('proj-reg-evidence-existing');
+  const hint = document.getElementById('proj-reg-evidence-remove-hint');
+  if (ex) ex.hidden = true;
+  if (hint) hint.hidden = false;
+  const fin = document.getElementById('proj-reg-evidence');
+  if (fin) fin.value = '';
+  Toast.warning('저장하면 근거 파일 연결이 해제되고 기존 업로드 파일 삭제를 시도합니다.');
+  projRegRefreshProgress();
+}
+
+function projRegResetRouteEvidenceUi() {
+  const ex = document.getElementById('proj-reg-route-evidence-existing');
+  const rem = document.getElementById('proj-reg-route-evidence-remove');
+  const hint = document.getElementById('proj-reg-route-evidence-remove-hint');
+  const link = document.getElementById('proj-reg-route-evidence-existing-link');
+  if (ex) ex.hidden = true;
+  if (rem) rem.value = '';
+  if (hint) hint.hidden = true;
+  if (link) {
+    link.style.display = 'none';
+    link.href = '#';
+  }
+  const n = document.getElementById('proj-reg-route-evidence-existing-name');
+  const m = document.getElementById('proj-reg-route-evidence-existing-meta');
+  if (n) n.textContent = '';
+  if (m) m.textContent = '';
+}
+
+function projRegSyncRouteEvidenceExisting(r) {
+  projRegResetRouteEvidenceUi();
+  if (!r) return;
+  const name = String(r.order_evidence_file_name || '').trim();
+  if (!name) return;
+  const ex = document.getElementById('proj-reg-route-evidence-existing');
+  const nEl = document.getElementById('proj-reg-route-evidence-existing-name');
+  const mEl = document.getElementById('proj-reg-route-evidence-existing-meta');
+  const link = document.getElementById('proj-reg-route-evidence-existing-link');
+  if (nEl) nEl.textContent = name;
+  let meta = '';
+  if (r.order_evidence_uploaded_at) {
+    try {
+      meta = Utils.formatDate ? Utils.formatDate(r.order_evidence_uploaded_at) : String(r.order_evidence_uploaded_at);
+      meta = '등록 시각: ' + meta;
+    } catch (_) {
+      meta = '';
+    }
+  }
+  if (mEl) mEl.textContent = meta;
+  const url = String(r.order_evidence_file_url || '').trim();
+  if (link && url && /^https?:\/\//i.test(url)) {
+    link.href = url;
+    link.style.display = 'inline-flex';
+  }
+  if (ex) ex.hidden = false;
+}
+
+function projRegOnRouteEvidenceFileChange() {
+  const rem = document.getElementById('proj-reg-route-evidence-remove');
+  const hint = document.getElementById('proj-reg-route-evidence-remove-hint');
+  const fileEl = document.getElementById('proj-reg-route-evidence');
+  if (rem) rem.value = '';
+  if (hint) hint.hidden = true;
+  const ex = document.getElementById('proj-reg-route-evidence-existing');
+  if (fileEl && fileEl.files && fileEl.files.length > 0 && ex) {
+    ex.hidden = true;
+  } else if (fileEl && (!fileEl.files || !fileEl.files.length)) {
+    const editId = document.getElementById('proj-reg-edit-id')?.value;
+    if (editId) {
+      const r = _projRegRows.find((x) => x.id === editId);
+      if (r && String(r.order_evidence_file_name || '').trim()) projRegSyncRouteEvidenceExisting(r);
+    }
+  }
+  projRegRefreshProgress();
+}
+
+function projRegMarkRouteEvidenceRemove() {
+  document.getElementById('proj-reg-route-evidence-remove').value = '1';
+  const ex = document.getElementById('proj-reg-route-evidence-existing');
+  const hint = document.getElementById('proj-reg-route-evidence-remove-hint');
+  if (ex) ex.hidden = true;
+  if (hint) hint.hidden = false;
+  const fin = document.getElementById('proj-reg-route-evidence');
+  if (fin) fin.value = '';
+  Toast.warning('저장하면 수주경로 증빙 파일 연결이 해제되고 기존 업로드 파일 삭제를 시도합니다.');
   projRegRefreshProgress();
 }
 
@@ -653,6 +1002,166 @@ function projRegOnCodeTypeChange() {
     nameEl.value = opt.dataset.nameEn;
   }
   projRegRefreshProgress();
+}
+
+function _projRegTypeById(typeId) {
+  if (!typeId) return null;
+  return _projRegTypes.find((x) => String(x.id) === String(typeId)) || null;
+}
+
+function _projRegRowMainCode(r) {
+  const t = _projRegTypeById(r && r.project_code_type_id);
+  return t ? String(t.main_code || '').trim() : '';
+}
+
+function _projRegDateStr(v) {
+  if (v == null || v === '') return '';
+  return String(v).slice(0, 10);
+}
+
+/** 등록일(행 created_at)이 필터 [fromF, toF] 구간에 포함되면 true */
+function _projRegCreatedAtInRange(r, fromF, toF) {
+  if (!fromF && !toF) return true;
+  const cd = _projRegDateStr(r && r.created_at);
+  if (!cd) return false;
+  if (fromF && cd < fromF) return false;
+  if (toF && cd > toF) return false;
+  return true;
+}
+
+function _projRegPopulateListMainSelect() {
+  const sel = document.getElementById('proj-reg-filter-main');
+  if (!sel) return;
+  const prev = sel.value;
+  const mains = new Map();
+  (_projRegTypes || []).forEach((t) => {
+    const mc = String(t.main_code || '').trim();
+    if (!mc) return;
+    const cat = String(t.main_category || '').trim();
+    const lab = `${cat || mc} (${mc})`;
+    if (!mains.has(mc)) mains.set(mc, lab);
+  });
+  sel.innerHTML = '<option value="">대분류 전체</option>';
+  [...mains.entries()].sort((a, b) => a[0].localeCompare(b[0])).forEach(([code, lab]) => {
+    const o = document.createElement('option');
+    o.value = code;
+    o.textContent = lab;
+    sel.appendChild(o);
+  });
+  if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
+}
+
+function _projRegPopulateListSubSelect() {
+  const mainSel = document.getElementById('proj-reg-filter-main');
+  const subSel = document.getElementById('proj-reg-filter-sub');
+  if (!subSel) return;
+  const prev = subSel.value;
+  const mc = (mainSel && mainSel.value) ? String(mainSel.value).trim() : '';
+  subSel.innerHTML = '<option value="">소분류 전체</option>';
+  const list = mc
+    ? _projRegTypes.filter((t) => String(t.main_code || '').trim() === mc)
+    : _projRegTypes.slice();
+  list.forEach((t) => {
+    const sc = String(t.sub_code || '').trim();
+    const o = document.createElement('option');
+    o.value = t.id;
+    const subLab = String(t.sub_category || '').trim() || sc;
+    o.textContent = `${subLab} (${sc})`;
+    subSel.appendChild(o);
+  });
+  if (prev && [...subSel.options].some((o) => o.value === prev)) subSel.value = prev;
+}
+
+function _projRegPopulateListFilterDropdowns() {
+  const fCpm = document.getElementById('proj-reg-filter-cpm');
+  if (fCpm) {
+    const p2 = fCpm.value;
+    fCpm.innerHTML = '<option value="">PM 전체</option>';
+    (_projRegUsers || [])
+      .filter((u) => u.deleted !== true && u.is_active !== false && _projRegIsCpmEligible(u))
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+      .forEach((u) => {
+        const o = document.createElement('option');
+        o.value = u.id;
+        o.textContent = u.name || String(u.id || '');
+        fCpm.appendChild(o);
+      });
+    if (p2 && [...fCpm.options].some((o) => o.value === p2)) fCpm.value = p2;
+  }
+}
+
+function _projRegBindListFiltersOnce() {
+  if (_projRegListFiltersBound) return;
+  const main = document.getElementById('proj-reg-filter-main');
+  if (main) {
+    main.addEventListener('change', () => {
+      _projRegPopulateListSubSelect();
+      projRegRenderList();
+    });
+  }
+  ['proj-reg-filter-sub', 'proj-reg-filter-status', 'proj-reg-filter-cpm'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', () => projRegRenderList());
+  });
+  ['proj-reg-filter-period-from', 'proj-reg-filter-period-to'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', () => projRegRenderList());
+  });
+  ['proj-reg-filter-client', 'proj-reg-filter-registrant'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', () => projRegRenderList());
+  });
+  _projRegListFiltersBound = true;
+}
+
+function projRegResetListFilters() {
+  [
+    'proj-reg-filter-main',
+    'proj-reg-filter-sub',
+    'proj-reg-filter-client',
+    'proj-reg-filter-status',
+    'proj-reg-filter-period-from',
+    'proj-reg-filter-period-to',
+    'proj-reg-filter-registrant',
+    'proj-reg-filter-cpm',
+  ].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  _projRegPopulateListSubSelect();
+  projRegRenderList();
+}
+
+function _projRegApplyListFilters(rowsIn) {
+  const mainMc = (document.getElementById('proj-reg-filter-main')?.value || '').trim();
+  const subId = (document.getElementById('proj-reg-filter-sub')?.value || '').trim();
+  const clientKw = (document.getElementById('proj-reg-filter-client')?.value || '').trim().toLowerCase();
+  const stF = (document.getElementById('proj-reg-filter-status')?.value || '').trim().toLowerCase();
+  const pFrom = (document.getElementById('proj-reg-filter-period-from')?.value || '').trim();
+  const pTo = (document.getElementById('proj-reg-filter-period-to')?.value || '').trim();
+  const regKw = (document.getElementById('proj-reg-filter-registrant')?.value || '').trim().toLowerCase();
+  const cpmId = (document.getElementById('proj-reg-filter-cpm')?.value || '').trim();
+
+  return rowsIn.filter((r) => {
+    const st = _projRegNormStatus(r);
+    if (subId) {
+      if (String(r.project_code_type_id || '') !== String(subId)) return false;
+    } else if (mainMc) {
+      if (_projRegRowMainCode(r) !== mainMc) return false;
+    }
+    if (clientKw) {
+      const cb = [r.client_name, r.client_id].map((x) => String(x || '').toLowerCase()).join(' ');
+      if (!cb.includes(clientKw)) return false;
+    }
+    if (stF && st !== stF) return false;
+    if (!_projRegCreatedAtInRange(r, pFrom, pTo)) return false;
+    if (regKw) {
+      const nb = [r.created_by_name, r.created_by].map((x) => String(x || '').toLowerCase()).join(' ');
+      if (!nb.includes(regKw)) return false;
+    }
+    if (cpmId && String(r.cpm_user_id || '') !== String(cpmId)) return false;
+    return true;
+  });
 }
 
 async function projRegLoadList() {
@@ -672,51 +1181,197 @@ function projRegRenderList() {
   const tbody = document.getElementById('proj-reg-list-body');
   if (!tbody) return;
   const session = getSession();
-  const q = (document.getElementById('proj-reg-filter-q')?.value || '').trim().toLowerCase();
-  let rows = _projRegRows.slice();
-  if (q) {
-    rows = rows.filter((r) => {
-      const st = _projRegNormStatus(r);
-      const blob = [r.project_code, r.project_name, r.client_name, r.cpm_user_name, _projRegStatusLabel(st)].join(' ').toLowerCase();
-      return blob.includes(q);
-    });
-  }
+  let rows = _projRegApplyListFilters(_projRegRows.slice());
+  // 기본 정렬: 최신 등록일(created_at) 우선
+  rows.sort((a, b) => {
+    const ta = new Date(a && a.created_at || 0).getTime();
+    const tb = new Date(b && b.created_at || 0).getTime();
+    return tb - ta;
+  });
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="table-empty"><i class="fas fa-clipboard-list"></i><p>등록된 프로젝트가 없습니다.</p></td></tr>';
+    const emptyMsg = !_projRegRows.length
+      ? '등록된 프로젝트가 없습니다.'
+      : '조건에 맞는 프로젝트가 없습니다.';
+    tbody.innerHTML = `<tr><td colspan="9" class="table-empty"><i class="fas fa-clipboard-list"></i><p>${Utils.escHtml(emptyMsg)}</p></td></tr>`;
     return;
   }
   tbody.innerHTML = rows.map((r, i) => {
-    const p0 = r.period_start ? String(r.period_start).slice(0, 10) : '-';
-    const p1 = r.period_end ? String(r.period_end).slice(0, 10) : '-';
-    const period = p0 !== '-' || p1 !== '-' ? `${p0} ~ ${p1}` : '-';
     const cd = r.created_at ? Utils.formatDate(r.created_at) : '-';
     const st = _projRegNormStatus(r);
     const codeDisp = (r.project_code && String(r.project_code).trim()) ? String(r.project_code) : '—';
     const owner = _projRegIsOwner(session, r);
-    const canAp = st === 'pending' && _projRegCanApproveRow(session, r);
     const canDel = (st === 'draft' || st === 'rejected') && (owner || session.role === 'admin');
-    let actionHtml = `<div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
-      <button type="button" class="btn btn-sm btn-outline btn-icon" onclick="projRegShowForm('${r.id}')" title="상세"><i class="fas fa-edit"></i></button>`;
-    if (canDel) {
-      actionHtml += `<button type="button" class="btn btn-sm btn-danger btn-icon" onclick="projRegDelete('${r.id}')" title="삭제"><i class="fas fa-trash"></i></button>`;
-    }
-    if (canAp) {
-      actionHtml += `<button type="button" class="btn btn-sm btn-success btn-icon" onclick="projRegApprove('${r.id}')" title="승인"><i class="fas fa-check"></i></button>
-      <button type="button" class="btn btn-sm btn-danger btn-icon" onclick="projRegReject('${r.id}')" title="반려"><i class="fas fa-times"></i></button>`;
-    }
-    actionHtml += '</div>';
+    const editBtn = `<button type="button" class="btn btn-sm btn-outline btn-icon" onclick="projRegShowForm('${r.id}')" title="상세"><i class="fas fa-edit"></i></button>`;
+    const delBtn = `<button type="button" class="btn btn-sm btn-danger btn-icon" onclick="projRegDelete('${r.id}')" title="삭제"><i class="fas fa-trash"></i></button>`;
+    const delSlot = canDel
+      ? delBtn
+      : `<button type="button" class="btn btn-sm btn-danger btn-icon" disabled tabindex="-1" aria-hidden="true" style="visibility:hidden"><i class="fas fa-trash"></i></button>`;
+    const row1 = `<div class="proj-reg-list-act-row">${editBtn}${delSlot}</div>`;
+    const actionHtml = `<div class="proj-reg-list-actions">${row1}</div>`;
+    const contribCount = _projRegContribRowCount(r.order_contributors_text || '');
+    const contribLabel = r.project_code || r.project_name || `프로젝트 ${i + 1}`;
+    const contribBtn = contribCount
+      ? `<button type="button" class="btn btn-sm btn-outline" onclick="projRegOpenContribModal('${_projRegEscJs(r.order_contributors_text || '')}','${_projRegEscJs(contribLabel)}')" title="수주 참여자 보기">보기 (${contribCount})</button>`
+      : '<span style="color:var(--text-muted)">-</span>';
     return `<tr>
       <td>${i + 1}</td>
-      <td><span class="${_projRegStatusBadgeClass(st)}">${Utils.escHtml(_projRegStatusLabel(st))}</span></td>
+      <td><span class="${_projRegStatusBadgeClass(st, r)}">${Utils.escHtml(_projRegStatusLabel(st, r))}</span></td>
       <td><strong>${Utils.escHtml(codeDisp)}</strong></td>
       <td>${Utils.escHtml(r.project_name || '')}</td>
       <td>${Utils.escHtml(r.client_name || '')}</td>
-      <td style="font-size:12px">${Utils.escHtml(period)}</td>
+      <td style="text-align:center">${contribBtn}</td>
       <td>${Utils.escHtml(r.cpm_user_name || '-')}</td>
       <td style="font-size:12px">${Utils.escHtml(cd)}</td>
       <td style="text-align:center">${actionHtml}</td>
     </tr>`;
   }).join('');
+}
+
+function _projRegCollectContractDocs(rows) {
+  const out = [];
+  (rows || []).forEach((r) => {
+    if (!r) return;
+    const common = {
+      projectId: String(r.id || ''),
+      projectCode: String(r.project_code || '').trim(),
+      projectName: String(r.project_name || '').trim(),
+      clientName: String(r.client_name || '').trim(),
+      regStatus: _projRegNormStatus(r),
+      createdByName: String(r.created_by_name || '').trim(),
+    };
+    if (String(r.contract_file_name || '').trim()) {
+      out.push({
+        ...common,
+        kind: 'contract',
+        kindLabel: '용역계약서',
+        fileName: String(r.contract_file_name || '').trim(),
+        fileUrl: String(r.contract_file_url || '').trim(),
+        uploadedAt: r.contract_uploaded_at || null,
+      });
+    }
+    if (String(r.contract_evidence_file_name || '').trim()) {
+      out.push({
+        ...common,
+        kind: 'agreement',
+        kindLabel: '계약예외근거',
+        fileName: String(r.contract_evidence_file_name || '').trim(),
+        fileUrl: String(r.contract_evidence_file_url || '').trim(),
+        uploadedAt: r.contract_evidence_uploaded_at || null,
+      });
+    }
+    if (String(r.order_evidence_file_name || '').trim()) {
+      out.push({
+        ...common,
+        kind: 'route',
+        kindLabel: '수주경로증빙',
+        fileName: String(r.order_evidence_file_name || '').trim(),
+        fileUrl: String(r.order_evidence_file_url || '').trim(),
+        uploadedAt: r.order_evidence_uploaded_at || null,
+      });
+    }
+  });
+  out.sort((a, b) => (Number(b.uploadedAt || 0) - Number(a.uploadedAt || 0)));
+  return out;
+}
+
+function _projRegApplyContractDocFilters(list) {
+  const kw = String(document.getElementById('proj-reg-contract-doc-filter-q')?.value || '').trim().toLowerCase();
+  const kind = String(document.getElementById('proj-reg-contract-doc-filter-kind')?.value || '').trim();
+  return (list || []).filter((d) => {
+    if (kind && d.kind !== kind) return false;
+    if (!kw) return true;
+    const hay = [
+      d.projectCode,
+      d.projectName,
+      d.clientName,
+      d.fileName,
+      d.createdByName,
+      d.kindLabel,
+    ].map((x) => String(x || '').toLowerCase()).join(' ');
+    return hay.includes(kw);
+  });
+}
+
+function projRegRenderContractDocModal() {
+  const tbody = document.getElementById('proj-reg-contract-doc-body');
+  if (!tbody) return;
+  const rows = _projRegApplyContractDocFilters(_projRegContractDocs);
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="table-empty"><i class="fas fa-file-alt"></i><p>표시할 계약 문서가 없습니다.</p></td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map((d, i) => {
+    const code = d.projectCode || '—';
+    const pn = d.projectName || '-';
+    const cl = d.clientName || '-';
+    const upAt = d.uploadedAt ? (Utils.formatDate ? Utils.formatDate(d.uploadedAt) : String(d.uploadedAt)) : '-';
+    const openBtn = d.fileUrl
+      ? `<a class="btn btn-sm btn-outline" href="${Utils.escHtml(d.fileUrl)}" target="_blank" rel="noopener noreferrer">열기</a>`
+      : '<span style="font-size:12px;color:var(--text-muted)">URL 없음</span>';
+    const unlinkBtn = `<button type="button" class="btn btn-sm btn-danger" onclick="projRegUnlinkContractDoc('${Utils.escHtml(d.projectId)}','${d.kind}')" title="문서 연결 해제">연결해제</button>`;
+    return `<tr>
+      <td>${i + 1}</td>
+      <td><span class="badge badge-gray">${Utils.escHtml(d.kindLabel)}</span></td>
+      <td><strong>${Utils.escHtml(code)}</strong></td>
+      <td>${Utils.escHtml(pn)}</td>
+      <td>${Utils.escHtml(cl)}</td>
+      <td>${Utils.escHtml(d.fileName || '-')}</td>
+      <td style="font-size:12px">${Utils.escHtml(String(upAt))}</td>
+      <td style="font-size:12px">${Utils.escHtml(d.createdByName || '-')}</td>
+      <td style="text-align:center;white-space:nowrap">${openBtn} ${unlinkBtn}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function projRegOpenContractDocModal() {
+  if (!_projRegRows.length) await projRegLoadList();
+  _projRegContractDocs = _projRegCollectContractDocs(_projRegRows);
+  const q = document.getElementById('proj-reg-contract-doc-filter-q');
+  const kind = document.getElementById('proj-reg-contract-doc-filter-kind');
+  if (q) q.value = '';
+  if (kind) kind.value = '';
+  projRegRenderContractDocModal();
+  openModal('projRegContractDocModal');
+}
+
+async function projRegUnlinkContractDoc(projectId, kind) {
+  if (!projectId || !kind) return;
+  if (!confirm('선택한 문서 연결을 해제할까요? (스토리지 파일도 함께 삭제 시도)')) return;
+  const row = await _projRegResolveRow(projectId);
+  if (!row) return;
+  const patch = {
+    updated_by: String(getSession()?.id || ''),
+    updated_by_name: String(getSession()?.name || ''),
+  };
+  let oldUrl = '';
+  if (kind === 'contract') {
+    patch.contract_file_name = '';
+    patch.contract_file_url = '';
+    patch.contract_uploaded_at = null;
+    oldUrl = String(row.contract_file_url || '');
+  } else if (kind === 'agreement') {
+    patch.contract_evidence_file_name = '';
+    patch.contract_evidence_file_url = '';
+    patch.contract_evidence_uploaded_at = null;
+    oldUrl = String(row.contract_evidence_file_url || '');
+  } else if (kind === 'route') {
+    patch.order_evidence_file_name = '';
+    patch.order_evidence_file_url = '';
+    patch.order_evidence_uploaded_at = null;
+    oldUrl = String(row.order_evidence_file_url || '');
+  } else {
+    return;
+  }
+  try {
+    await API.patch('registered_projects', projectId, patch);
+    if (oldUrl) await _projRegTryDeleteStorageByUrl(oldUrl);
+    await projRegLoadList();
+    _projRegContractDocs = _projRegCollectContractDocs(_projRegRows);
+    projRegRenderContractDocModal();
+    Toast.success('문서 연결을 해제했습니다.');
+  } catch (e) {
+    Toast.error('문서 연결 해제 실패: ' + (e.message || e));
+  }
 }
 
 function _projRegClearBilling() {
@@ -802,15 +1457,7 @@ async function projRegShowForm(editId) {
   if (rowStatusEl) rowStatusEl.value = editId ? '' : 'draft';
 
   const titleEl = document.getElementById('proj-reg-form-title');
-  const subEl = document.getElementById('proj-reg-form-subtitle');
-  const crumbEl = document.getElementById('proj-reg-form-crumb');
-  if (titleEl) titleEl.textContent = editId ? '프로젝트 수정' : '새 프로젝트 등록';
-  if (subEl) {
-    subEl.textContent = editId
-      ? '상태에 따라 유형·연월·승인 절차가 달라집니다. (임시저장 → 승인 요청 → 승인완료)'
-      : '임시저장(draft) 후 승인 요청 시 코드가 채번되며, 직원등록에 지정된 1·2차 승인자가 승인합니다. 승인자가 없으면 즉시 승인됩니다.';
-  }
-  if (crumbEl) crumbEl.textContent = editId ? 'Edit Project' : 'Create Project';
+  if (titleEl) titleEl.textContent = editId ? '프로젝트 수정' : 'Create Project';
 
   try {
     const wrap = document.querySelector('.proj-reg-create-wrap');
@@ -832,17 +1479,33 @@ async function projRegShowForm(editId) {
   projRegHideClientSuggest();
   document.getElementById('proj-reg-order-owner').value = '';
   document.getElementById('proj-reg-route').value = '';
-  document.getElementById('proj-reg-route-other').value = '';
+  const routeDetailEl = document.getElementById('proj-reg-route-detail');
+  if (routeDetailEl) routeDetailEl.value = '';
+  projRegSetContributorsFromStored('');
   projRegOnRouteChange();
   document.getElementById('proj-reg-cpm').value = '';
   document.getElementById('proj-reg-period-start').value = '';
   document.getElementById('proj-reg-period-end').value = '';
   document.getElementById('proj-reg-contract').value = '';
+  document.getElementById('proj-reg-evidence').value = '';
+  document.getElementById('proj-reg-route-evidence').value = '';
+  const exReasonEl = document.getElementById('proj-reg-contract-exception-reason');
+  if (exReasonEl) exReasonEl.value = '';
   const remInp = document.getElementById('proj-reg-contract-remove');
   if (remInp) remInp.value = '';
+  const remEviInp = document.getElementById('proj-reg-evidence-remove');
+  if (remEviInp) remEviInp.value = '';
+  const remRouteInp = document.getElementById('proj-reg-route-evidence-remove');
+  if (remRouteInp) remRouteInp.value = '';
   const rmHint = document.getElementById('proj-reg-contract-remove-hint');
   if (rmHint) rmHint.hidden = true;
+  const rmEviHint = document.getElementById('proj-reg-evidence-remove-hint');
+  if (rmEviHint) rmEviHint.hidden = true;
+  const rmRouteHint = document.getElementById('proj-reg-route-evidence-remove-hint');
+  if (rmRouteHint) rmRouteHint.hidden = true;
   projRegResetContractUi();
+  projRegResetEvidenceUi();
+  projRegResetRouteEvidenceUi();
   _projRegClearBilling();
 
   await projRegLoadTypes();
@@ -877,12 +1540,16 @@ async function projRegShowForm(editId) {
     document.getElementById('proj-reg-client').value = row.client_id || '';
     if (cSearch) cSearch.value = row.client_name || '';
     document.getElementById('proj-reg-order-owner').value = row.order_owner_text || '';
-    projRegApplyRouteFromStored(row.acquisition_route || '');
+    projRegSetContributorsFromStored(row.order_contributors_text || '');
+    projRegApplyRouteFromStored(row.acquisition_route || '', row.acquisition_route_detail || '');
     document.getElementById('proj-reg-cpm').value = row.cpm_user_id || '';
     if (row.period_start) document.getElementById('proj-reg-period-start').value = String(row.period_start).slice(0, 10);
     if (row.period_end) document.getElementById('proj-reg-period-end').value = String(row.period_end).slice(0, 10);
     _projRegFillBilling(row.billing_schedule);
     projRegSyncContractExisting(row);
+    projRegSyncEvidenceExisting(row);
+    projRegSyncRouteEvidenceExisting(row);
+    if (exReasonEl) exReasonEl.value = row.contract_exception_reason || '';
 
     if (st === 'draft' && yymmEl && !yymmEl.value) _projRegSetDefaultMonth();
   } else {
@@ -893,6 +1560,7 @@ async function projRegShowForm(editId) {
     }
     if (codeWrap) codeWrap.style.display = 'none';
     if (codeRo) codeRo.value = '';
+    projRegSetContributorsFromStored('');
   }
 
   projRegBindProgress();
@@ -915,17 +1583,22 @@ function _projRegReadFormCore(session) {
   const cpmId = cpmSel?.value || '';
   const cpmName = cpmOpt?.dataset?.name || '';
   const orderOwner = document.getElementById('proj-reg-order-owner').value.trim();
-  const routeSel = document.getElementById('proj-reg-route').value;
-  let route = routeSel;
-  if (routeSel === '기타') {
-    route = document.getElementById('proj-reg-route-other').value.trim() || '기타';
-  }
+  const route = document.getElementById('proj-reg-route').value;
+  const routeDetail = document.getElementById('proj-reg-route-detail').value.trim();
+  const contributors = document.getElementById('proj-reg-order-contributors').value.trim();
   const ps = document.getElementById('proj-reg-period-start').value || null;
   const pe = document.getElementById('proj-reg-period-end').value || null;
   const billing = _projRegCollectBilling();
   const fileInput = document.getElementById('proj-reg-contract');
   const file = fileInput?.files?.[0];
   const removeContractMeta = document.getElementById('proj-reg-contract-remove')?.value === '1';
+  const evidenceInput = document.getElementById('proj-reg-evidence');
+  const evidenceFile = evidenceInput?.files?.[0];
+  const removeEvidenceMeta = document.getElementById('proj-reg-evidence-remove')?.value === '1';
+  const routeEvidenceInput = document.getElementById('proj-reg-route-evidence');
+  const routeEvidenceFile = routeEvidenceInput?.files?.[0];
+  const removeRouteEvidenceMeta = document.getElementById('proj-reg-route-evidence-remove')?.value === '1';
+  const contractExceptionReason = document.getElementById('proj-reg-contract-exception-reason')?.value?.trim() || '';
   return {
     name,
     clientId,
@@ -937,17 +1610,32 @@ function _projRegReadFormCore(session) {
     cpmName,
     orderOwner,
     route,
+    routeDetail,
+    contributors,
     ps,
     pe,
     billing,
     file,
     removeContractMeta,
+    evidenceFile,
+    removeEvidenceMeta,
+    routeEvidenceFile,
+    removeRouteEvidenceMeta,
+    contractExceptionReason,
     session,
   };
 }
 
 function _projRegHasContractMeta(row) {
   return !!(row && String(row.contract_file_name || '').trim());
+}
+
+function _projRegHasEvidenceMeta(row) {
+  return !!(row && String(row.contract_evidence_file_name || '').trim());
+}
+
+function _projRegHasRouteEvidenceMeta(row) {
+  return !!(row && String(row.order_evidence_file_name || '').trim());
 }
 
 /** 승인 요청 직전: 새 파일 선택 또는 기존 저장 메타(삭제 표시 없음) */
@@ -957,14 +1645,96 @@ function _projRegFormWillHaveContract(f, prev) {
   return _projRegHasContractMeta(prev);
 }
 
-function _projRegApplyContractToPayload(basePayload, file, removeContractMeta, prev) {
+function _projRegFormWillHaveEvidence(f, prev) {
+  if (f.evidenceFile) return true;
+  if (f.removeEvidenceMeta) return false;
+  return _projRegHasEvidenceMeta(prev);
+}
+
+function _projRegFormWillHaveRouteEvidence(f, prev) {
+  if (f.routeEvidenceFile) return true;
+  if (f.removeRouteEvidenceMeta) return false;
+  return _projRegHasRouteEvidenceMeta(prev);
+}
+
+function _projRegSafePathSegment(v) {
+  return String(v || '')
+    .replace(/[^\w.\-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80) || 'file';
+}
+
+function _projRegStorageRefFromUrl(url) {
+  const raw = String(url || '').trim();
+  if (!raw) return null;
+  const pubKey = '/storage/v1/object/public/';
+  const prvKey = '/storage/v1/object/';
+  let p = '';
+  const iPub = raw.indexOf(pubKey);
+  if (iPub >= 0) p = raw.slice(iPub + pubKey.length);
+  else {
+    const iPrv = raw.indexOf(prvKey);
+    if (iPrv < 0) return null;
+    p = raw.slice(iPrv + prvKey.length);
+  }
+  const q = p.indexOf('?');
+  if (q >= 0) p = p.slice(0, q);
+  const slash = p.indexOf('/');
+  if (slash <= 0) return null;
+  return {
+    bucket: decodeURIComponent(p.slice(0, slash)),
+    path: decodeURIComponent(p.slice(slash + 1)),
+  };
+}
+
+async function _projRegTryDeleteStorageByUrl(url) {
+  const ref = _projRegStorageRefFromUrl(url);
+  if (!ref || !ref.bucket || !ref.path) return;
+  try {
+    await API.storageDelete(ref.bucket, ref.path);
+  } catch (e) {
+    console.warn('[proj-reg] storage delete failed', e);
+  }
+}
+
+async function _projRegUploadFile(kind, file, keyHint) {
+  if (!file) return null;
+  const bucket = _PROJ_REG_STORAGE_BUCKETS[kind];
+  if (!bucket) throw new Error('알 수 없는 파일 유형입니다.');
+  const now = Date.now();
+  const d = new Date(now);
+  const yyyy = String(d.getFullYear());
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const key = _projRegSafePathSegment(keyHint || 'unclassified');
+  const ext = String(file.name || '').split('.').pop() || 'bin';
+  const fileStem = _projRegSafePathSegment(String(file.name || '').replace(/\.[^.]*$/, ''));
+  const uniq = Math.random().toString(36).slice(2, 8);
+  const path = `project-register/${kind}/${yyyy}/${mm}/${key}/${now}_${uniq}_${fileStem}.${ext}`;
+  const up = await API.storageUpload(bucket, path, file, { upsert: false });
+  return {
+    fileName: file.name,
+    fileUrl: up.publicUrl,
+    uploadedAt: now,
+  };
+}
+
+async function _projRegApplyContractToPayload(basePayload, file, removeContractMeta, prev) {
   if (file) {
-    basePayload.contract_file_name = file.name;
-    basePayload.contract_uploaded_at = Date.now();
-    basePayload.contract_file_url = '';
+    const keyHint = basePayload.project_code || (prev && prev.project_code) || (prev && prev.id) || 'draft';
+    const up = await _projRegUploadFile('contract', file, keyHint);
+    basePayload.contract_file_name = up.fileName;
+    basePayload.contract_uploaded_at = up.uploadedAt;
+    basePayload.contract_file_url = up.fileUrl;
+    if (prev && String(prev.contract_file_url || '').trim()) {
+      await _projRegTryDeleteStorageByUrl(prev.contract_file_url);
+    }
     return;
   }
   if (removeContractMeta && !file) {
+    if (prev && String(prev.contract_file_url || '').trim()) {
+      await _projRegTryDeleteStorageByUrl(prev.contract_file_url);
+    }
     basePayload.contract_file_name = '';
     basePayload.contract_file_url = '';
     basePayload.contract_uploaded_at = null;
@@ -974,6 +1744,62 @@ function _projRegApplyContractToPayload(basePayload, file, removeContractMeta, p
     basePayload.contract_file_name = prev.contract_file_name || '';
     basePayload.contract_file_url = prev.contract_file_url || '';
     basePayload.contract_uploaded_at = prev.contract_uploaded_at || null;
+  }
+}
+
+async function _projRegApplyEvidenceToPayload(basePayload, evidenceFile, removeEvidenceMeta, prev) {
+  if (evidenceFile) {
+    const keyHint = basePayload.project_code || (prev && prev.project_code) || (prev && prev.id) || 'draft';
+    const up = await _projRegUploadFile('agreement', evidenceFile, keyHint);
+    basePayload.contract_evidence_file_name = up.fileName;
+    basePayload.contract_evidence_uploaded_at = up.uploadedAt;
+    basePayload.contract_evidence_file_url = up.fileUrl;
+    if (prev && String(prev.contract_evidence_file_url || '').trim()) {
+      await _projRegTryDeleteStorageByUrl(prev.contract_evidence_file_url);
+    }
+    return;
+  }
+  if (removeEvidenceMeta && !evidenceFile) {
+    if (prev && String(prev.contract_evidence_file_url || '').trim()) {
+      await _projRegTryDeleteStorageByUrl(prev.contract_evidence_file_url);
+    }
+    basePayload.contract_evidence_file_name = '';
+    basePayload.contract_evidence_file_url = '';
+    basePayload.contract_evidence_uploaded_at = null;
+    return;
+  }
+  if (prev) {
+    basePayload.contract_evidence_file_name = prev.contract_evidence_file_name || '';
+    basePayload.contract_evidence_file_url = prev.contract_evidence_file_url || '';
+    basePayload.contract_evidence_uploaded_at = prev.contract_evidence_uploaded_at || null;
+  }
+}
+
+async function _projRegApplyRouteEvidenceToPayload(basePayload, routeEvidenceFile, removeRouteEvidenceMeta, prev) {
+  if (routeEvidenceFile) {
+    const keyHint = basePayload.project_code || (prev && prev.project_code) || (prev && prev.id) || 'draft';
+    const up = await _projRegUploadFile('route', routeEvidenceFile, keyHint);
+    basePayload.order_evidence_file_name = up.fileName;
+    basePayload.order_evidence_uploaded_at = up.uploadedAt;
+    basePayload.order_evidence_file_url = up.fileUrl;
+    if (prev && String(prev.order_evidence_file_url || '').trim()) {
+      await _projRegTryDeleteStorageByUrl(prev.order_evidence_file_url);
+    }
+    return;
+  }
+  if (removeRouteEvidenceMeta && !routeEvidenceFile) {
+    if (prev && String(prev.order_evidence_file_url || '').trim()) {
+      await _projRegTryDeleteStorageByUrl(prev.order_evidence_file_url);
+    }
+    basePayload.order_evidence_file_name = '';
+    basePayload.order_evidence_file_url = '';
+    basePayload.order_evidence_uploaded_at = null;
+    return;
+  }
+  if (prev) {
+    basePayload.order_evidence_file_name = prev.order_evidence_file_name || '';
+    basePayload.order_evidence_file_url = prev.order_evidence_file_url || '';
+    basePayload.order_evidence_uploaded_at = prev.order_evidence_uploaded_at || null;
   }
 }
 
@@ -991,6 +1817,8 @@ async function projRegSaveDraft() {
     client_name: f.clientName,
     order_owner_text: f.orderOwner,
     acquisition_route: f.route,
+    acquisition_route_detail: f.routeDetail,
+    order_contributors_text: f.contributors,
     cpm_user_id: f.cpmId,
     cpm_user_name: f.cpmName,
     period_start: f.ps,
@@ -1016,14 +1844,24 @@ async function projRegSaveDraft() {
         Toast.warning('승인 완료 건은 하단 「저장」으로 수정하세요.');
         return;
       }
-      _projRegApplyContractToPayload(basePayload, f.file, f.removeContractMeta, prev);
+      await _projRegApplyContractToPayload(basePayload, f.file, f.removeContractMeta, prev);
+      await _projRegApplyEvidenceToPayload(basePayload, f.evidenceFile, f.removeEvidenceMeta, prev);
+      await _projRegApplyRouteEvidenceToPayload(basePayload, f.routeEvidenceFile, f.removeRouteEvidenceMeta, prev);
+      basePayload.contract_exception_reason = f.contractExceptionReason || '';
       await API.patch('registered_projects', editId, basePayload);
       Toast.success('임시저장되었습니다.');
     } else {
-      _projRegApplyContractToPayload(basePayload, f.file, f.removeContractMeta, null);
+      await _projRegApplyContractToPayload(basePayload, f.file, f.removeContractMeta, null);
+      await _projRegApplyEvidenceToPayload(basePayload, f.evidenceFile, f.removeEvidenceMeta, null);
+      await _projRegApplyRouteEvidenceToPayload(basePayload, f.routeEvidenceFile, f.removeRouteEvidenceMeta, null);
+      basePayload.contract_exception_reason = f.contractExceptionReason || '';
       if (!f.file) {
         basePayload.contract_file_name = '';
         basePayload.contract_file_url = '';
+      }
+      if (!f.evidenceFile) {
+        basePayload.contract_evidence_file_name = '';
+        basePayload.contract_evidence_file_url = '';
       }
       const row = await API.create('registered_projects', {
         ...basePayload,
@@ -1061,11 +1899,24 @@ async function projRegSubmitForApproval() {
     return;
   }
   if (!f.clientId) {
-    Toast.warning('발주처를 검색한 뒤 목록에서 선택하세요.');
+    Toast.warning('고객사를 검색한 뒤 목록에서 선택하세요.');
     return;
   }
   if (!f.typeId) {
     Toast.warning('유형(대·소분류)을 선택하세요.');
+    return;
+  }
+  if (!f.route) {
+    Toast.warning('수주경로를 선택하세요.');
+    return;
+  }
+  if (!f.routeDetail) {
+    Toast.warning('수주경로 세부내역을 입력하세요.');
+    return;
+  }
+  const contribValid = _projRegValidateContributorsForApproval();
+  if (!contribValid.ok) {
+    Toast.warning(contribValid.message);
     return;
   }
   if (!f.yymm || f.yymm.length !== 4) {
@@ -1081,6 +1932,10 @@ async function projRegSubmitForApproval() {
   }
 
   let prev = editId ? _projRegRows.find((x) => x.id === editId) : null;
+  const willHaveContract = _projRegFormWillHaveContract(f, prev);
+  const willHaveEvidence = _projRegFormWillHaveEvidence(f, prev);
+  const willHaveRouteEvidence = _projRegFormWillHaveRouteEvidence(f, prev);
+  const isConditional = !willHaveContract;
   const snap = await _projRegRegistrantSnapshot(session);
   const has1 = !!snap.pa1Id;
   const has2 = !!snap.pa2Id;
@@ -1091,19 +1946,17 @@ async function projRegSubmitForApproval() {
     Auth.preferredSheetType(session) === 'daily';
   const autoApprove = isCcbAutoApprove || (!has1 && !has2);
 
-  if (autoApprove && !_projRegFormWillHaveContract(f, prev)) {
-    Toast.warning(
-      isCcbAutoApprove
-        ? 'CCB 본부장/사업부장 등록은 제출 즉시 최종 승인됩니다. 이 경우 계약서(파일명)를 먼저 첨부한 뒤 다시 시도하세요.'
-        : '승인자가 지정되어 있지 않아 제출 즉시 최종 승인됩니다. 이 경우 계약서(파일명)를 먼저 첨부한 뒤 다시 시도하세요.'
-    );
+  if (isConditional && !willHaveEvidence) {
+    Toast.warning('계약서 미첨부 시 고객 합의 근거(메일/공문 등) 파일을 첨부해야 승인 요청할 수 있습니다.');
     return;
   }
-  if (!_projRegFormWillHaveContract(f, prev)) {
-    Toast.info(
-      '계약서 첨부없이 승인요청은 가능하나, 최종 승인 때 계약서가 업로드되어 있지 않으면 최종 승인이 되지 않습니다.',
-      7500
-    );
+  if (isConditional && !f.contractExceptionReason) {
+    Toast.warning('계약서 미첨부 사유를 입력하세요.');
+    return;
+  }
+  if (!willHaveRouteEvidence) {
+    Toast.warning('수주경로를 증빙할 파일을 첨부해야 승인 요청할 수 있습니다.');
+    return;
   }
 
   if (prev && !_projRegIsOwner(session, prev)) {
@@ -1149,6 +2002,8 @@ async function projRegSubmitForApproval() {
     client_name: f.clientName,
     order_owner_text: f.orderOwner,
     acquisition_route: f.route,
+    acquisition_route_detail: f.routeDetail,
+    order_contributors_text: f.contributors,
     cpm_user_id: f.cpmId,
     cpm_user_name: f.cpmName,
     period_start: f.ps,
@@ -1170,6 +2025,10 @@ async function projRegSubmitForApproval() {
     final_approved_by: '',
     final_approved_by_name: '',
     rejection_reason: '',
+    contract_exception_required: isConditional,
+    contract_exception_reason: isConditional ? f.contractExceptionReason : '',
+    conditional_approval: isConditional,
+    conditional_approved_at: autoApprove && isConditional ? now : null,
   };
 
   if (autoApprove) {
@@ -1184,8 +2043,21 @@ async function projRegSubmitForApproval() {
     basePayload.registration_status = 'pending';
   }
 
-  if (prev) _projRegApplyContractToPayload(basePayload, f.file, f.removeContractMeta, prev);
-  else _projRegApplyContractToPayload(basePayload, f.file, f.removeContractMeta, null);
+  if (prev) await _projRegApplyContractToPayload(basePayload, f.file, f.removeContractMeta, prev);
+  else await _projRegApplyContractToPayload(basePayload, f.file, f.removeContractMeta, null);
+  if (prev) await _projRegApplyEvidenceToPayload(basePayload, f.evidenceFile, f.removeEvidenceMeta, prev);
+  else await _projRegApplyEvidenceToPayload(basePayload, f.evidenceFile, f.removeEvidenceMeta, null);
+  if (prev) await _projRegApplyRouteEvidenceToPayload(basePayload, f.routeEvidenceFile, f.removeRouteEvidenceMeta, prev);
+  else await _projRegApplyRouteEvidenceToPayload(basePayload, f.routeEvidenceFile, f.removeRouteEvidenceMeta, null);
+  if (!isConditional) {
+    basePayload.contract_exception_required = false;
+    basePayload.contract_exception_reason = '';
+    basePayload.conditional_approval = false;
+    basePayload.conditional_approved_at = null;
+    basePayload.contract_evidence_file_name = '';
+    basePayload.contract_evidence_file_url = '';
+    basePayload.contract_evidence_uploaded_at = null;
+  }
   if (!prev && !f.file) {
     basePayload.contract_file_name = '';
     basePayload.contract_file_url = '';
@@ -1201,8 +2073,8 @@ async function projRegSubmitForApproval() {
         created_by_name: session.name || '',
       });
     }
-    if (autoApprove) Toast.success('승인되었습니다. 코드: ' + projectCode);
-    else Toast.success('승인 요청되었습니다. 코드: ' + projectCode);
+    if (autoApprove) Toast.success((isConditional ? '조건부 승인되었습니다. 코드: ' : '승인되었습니다. 코드: ') + projectCode);
+    else Toast.success((isConditional ? '조건부 승인 요청되었습니다. 코드: ' : '승인 요청되었습니다. 코드: ') + projectCode);
     projRegShowList();
   } catch (e) {
     Toast.error('승인 요청 실패: ' + (e.message || e));
@@ -1228,7 +2100,23 @@ async function projRegSaveApproved() {
     return;
   }
   if (!f.clientId) {
-    Toast.warning('발주처를 검색한 뒤 목록에서 선택하세요.');
+    Toast.warning('고객사를 검색한 뒤 목록에서 선택하세요.');
+    return;
+  }
+  const willHaveContract = _projRegFormWillHaveContract(f, prev);
+  const willHaveEvidence = _projRegFormWillHaveEvidence(f, prev);
+  const willHaveRouteEvidence = _projRegFormWillHaveRouteEvidence(f, prev);
+  const isConditional = !willHaveContract;
+  if (isConditional && !willHaveEvidence) {
+    Toast.warning('계약서 미첨부 시 고객 합의 근거 파일을 첨부해야 저장할 수 있습니다.');
+    return;
+  }
+  if (isConditional && !f.contractExceptionReason) {
+    Toast.warning('계약서 미첨부 사유를 입력하세요.');
+    return;
+  }
+  if (!willHaveRouteEvidence) {
+    Toast.warning('수주경로를 증빙할 파일을 첨부해야 저장할 수 있습니다.');
     return;
   }
   const basePayload = {
@@ -1237,6 +2125,8 @@ async function projRegSaveApproved() {
     client_name: f.clientName,
     order_owner_text: f.orderOwner,
     acquisition_route: f.route,
+    acquisition_route_detail: f.routeDetail,
+    order_contributors_text: f.contributors,
     cpm_user_id: f.cpmId,
     cpm_user_name: f.cpmName,
     period_start: f.ps,
@@ -1244,8 +2134,19 @@ async function projRegSaveApproved() {
     billing_schedule: f.billing,
     updated_by: String(session.id || ''),
     updated_by_name: session.name || '',
+    contract_exception_required: isConditional,
+    contract_exception_reason: isConditional ? f.contractExceptionReason : '',
+    conditional_approval: isConditional,
+    conditional_approved_at: isConditional ? (prev.conditional_approved_at || Date.now()) : null,
   };
-  _projRegApplyContractToPayload(basePayload, f.file, f.removeContractMeta, prev);
+  await _projRegApplyContractToPayload(basePayload, f.file, f.removeContractMeta, prev);
+  await _projRegApplyEvidenceToPayload(basePayload, f.evidenceFile, f.removeEvidenceMeta, prev);
+  await _projRegApplyRouteEvidenceToPayload(basePayload, f.routeEvidenceFile, f.removeRouteEvidenceMeta, prev);
+  if (!isConditional) {
+    basePayload.contract_evidence_file_name = '';
+    basePayload.contract_evidence_file_url = '';
+    basePayload.contract_evidence_uploaded_at = null;
+  }
   try {
     await API.patch('registered_projects', editId, basePayload);
     Toast.success('수정되었습니다.');
@@ -1255,9 +2156,27 @@ async function projRegSaveApproved() {
   }
 }
 
+async function _projRegResolveRow(id) {
+  let row = _projRegRows.find((x) => String(x.id) === String(id));
+  if (row) return row;
+  try {
+    row = await API.get('registered_projects', id);
+  } catch (_) {
+    row = null;
+  }
+  if (!row) {
+    Toast.error('건을 찾을 수 없습니다.');
+    return null;
+  }
+  const ix = _projRegRows.findIndex((x) => String(x.id) === String(id));
+  if (ix >= 0) _projRegRows[ix] = row;
+  else _projRegRows.push(row);
+  return row;
+}
+
 async function projRegApprove(id) {
   const session = getSession();
-  const row = _projRegRows.find((x) => x.id === id);
+  const row = await _projRegResolveRow(id);
   if (!row || _projRegNormStatus(row) !== 'pending') return;
   if (!_projRegCanApproveRow(session, row)) {
     Toast.warning('현재 단계의 승인 권한이 없습니다.');
@@ -1268,8 +2187,15 @@ async function projRegApprove(id) {
   const eff = _projRegEffectiveApprovers(row);
   const hasSecond = !!eff.pa2 && !eff.same;
   const willFinalApprove = !(step === 1 && hasSecond);
-  if (willFinalApprove && !_projRegHasContractMeta(row)) {
-    Toast.warning('계약서가 첨부된 건만 최종 승인할 수 있습니다.');
+  const hasContract = _projRegHasContractMeta(row);
+  const hasEvidence = _projRegHasEvidenceMeta(row);
+  const isConditional = !hasContract;
+  if (willFinalApprove && isConditional && !hasEvidence) {
+    Toast.warning('계약서 미첨부 건은 고객 합의 근거 파일이 있어야 최종 승인할 수 있습니다.');
+    return;
+  }
+  if (willFinalApprove && isConditional && !String(row.contract_exception_reason || '').trim()) {
+    Toast.warning('계약서 미첨부 사유가 있어야 최종 승인할 수 있습니다.');
     return;
   }
   try {
@@ -1288,10 +2214,13 @@ async function projRegApprove(id) {
         final_approved_by: String(session.id || ''),
         final_approved_by_name: session.name || '',
         registration_status: 'approved',
+        conditional_approval: isConditional,
+        conditional_approved_at: isConditional ? now : null,
+        contract_exception_required: isConditional,
         updated_by: String(session.id || ''),
         updated_by_name: session.name || '',
       });
-      Toast.success('승인 완료되었습니다.');
+      Toast.success(isConditional ? '조건부 승인 완료되었습니다.' : '승인 완료되었습니다.');
     } else {
       await API.patch('registered_projects', id, {
         first_approved_at: now,
@@ -1301,12 +2230,20 @@ async function projRegApprove(id) {
         final_approved_by: String(session.id || ''),
         final_approved_by_name: session.name || '',
         registration_status: 'approved',
+        conditional_approval: isConditional,
+        conditional_approved_at: isConditional ? now : null,
+        contract_exception_required: isConditional,
         updated_by: String(session.id || ''),
         updated_by_name: session.name || '',
       });
-      Toast.success('승인 완료되었습니다.');
+      Toast.success(isConditional ? '조건부 승인 완료되었습니다.' : '승인 완료되었습니다.');
     }
     await projRegLoadList();
+    if (typeof window.loadApprovalProjectList === 'function') {
+      try {
+        await window.loadApprovalProjectList();
+      } catch (_) {}
+    }
     const curFormId = document.getElementById('proj-reg-edit-id')?.value;
     if (curFormId === id) {
       const r2 = _projRegRows.find((x) => x.id === id);
@@ -1321,7 +2258,7 @@ async function projRegApprove(id) {
 
 async function projRegReject(id) {
   const session = getSession();
-  const row = _projRegRows.find((x) => x.id === id);
+  const row = await _projRegResolveRow(id);
   if (!row || _projRegNormStatus(row) !== 'pending') return;
   if (!_projRegCanApproveRow(session, row)) {
     Toast.warning('현재 단계의 반려 권한이 없습니다.');
@@ -1347,6 +2284,11 @@ async function projRegReject(id) {
     });
     Toast.success('반려 처리되었습니다.');
     await projRegLoadList();
+    if (typeof window.loadApprovalProjectList === 'function') {
+      try {
+        await window.loadApprovalProjectList();
+      } catch (_) {}
+    }
     const curFormId = document.getElementById('proj-reg-edit-id')?.value;
     if (curFormId === id) await projRegShowForm(id);
   } catch (e) {
@@ -1412,5 +2354,30 @@ window.projRegScrollToSection = projRegScrollToSection;
 window.projRegRefreshProgress = projRegRefreshProgress;
 window.projRegToggleAside = projRegToggleAside;
 window.projRegOnRouteChange = projRegOnRouteChange;
+window.projRegAddContributorRow = projRegAddContributorRow;
+window.projRegRemoveContributorRow = projRegRemoveContributorRow;
+window.projRegContribUpdate = projRegContribUpdate;
+window.projRegOpenContribModal = projRegOpenContribModal;
+window.projRegOpenContractDocModal = projRegOpenContractDocModal;
+window.projRegUnlinkContractDoc = projRegUnlinkContractDoc;
+window.projRegRenderContractDocModal = projRegRenderContractDocModal;
 window.projRegOnContractFileChange = projRegOnContractFileChange;
 window.projRegMarkContractRemove = projRegMarkContractRemove;
+window.projRegOnEvidenceFileChange = projRegOnEvidenceFileChange;
+window.projRegMarkEvidenceRemove = projRegMarkEvidenceRemove;
+window.projRegOnRouteEvidenceFileChange = projRegOnRouteEvidenceFileChange;
+window.projRegMarkRouteEvidenceRemove = projRegMarkRouteEvidenceRemove;
+window.projRegResetListFilters = projRegResetListFilters;
+
+window.SmartlogProjReg = {
+  normStatus: _projRegNormStatus,
+  statusLabel: _projRegStatusLabel,
+  statusBadgeClass: _projRegStatusBadgeClass,
+  pendingStep: _projRegPendingStep,
+  canApproveRow: _projRegCanApproveRow,
+  contribCount: _projRegContribRowCount,
+  openContribModal: projRegOpenContribModal,
+  openContractDocModal: projRegOpenContractDocModal,
+  approve: projRegApprove,
+  reject: projRegReject,
+};

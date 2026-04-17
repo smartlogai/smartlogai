@@ -447,7 +447,7 @@ const PAGE_TITLES = {
   'master-departments': '사업부 관리',
   'master-csteams': '고객지원팀 관리',
   users: 'Staff 관리',
-  'project-register': '프로젝트 등록 (Create Project)',
+  'project-register': '프로젝트 등록',
 };
 
 // page init 함수 매핑
@@ -482,12 +482,12 @@ const _LAZY_SCRIPTS = {
   'master-teams'      : 'js/master.js?v=20260405b',
   'master-clients'    : 'js/master.js?v=20260405b',
   'master-categories' : 'js/master.js?v=20260405b',
-  'master-project-codes': 'js/project-code-master.js?v=20260413a',
+  'master-project-codes': 'js/project-code-master.js?v=20260416pcmAdminOnly1',
   'master-org'        : 'js/master.js?v=20260405b',
   'master-departments': 'js/master.js?v=20260405b',
   'master-csteams'    : 'js/master.js?v=20260405b',
   'users'             : 'js/users.js?v=20260416tsopt1',
-  'project-register'  : 'js/project-register.js?v=20260413typelock2',
+  'project-register'  : 'js/project-register.js?v=20260417realUploadContractModal1',
 };
 const _lazyLoaded = {};  // 이미 로드된 파일 추적
 

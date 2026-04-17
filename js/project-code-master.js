@@ -13,7 +13,7 @@ function _pcmNormCode(s) {
 
 async function init_master_project_codes() {
   const session = getSession();
-  if (!Auth.canManageMaster(session)) {
+  if (!Auth.isAdmin(session)) {
     navigateTo('dashboard');
     Toast.warning('프로젝트 Code 관리는 관리자만 사용할 수 있습니다.');
     return;
@@ -113,8 +113,8 @@ function openProjectCodeModal(id) {
 
 async function saveProjectCodeType() {
   const session = getSession();
-  if (!Auth.canManageMaster(session)) {
-    Toast.warning('권한이 없습니다.');
+  if (!Auth.isAdmin(session)) {
+    Toast.warning('프로젝트 코드 유형 추가·수정은 관리자만 가능합니다.');
     return;
   }
   const id = document.getElementById('project-code-edit-id').value;
@@ -164,8 +164,8 @@ async function saveProjectCodeType() {
 
 async function deleteProjectCodeType(id, label) {
   const session = getSession();
-  if (!Auth.canManageMaster(session)) {
-    Toast.warning('권한이 없습니다.');
+  if (!Auth.isAdmin(session)) {
+    Toast.warning('프로젝트 코드 유형 삭제는 관리자만 가능합니다.');
     return;
   }
   if (!await Confirm.delete(label || '이 행')) return;
@@ -190,8 +190,8 @@ function openProjectCodeUploadModal() {
 
 async function uploadProjectCodeTypes() {
   const session = getSession();
-  if (!Auth.canManageMaster(session)) {
-    Toast.warning('권한이 없습니다.');
+  if (!Auth.isAdmin(session)) {
+    Toast.warning('프로젝트 코드 엑셀 업로드는 관리자만 가능합니다.');
     return;
   }
   const file = document.getElementById('project-code-upload-file').files[0];

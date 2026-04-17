@@ -514,6 +514,64 @@ const API = {
       body: JSON.stringify(body),
     });
   },
+
+  _encodeStoragePath(path) {
+    return String(path || '')
+      .split('/')
+      .map((s) => encodeURIComponent(s))
+      .join('/');
+  },
+
+  storagePublicUrl(bucket, path) {
+    const b = encodeURIComponent(String(bucket || '').trim());
+    const p = this._encodeStoragePath(path);
+    return `${SUPABASE_URL}/storage/v1/object/public/${b}/${p}`;
+  },
+
+  async storageUpload(bucket, path, file, opts = {}) {
+    if (!file) throw new Error('업로드할 파일이 없습니다.');
+    const b = encodeURIComponent(String(bucket || '').trim());
+    const p = this._encodeStoragePath(path);
+    const upsert = opts.upsert === true ? 'true' : 'false';
+    const url = `${SUPABASE_URL}/storage/v1/object/${b}/${p}?upsert=${upsert}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'x-upsert': upsert,
+        'content-type': file.type || 'application/octet-stream',
+      },
+      body: file,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+      throw new Error(err.message || err.error || `HTTP ${res.status}`);
+    }
+    return {
+      bucket: String(bucket || '').trim(),
+      path: String(path || ''),
+      publicUrl: this.storagePublicUrl(bucket, path),
+    };
+  },
+
+  async storageDelete(bucket, path) {
+    const b = encodeURIComponent(String(bucket || '').trim());
+    const p = this._encodeStoragePath(path);
+    const url = `${SUPABASE_URL}/storage/v1/object/${b}/${p}`;
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+      },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+      throw new Error(err.message || err.error || `HTTP ${res.status}`);
+    }
+    return true;
+  },
 };
 
 // ─────────────────────────────────────────────
@@ -1551,6 +1609,7 @@ function setupMenuByRole(session) {
   const canAnalysis          = Auth.canViewAnalysis(session);   // director+admin
   const isMaster             = Auth.canManageMaster(session);   // admin only
   const canProjectReg        = Auth.canManageProjectRegister(session);
+  const canRefData           = Auth.canManageRefData(session);
 
   // ── Time Sheet 섹션 ────────────────────────────────────────
   const isManagerTimesheetTarget = Auth.isManager(session) && (
@@ -1565,7 +1624,8 @@ function setupMenuByRole(session) {
   const preferredSheet = Auth.preferredSheetType(session);
   const showTS = baseTs && (hourlyOk || dailyOk);
   const tsSection = document.getElementById('menu-timesheet-section');
-  if (tsSection) tsSection.style.display = showTS ? '' : 'none';
+  /* Time Sheet 블록: 본인 시트 메뉴 또는 기준정보(고객사·분류·프로젝트 등록) 권한이 있으면 표시 */
+  if (tsSection) tsSection.style.display = (showTS || canRefData || canProjectReg) ? '' : 'none';
   const mHourlyNew = document.getElementById('menu-entry-new-hourly');
   const mDailyNew = document.getElementById('menu-entry-new-daily');
   const mHourlyMy = document.getElementById('menu-my-entries-hourly');
@@ -1609,16 +1669,21 @@ function setupMenuByRole(session) {
   const masterMenus = document.querySelectorAll('.menu-master');
   masterMenus.forEach(m => m.style.display = isMaster ? '' : 'none');
 
-  // ── 기준정보 (고객사·업무분류): admin + director + manager ─────
-  const canRefData  = Auth.canManageRefData(session);
-  const refDataMenus = document.querySelectorAll('.menu-ref-data');
-  refDataMenus.forEach(m => m.style.display = canRefData ? '' : 'none');
+  // ── 등록정보 (Time Sheet 아래): 고객등록 / 업무분류등록 / 프로젝트 등록 ─────
+  // 업무분류등록: 1차 승인자(manager) 이상(상위 권한 포함)에게만 노출
+  const canCategoryReg = Auth.canApprove1st(session) || Auth.isDirector(session) || Auth.isTopMgr(session) || Auth.isAdmin(session);
+  const refLabel = document.getElementById('nav-ref-data-ts-label');
+  const clientsMenu = document.querySelector('.nav-item[data-page="master-clients"]');
+  const categoriesMenu = document.querySelector('.nav-item[data-page="master-categories"]');
   const projectRegMenu = document.querySelector('.nav-item[data-page="project-register"]');
+  if (clientsMenu) clientsMenu.style.display = canRefData ? '' : 'none';
+  if (categoriesMenu) categoriesMenu.style.display = canCategoryReg ? '' : 'none';
   if (projectRegMenu) projectRegMenu.style.display = canProjectReg ? '' : 'none';
+  if (refLabel) refLabel.style.display = (canRefData || canCategoryReg || canProjectReg) ? '' : 'none';
 
-  // ── Settings 섹션 타이틀: admin 또는 기준정보 권한 있을 때 ───
+  // ── Settings 섹션 타이틀: 조직·직원·프로젝트 코드 마스터(admin) ───
   const settingsSection = document.querySelector('.menu-settings-section');
-  if (settingsSection) settingsSection.style.display = (isMaster || canRefData || canProjectReg) ? '' : 'none';
+  if (settingsSection) settingsSection.style.display = isMaster ? '' : 'none';
 
   // ── 승인자 없는 staff 안내 배너 표시 ──────────────────────
   _showNoApproverBanner(isStaffNoApprover);
