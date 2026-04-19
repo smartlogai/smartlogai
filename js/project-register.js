@@ -1,4 +1,4 @@
-/* project-register.js — 프로젝트 등록 (manager+ director+ top_mgr+ admin) */
+/* project-register.js — 프로젝트 등록 (staff+ manager+ director+ top_mgr+ admin) */
 /* DB: registered_projects, fn_allocate_project_code — dev_schema_registered_projects.sql */
 
 let _projRegRows = [];
@@ -32,6 +32,7 @@ const _PROJ_ROUTE_GUIDES = {
 let _projRegContributors = [];
 let _projRegContractDocs = [];
 let _projRegContractDocFiltersBound = false;
+let _projRegOpenedFromApprovalDetail = false;
 
 const _PROJ_REG_STORAGE_BUCKETS = {
   contract: 'registered-project-contracts',
@@ -117,51 +118,85 @@ function _projRegIsOwner(session, r) {
 
 async function _projRegRegistrantSnapshot(session) {
   let u = null;
+  let users = [];
   try {
-    const users = await Master.users();
+    users = await Master.users();
     u = users.find((x) => String(x.id) === String(session.id)) || null;
   } catch (_) {}
+  const myRole = String((u && u.role) || session.role || '').trim().toLowerCase();
   const pa1Id = String((u && u.approver_id) || session.approver_id || '').trim();
   const pa1Name = String((u && u.approver_name) || session.approver_name || '').trim();
   const pa2Id = String((u && u.reviewer2_id) || session.reviewer2_id || '').trim();
   const pa2Name = String((u && u.reviewer2_name) || session.reviewer2_name || '').trim();
-  return { pa1Id, pa1Name, pa2Id, pa2Name };
+  // 프로젝트 승인(인센티브): staff 등록 건은 3차(사업부장/top_mgr) 최종 승인
+  let pa3Id = '';
+  let pa3Name = '';
+  if (myRole === 'staff' && Array.isArray(users) && users.length) {
+    const pickScore = (cand) => {
+      if (!cand || String(cand.role || '').toLowerCase() !== 'top_mgr') return -1;
+      let s = 0;
+      if (u && u.dept_id && cand.dept_id && String(u.dept_id) === String(cand.dept_id)) s += 100;
+      if (u && u.hq_id && cand.hq_id && String(u.hq_id) === String(cand.hq_id)) s += 40;
+      if (u && u.cs_team_id && cand.cs_team_id && String(u.cs_team_id) === String(cand.cs_team_id)) s += 20;
+      return s;
+    };
+    const sorted = users
+      .filter((x) => String(x && x.role || '').toLowerCase() === 'top_mgr')
+      .map((x) => ({ x, score: pickScore(x) }))
+      .sort((a, b) => {
+        if (a.score !== b.score) return b.score - a.score;
+        return String(a.x.name || '').localeCompare(String(b.x.name || ''));
+      });
+    const picked = sorted.length ? sorted[0].x : null;
+    if (picked) {
+      pa3Id = String(picked.id || '').trim();
+      pa3Name = String(picked.name || '').trim();
+    }
+  }
+  return { pa1Id, pa1Name, pa2Id, pa2Name, pa3Id, pa3Name };
 }
 
 function _projRegEffectiveApprovers(row) {
   const a1 = String((row && row.reg_pa1_id) || '').trim();
   const a2 = String((row && row.reg_pa2_id) || '').trim();
-  if (a1 && a2 && a1 === a2) return { pa1: a1, pa2: '', same: true };
-  return { pa1: a1, pa2: a2, same: false };
+  const a3 = String((row && row.reg_pa3_id) || '').trim();
+  const ordered = [a1, a2, a3].filter(Boolean);
+  const uniq = [];
+  ordered.forEach((id) => {
+    if (!uniq.includes(id)) uniq.push(id);
+  });
+  return {
+    pa1: uniq[0] || '',
+    pa2: uniq[1] || '',
+    pa3: uniq[2] || '',
+    count: uniq.length,
+    chain: uniq,
+  };
 }
 
 function _projRegPendingStep(row) {
   if (_projRegNormStatus(row) !== 'pending') return null;
   const eff = _projRegEffectiveApprovers(row);
-  const has1 = !!eff.pa1;
-  const has2 = !!eff.pa2 && !eff.same;
-
-  if (!row.first_approved_at) {
-    if (eff.same && has1) return 1;
-    if (has1) return 1;
-    if (has2) return 2;
+  const cnt = Number(eff.count || 0);
+  if (!cnt) return null;
+  if (!row.first_approved_at) return 1;
+  if (cnt >= 3) {
+    if (!row.second_approved_at) return 2;
+    if (!row.final_approved_at) return 3;
     return null;
   }
-  if (has2 && !row.final_approved_at) return 2;
+  if (cnt >= 2 && !row.final_approved_at) return 2;
   return null;
 }
 
 function _projRegCanApproveRow(session, row) {
+  if (session && session.role === 'admin') return _projRegNormStatus(row) === 'pending';
   const step = _projRegPendingStep(row);
   if (!step) return false;
   const sid = String(session.id || '');
   const eff = _projRegEffectiveApprovers(row);
-  if (step === 1) {
-    if (eff.same) return sid === eff.pa1;
-    if (eff.pa1) return sid === eff.pa1;
-    return sid === eff.pa2;
-  }
-  if (step === 2) return sid === eff.pa2;
+  const targetId = String((eff.chain && eff.chain[step - 1]) || '');
+  if (targetId) return sid === targetId;
   return false;
 }
 
@@ -169,6 +204,133 @@ function _projRegCodeMatchesForm(row, typeId, yymm) {
   if (!row || !row.project_code || !typeId || !yymm) return false;
   if (String(row.project_code_type_id || '') !== String(typeId)) return false;
   return _projRegYymmFromCode(row.project_code) === yymm;
+}
+
+function _projRegNotifyProjectSubmit({ rowId, projectCode, projectName, clientName, pa1Id, pa1Name, pa2Id, pa2Name, pa3Id, pa3Name, fromSession }) {
+  if (typeof createNotification !== 'function') return;
+  const codeTxt = String(projectCode || '').trim();
+  const nameTxt = String(projectName || '').trim();
+  const clientTxt = String(clientName || '').trim();
+  const summary = _projRegNotificationSummary({
+    clientName: clientTxt,
+    projectName: nameTxt,
+    projectCode: codeTxt,
+  });
+  const msgBase = `${fromSession?.name || '등록자'}님이 프로젝트 승인을 요청했습니다.`;
+  // 제출 직후 대기 단계의 승인자에게만 알림 전송
+  if (pa1Id) {
+    createNotification({
+      toUserId: pa1Id,
+      toUserName: pa1Name || '',
+      fromUserId: fromSession?.id || '',
+      fromUserName: fromSession?.name || '',
+      type: 'submitted',
+      entryId: rowId || '',
+      entrySummary: summary,
+      message: `${msgBase}${clientTxt ? ` 고객사: ${clientTxt}.` : ''}`,
+      targetMenu: 'approval:project',
+    });
+    return;
+  }
+  if (pa2Id) {
+    createNotification({
+      toUserId: pa2Id,
+      toUserName: pa2Name || '',
+      fromUserId: fromSession?.id || '',
+      fromUserName: fromSession?.name || '',
+      type: 'submitted',
+      entryId: rowId || '',
+      entrySummary: summary,
+      message: `${msgBase}${clientTxt ? ` 고객사: ${clientTxt}.` : ''}`,
+      targetMenu: 'approval:project',
+    });
+    return;
+  }
+  if (pa3Id) {
+    createNotification({
+      toUserId: pa3Id,
+      toUserName: pa3Name || '',
+      fromUserId: fromSession?.id || '',
+      fromUserName: fromSession?.name || '',
+      type: 'submitted',
+      entryId: rowId || '',
+      entrySummary: summary,
+      message: `${msgBase}${clientTxt ? ` 고객사: ${clientTxt}.` : ''}`,
+      targetMenu: 'approval:project',
+    });
+  }
+}
+
+function _projRegNotificationSummary({ clientName, projectName, projectCode }) {
+  const c = String(clientName || '').trim();
+  const n = String(projectName || '').trim();
+  const code = String(projectCode || '').trim();
+  const left = c || '프로젝트';
+  const right = n || code || '';
+  return `${left} | ${right}`;
+}
+
+function _projRegNotifyProjectFinalResult({ row, decision, fromSession, reason }) {
+  if (typeof createNotification !== 'function' || !row) return;
+  const toUserId = String(row.created_by || '').trim();
+  if (!toUserId) return;
+  if (String(fromSession?.id || '') === toUserId) return; // 자기 자신에게 중복 알림 방지
+  const codeTxt = String(row.project_code || '').trim();
+  const nameTxt = String(row.project_name || '').trim();
+  const clientTxt = String(row.client_name || '').trim();
+  const summary = _projRegNotificationSummary({
+    clientName: clientTxt,
+    projectName: nameTxt,
+    projectCode: codeTxt,
+  });
+  const isRejected = String(decision || '') === 'rejected';
+  const msg = isRejected
+    ? `${fromSession?.name || '승인자'}님이 프로젝트를 반려했습니다. 사유를 확인하고 수정 후 재제출해주세요.${reason ? ` (반려 사유: ${String(reason).trim()})` : ''}`
+    : `${fromSession?.name || '승인자'}님이 프로젝트를 최종 승인했습니다. 🎉${clientTxt ? ` 고객사: ${clientTxt}.` : ''}`;
+  createNotification({
+    toUserId,
+    toUserName: row.created_by_name || '',
+    fromUserId: fromSession?.id || '',
+    fromUserName: fromSession?.name || '',
+    type: isRejected ? 'rejected' : 'approved',
+    entryId: row.id || '',
+    entrySummary: summary,
+    message: msg,
+    targetMenu: 'project-register',
+  });
+}
+
+function _projRegNotifyProjectNextPending({ row, fromSession, step }) {
+  if (typeof createNotification !== 'function' || !row) return;
+  const n = Number(step || 0);
+  const sid = String(fromSession?.id || '');
+  const targetId = n === 2
+    ? String(row.reg_pa2_id || '').trim()
+    : (n === 3 ? String(row.reg_pa3_id || '').trim() : '');
+  const targetName = n === 2
+    ? String(row.reg_pa2_name || '').trim()
+    : (n === 3 ? String(row.reg_pa3_name || '').trim() : '');
+  if (!targetId || sid === targetId) return;
+  const codeTxt = String(row.project_code || '').trim();
+  const nameTxt = String(row.project_name || '').trim();
+  const summary = _projRegNotificationSummary({
+    clientName: row.client_name,
+    projectName: nameTxt,
+    projectCode: codeTxt,
+  });
+  createNotification({
+    toUserId: targetId,
+    toUserName: targetName,
+    fromUserId: fromSession?.id || '',
+    fromUserName: fromSession?.name || '',
+    type: 'submitted',
+    entryId: row.id || '',
+    entrySummary: summary,
+    message: n === 2
+      ? `${fromSession?.name || '승인자'}님이 프로젝트를 1차 승인했습니다. 2차 승인 검토를 진행해주세요.`
+      : `${fromSession?.name || '승인자'}님이 프로젝트를 2차 승인했습니다. 3차 최종 승인 검토를 진행해주세요.`,
+    targetMenu: 'approval:project',
+  });
 }
 
 function projRegSetFormFieldsDisabled(disabled) {
@@ -199,6 +361,7 @@ function projRegUpdateFormFooter(session, editId, row) {
       const step = st === 'pending' ? _projRegPendingStep(row) : null;
       if (st === 'pending' && step === 1) banner.appendChild(document.createTextNode(' (1차 승인 대기)'));
       else if (st === 'pending' && step === 2) banner.appendChild(document.createTextNode(' (2차 승인 대기)'));
+      else if (st === 'pending' && step === 3) banner.appendChild(document.createTextNode(' (3차 승인 대기)'));
       if (row && row.contract_exception_required === true) {
         banner.appendChild(document.createTextNode(' · 조건부 승인 심사'));
       }
@@ -237,7 +400,16 @@ function projRegUpdateFormFooter(session, editId, row) {
     return;
   }
   if (st === 'pending' && canAp) {
-    if (footRedirect) footRedirect.style.display = 'inline-flex';
+    if (_projRegOpenedFromApprovalDetail) {
+      if (footDraft) footDraft.style.display = 'inline-flex';
+      projRegSetFormFieldsDisabled(false);
+    } else {
+      if (footRedirect) footRedirect.style.display = 'inline-flex';
+      projRegSetFormFieldsDisabled(true);
+    }
+    return;
+  }
+  if (st === 'pending' && _projRegOpenedFromApprovalDetail) {
     projRegSetFormFieldsDisabled(true);
     return;
   }
@@ -478,7 +650,8 @@ function _projRegValidateContributorsForApproval() {
   const rows = _projRegContributors
     .map((r) => ({ ...r, name: String(r.name || '').trim(), role: String(r.role || '').trim(), contribution: String(r.contribution || '').trim() }))
     .filter((r) => r.name || r.role || r.contribution);
-  if (!rows.length) return { ok: false, message: '수주 참여자를 1명 이상 입력하세요.' };
+  // 수주참여자는 인센티브 산정용 선택 정보이므로 미입력 제출 허용
+  if (!rows.length) return { ok: true };
   for (const r of rows) {
     if (!r.name || !r.role || !r.contribution) {
       return { ok: false, message: '수주 참여자별 이름·역할·기여도를 모두 입력하세요.' };
@@ -499,6 +672,18 @@ function _projRegContribRowCount(raw) {
 
 function _projRegEscJs(v) {
   return String(v || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r?\n/g, '\\n');
+}
+
+function _projRegEncClickArg(v) {
+  return encodeURIComponent(String(v || ''));
+}
+
+function projRegOpenContribModalEncoded(rawEnc, labelEnc) {
+  let raw = '';
+  let label = '';
+  try { raw = decodeURIComponent(String(rawEnc || '')); } catch (_) { raw = String(rawEnc || ''); }
+  try { label = decodeURIComponent(String(labelEnc || '')); } catch (_) { label = String(labelEnc || ''); }
+  projRegOpenContribModal(raw, label);
 }
 
 function projRegOpenContribModal(raw, label) {
@@ -534,7 +719,7 @@ async function init_project_register() {
   const session = getSession();
   if (!Auth.canManageProjectRegister(session)) {
     navigateTo('dashboard');
-    Toast.warning('프로젝트 등록 권한이 없습니다. (CCB 소속 또는 팀장 이상 권한 필요)');
+    Toast.warning('프로젝트 등록 권한이 없습니다.');
     return;
   }
   projRegBindClientSearch();
@@ -548,6 +733,13 @@ async function init_project_register() {
   _projRegBindListFiltersOnce();
   projRegBindContractDocFiltersOnce();
   await projRegLoadList();
+  if (typeof init_project_management === 'function') {
+    await init_project_management();
+  }
+  const activePage = document.querySelector('.nav-item.active')?.dataset.page || '';
+  if (typeof applyProjectPageMode === 'function') {
+    applyProjectPageMode(activePage === 'project-management' ? 'manage' : 'register');
+  }
 }
 
 function projRegBindContractDocFiltersOnce() {
@@ -560,6 +752,7 @@ function projRegBindContractDocFiltersOnce() {
 }
 
 function projRegShowList(reload) {
+  _projRegOpenedFromApprovalDetail = false;
   const list = document.getElementById('proj-reg-list');
   const form = document.getElementById('proj-reg-form');
   if (list) list.style.display = '';
@@ -1168,13 +1361,47 @@ async function projRegLoadList() {
   const tbody = document.getElementById('proj-reg-list-body');
   if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="9" class="table-empty"><i class="fas fa-spinner fa-spin"></i><p>불러오는 중…</p></td></tr>';
+  const session = getSession();
   try {
-    _projRegRows = await API.listAllPages('registered_projects', { limit: 500, maxPages: 10, sort: 'created_at' });
+    const allRows = await API.listAllPages('registered_projects', { limit: 500, maxPages: 10, sort: 'created_at' });
+    _projRegRows = await _projRegScopeRowsForSession(allRows, session);
   } catch (e) {
     _projRegRows = [];
     Toast.error('목록 조회 실패: ' + (e.message || '') + ' — SQL 스키마를 적용했는지 확인하세요.');
   }
   projRegRenderList();
+}
+
+async function _projRegScopeRowsForSession(rows, session) {
+  const src = Array.isArray(rows) ? rows : [];
+  if (!session || !session.id) return [];
+  if (Auth.isAdmin(session)) return src;
+
+  const myId = String(session.id || '');
+  // 승인자(팀장/본부장/경영층): 본인 + 소속 범위(팀/본부/사업부) 사용자 건 열람
+  const canScopeView = Auth.canApprove(session) || Auth.isDirector(session) || Auth.isTopMgr(session);
+  if (!canScopeView) {
+    return src.filter((r) => String(r && r.created_by || '') === myId);
+  }
+
+  let users = _projRegUsers;
+  if (!Array.isArray(users) || !users.length) {
+    try {
+      users = await Master.users();
+      _projRegUsers = users;
+    } catch (_) {
+      users = [];
+    }
+  }
+  const byId = new Map((users || []).map((u) => [String(u.id || ''), u]));
+  return src.filter((r) => {
+    const creatorId = String((r && r.created_by) || '');
+    if (!creatorId) return false;
+    if (creatorId === myId) return true;
+    const creator = byId.get(creatorId);
+    if (!creator) return false;
+    return Auth.scopeMatch(session, creator);
+  });
 }
 
 function projRegRenderList() {
@@ -1198,31 +1425,28 @@ function projRegRenderList() {
   tbody.innerHTML = rows.map((r, i) => {
     const cd = r.created_at ? Utils.formatDate(r.created_at) : '-';
     const st = _projRegNormStatus(r);
-    const codeDisp = (r.project_code && String(r.project_code).trim()) ? String(r.project_code) : '—';
+    const codeDisp = (r.project_code && String(r.project_code).trim()) ? String(r.project_code) : '';
     const owner = _projRegIsOwner(session, r);
     const canDel = (st === 'draft' || st === 'rejected') && (owner || session.role === 'admin');
     const editBtn = `<button type="button" class="btn btn-sm btn-outline btn-icon" onclick="projRegShowForm('${r.id}')" title="상세"><i class="fas fa-edit"></i></button>`;
     const delBtn = `<button type="button" class="btn btn-sm btn-danger btn-icon" onclick="projRegDelete('${r.id}')" title="삭제"><i class="fas fa-trash"></i></button>`;
-    const delSlot = canDel
-      ? delBtn
-      : `<button type="button" class="btn btn-sm btn-danger btn-icon" disabled tabindex="-1" aria-hidden="true" style="visibility:hidden"><i class="fas fa-trash"></i></button>`;
-    const row1 = `<div class="proj-reg-list-act-row">${editBtn}${delSlot}</div>`;
+    const row1 = `<div class="proj-reg-list-act-row">${editBtn}${canDel ? delBtn : ''}</div>`;
     const actionHtml = `<div class="proj-reg-list-actions">${row1}</div>`;
     const contribCount = _projRegContribRowCount(r.order_contributors_text || '');
     const contribLabel = r.project_code || r.project_name || `프로젝트 ${i + 1}`;
     const contribBtn = contribCount
-      ? `<button type="button" class="btn btn-sm btn-outline" onclick="projRegOpenContribModal('${_projRegEscJs(r.order_contributors_text || '')}','${_projRegEscJs(contribLabel)}')" title="수주 참여자 보기">보기 (${contribCount})</button>`
+      ? `<button type="button" class="btn btn-sm btn-outline proj-reg-contrib-btn" onclick="projRegOpenContribModalEncoded('${_projRegEncClickArg(r.order_contributors_text || '')}','${_projRegEncClickArg(contribLabel)}')" title="수주 참여자 보기"><i class="fas fa-users"></i><span>참여 ${contribCount}</span></button>`
       : '<span style="color:var(--text-muted)">-</span>';
     return `<tr>
-      <td>${i + 1}</td>
-      <td><span class="${_projRegStatusBadgeClass(st, r)}">${Utils.escHtml(_projRegStatusLabel(st, r))}</span></td>
-      <td><strong>${Utils.escHtml(codeDisp)}</strong></td>
-      <td>${Utils.escHtml(r.project_name || '')}</td>
-      <td>${Utils.escHtml(r.client_name || '')}</td>
-      <td style="text-align:center">${contribBtn}</td>
-      <td>${Utils.escHtml(r.cpm_user_name || '-')}</td>
-      <td style="font-size:12px">${Utils.escHtml(cd)}</td>
-      <td style="text-align:center">${actionHtml}</td>
+      <td class="text-center">${i + 1}</td>
+      <td class="text-center"><span class="${_projRegStatusBadgeClass(st, r)}">${Utils.escHtml(_projRegStatusLabel(st, r))}</span></td>
+      <td class="proj-reg-code-cell">${codeDisp ? `<strong>${Utils.escHtml(codeDisp)}</strong>` : '<span class="proj-reg-code-empty">코드생성전</span>'}</td>
+      <td class="proj-reg-name-cell" title="${Utils.escHtml(r.project_name || '')}">${Utils.escHtml(r.project_name || '')}</td>
+      <td class="proj-reg-client-cell" title="${Utils.escHtml(r.client_name || '')}">${Utils.escHtml(r.client_name || '')}</td>
+      <td class="text-center">${contribBtn}</td>
+      <td class="text-center">${Utils.escHtml(r.cpm_user_name || '-')}</td>
+      <td class="text-center" style="font-size:12px">${Utils.escHtml(cd)}</td>
+      <td class="text-center">${actionHtml}</td>
     </tr>`;
   }).join('');
 }
@@ -1337,11 +1561,19 @@ async function projRegOpenContractDocModal() {
 async function projRegUnlinkContractDoc(projectId, kind) {
   if (!projectId || !kind) return;
   if (!confirm('선택한 문서 연결을 해제할까요? (스토리지 파일도 함께 삭제 시도)')) return;
+  const session = getSession();
   const row = await _projRegResolveRow(projectId);
   if (!row) return;
+  const isAdmin = !!(session && session.role === 'admin');
+  const isOwner = String(row.created_by || '') === String(session?.id || '');
+  const isFinalApprover = String(row.final_approved_by || '') === String(session?.id || '');
+  if (!isAdmin && !isOwner && !isFinalApprover) {
+    Toast.warning('문서 연결해제 권한이 없습니다. (등록자/최종승인자/관리자)');
+    return;
+  }
   const patch = {
-    updated_by: String(getSession()?.id || ''),
-    updated_by_name: String(getSession()?.name || ''),
+    updated_by: String(session?.id || ''),
+    updated_by_name: String(session?.name || ''),
   };
   let oldUrl = '';
   if (kind === 'contract') {
@@ -1445,7 +1677,8 @@ function _projRegCollectBilling() {
   };
 }
 
-async function projRegShowForm(editId) {
+async function projRegShowForm(editId, opts) {
+  _projRegOpenedFromApprovalDetail = !!(opts && opts.fromApproval);
   const session = getSession();
   const list = document.getElementById('proj-reg-list');
   const form = document.getElementById('proj-reg-form');
@@ -1831,12 +2064,13 @@ async function projRegSaveDraft() {
   try {
     if (editId) {
       const prev = _projRegRows.find((x) => x.id === editId);
-      if (!prev || !_projRegIsOwner(session, prev)) {
+      const canEditFromApproval = !!(_projRegOpenedFromApprovalDetail && prev && _projRegCanApproveRow(session, prev));
+      if (!prev || (!_projRegIsOwner(session, prev) && !canEditFromApproval)) {
         Toast.warning('임시저장할 권한이 없습니다.');
         return;
       }
       const st = _projRegNormStatus(prev);
-      if (st === 'pending') {
+      if (st === 'pending' && !canEditFromApproval) {
         Toast.warning('승인 대기 중에는 수정할 수 없습니다.');
         return;
       }
@@ -1910,10 +2144,6 @@ async function projRegSubmitForApproval() {
     Toast.warning('수주경로를 선택하세요.');
     return;
   }
-  if (!f.routeDetail) {
-    Toast.warning('수주경로 세부내역을 입력하세요.');
-    return;
-  }
   const contribValid = _projRegValidateContributorsForApproval();
   if (!contribValid.ok) {
     Toast.warning(contribValid.message);
@@ -1934,17 +2164,25 @@ async function projRegSubmitForApproval() {
   let prev = editId ? _projRegRows.find((x) => x.id === editId) : null;
   const willHaveContract = _projRegFormWillHaveContract(f, prev);
   const willHaveEvidence = _projRegFormWillHaveEvidence(f, prev);
-  const willHaveRouteEvidence = _projRegFormWillHaveRouteEvidence(f, prev);
   const isConditional = !willHaveContract;
   const snap = await _projRegRegistrantSnapshot(session);
   const has1 = !!snap.pa1Id;
   const has2 = !!snap.pa2Id;
+  const has3 = !!snap.pa3Id;
+  const myRole = String(session.role || '').trim().toLowerCase();
+  const isStaffRegistrant = myRole === 'staff';
   const isCcbAutoApprove =
-    (session.role === 'director' || session.role === 'top_mgr') &&
+    (myRole === 'director' || myRole === 'top_mgr') &&
     typeof Auth !== 'undefined' &&
     typeof Auth.preferredSheetType === 'function' &&
     Auth.preferredSheetType(session) === 'daily';
-  const autoApprove = isCcbAutoApprove || (!has1 && !has2);
+  const autoApprove = isCcbAutoApprove || (!isStaffRegistrant && !has1 && !has2 && !has3);
+
+  // staff는 최소 1차 승인자 지정이 있어야 승인 요청 가능 (무승인 자동승인 차단)
+  if (isStaffRegistrant && !has1) {
+    Toast.warning('승인 요청할 수 없습니다. 1차 승인자(팀장) 지정 후 다시 시도하세요.');
+    return;
+  }
 
   if (isConditional && !willHaveEvidence) {
     Toast.warning('계약서 미첨부 시 고객 합의 근거(메일/공문 등) 파일을 첨부해야 승인 요청할 수 있습니다.');
@@ -1952,10 +2190,6 @@ async function projRegSubmitForApproval() {
   }
   if (isConditional && !f.contractExceptionReason) {
     Toast.warning('계약서 미첨부 사유를 입력하세요.');
-    return;
-  }
-  if (!willHaveRouteEvidence) {
-    Toast.warning('수주경로를 증빙할 파일을 첨부해야 승인 요청할 수 있습니다.');
     return;
   }
 
@@ -2017,10 +2251,15 @@ async function projRegSubmitForApproval() {
     reg_pa1_name: snap.pa1Name,
     reg_pa2_id: snap.pa2Id,
     reg_pa2_name: snap.pa2Name,
+    reg_pa3_id: snap.pa3Id,
+    reg_pa3_name: snap.pa3Name,
     submitted_at: now,
     first_approved_at: null,
     first_approved_by: '',
     first_approved_by_name: '',
+    second_approved_at: null,
+    second_approved_by: '',
+    second_approved_by_name: '',
     final_approved_at: null,
     final_approved_by: '',
     final_approved_by_name: '',
@@ -2036,6 +2275,9 @@ async function projRegSubmitForApproval() {
     basePayload.first_approved_at = now;
     basePayload.first_approved_by = String(session.id || '');
     basePayload.first_approved_by_name = session.name || '';
+    basePayload.second_approved_at = has3 ? now : null;
+    basePayload.second_approved_by = has3 ? String(session.id || '') : '';
+    basePayload.second_approved_by_name = has3 ? (session.name || '') : '';
     basePayload.final_approved_at = now;
     basePayload.final_approved_by = String(session.id || '');
     basePayload.final_approved_by_name = session.name || '';
@@ -2064,13 +2306,30 @@ async function projRegSubmitForApproval() {
   }
 
   try {
+    let savedId = editId || '';
     if (editId) {
       await API.patch('registered_projects', editId, basePayload);
     } else {
-      await API.create('registered_projects', {
+      const created = await API.create('registered_projects', {
         ...basePayload,
         created_by: String(session.id || ''),
         created_by_name: session.name || '',
+      });
+      savedId = String((created && created.id) || '');
+    }
+    if (!autoApprove && basePayload.registration_status === 'pending') {
+      _projRegNotifyProjectSubmit({
+        rowId: savedId || editId || '',
+        projectCode,
+        projectName: f.name,
+        clientName: f.clientName,
+        pa1Id: basePayload.reg_pa1_id,
+        pa1Name: basePayload.reg_pa1_name,
+        pa2Id: basePayload.reg_pa2_id,
+        pa2Name: basePayload.reg_pa2_name,
+        pa3Id: basePayload.reg_pa3_id,
+        pa3Name: basePayload.reg_pa3_name,
+        fromSession: session,
       });
     }
     if (autoApprove) Toast.success((isConditional ? '조건부 승인되었습니다. 코드: ' : '승인되었습니다. 코드: ') + projectCode);
@@ -2078,6 +2337,21 @@ async function projRegSubmitForApproval() {
     projRegShowList();
   } catch (e) {
     Toast.error('승인 요청 실패: ' + (e.message || e));
+  }
+}
+
+async function projRegOpenDetailFromApproval(id) {
+  if (!id) return;
+  try {
+    navigateTo('project-register');
+    if (typeof init_project_register === 'function') {
+      await init_project_register();
+    } else {
+      await projRegLoadList();
+    }
+    await projRegShowForm(id, { fromApproval: true });
+  } catch (e) {
+    Toast.error('상세 화면을 여는 중 오류가 발생했습니다: ' + (e.message || e));
   }
 }
 
@@ -2105,7 +2379,6 @@ async function projRegSaveApproved() {
   }
   const willHaveContract = _projRegFormWillHaveContract(f, prev);
   const willHaveEvidence = _projRegFormWillHaveEvidence(f, prev);
-  const willHaveRouteEvidence = _projRegFormWillHaveRouteEvidence(f, prev);
   const isConditional = !willHaveContract;
   if (isConditional && !willHaveEvidence) {
     Toast.warning('계약서 미첨부 시 고객 합의 근거 파일을 첨부해야 저장할 수 있습니다.');
@@ -2113,10 +2386,6 @@ async function projRegSaveApproved() {
   }
   if (isConditional && !f.contractExceptionReason) {
     Toast.warning('계약서 미첨부 사유를 입력하세요.');
-    return;
-  }
-  if (!willHaveRouteEvidence) {
-    Toast.warning('수주경로를 증빙할 파일을 첨부해야 저장할 수 있습니다.');
     return;
   }
   const basePayload = {
@@ -2136,6 +2405,7 @@ async function projRegSaveApproved() {
     updated_by_name: session.name || '',
     contract_exception_required: isConditional,
     contract_exception_reason: isConditional ? f.contractExceptionReason : '',
+    // 계약서가 첨부되면 조건부 승인 상태를 자동 해소
     conditional_approval: isConditional,
     conditional_approved_at: isConditional ? (prev.conditional_approved_at || Date.now()) : null,
   };
@@ -2185,8 +2455,7 @@ async function projRegApprove(id) {
   const step = _projRegPendingStep(row);
   const now = Date.now();
   const eff = _projRegEffectiveApprovers(row);
-  const hasSecond = !!eff.pa2 && !eff.same;
-  const willFinalApprove = !(step === 1 && hasSecond);
+  const willFinalApprove = (Number(step || 0) >= Number(eff.count || 0));
   const hasContract = _projRegHasContractMeta(row);
   const hasEvidence = _projRegHasEvidenceMeta(row);
   const isConditional = !hasContract;
@@ -2199,7 +2468,7 @@ async function projRegApprove(id) {
     return;
   }
   try {
-    if (step === 1 && hasSecond) {
+    if (step === 1 && eff.count >= 2) {
       await API.patch('registered_projects', id, {
         first_approved_at: now,
         first_approved_by: String(session.id || ''),
@@ -2207,8 +2476,19 @@ async function projRegApprove(id) {
         updated_by: String(session.id || ''),
         updated_by_name: session.name || '',
       });
+      _projRegNotifyProjectNextPending({ row, fromSession: session, step: 2 });
       Toast.success('1차 승인되었습니다.');
-    } else if (step === 2) {
+    } else if (step === 2 && eff.count >= 3) {
+      await API.patch('registered_projects', id, {
+        second_approved_at: now,
+        second_approved_by: String(session.id || ''),
+        second_approved_by_name: session.name || '',
+        updated_by: String(session.id || ''),
+        updated_by_name: session.name || '',
+      });
+      _projRegNotifyProjectNextPending({ row, fromSession: session, step: 3 });
+      Toast.success('2차 승인되었습니다.');
+    } else if (step === 2 || step === 3) {
       await API.patch('registered_projects', id, {
         final_approved_at: now,
         final_approved_by: String(session.id || ''),
@@ -2220,6 +2500,7 @@ async function projRegApprove(id) {
         updated_by: String(session.id || ''),
         updated_by_name: session.name || '',
       });
+      _projRegNotifyProjectFinalResult({ row, decision: 'approved', fromSession: session });
       Toast.success(isConditional ? '조건부 승인 완료되었습니다.' : '승인 완료되었습니다.');
     } else {
       await API.patch('registered_projects', id, {
@@ -2236,6 +2517,7 @@ async function projRegApprove(id) {
         updated_by: String(session.id || ''),
         updated_by_name: session.name || '',
       });
+      _projRegNotifyProjectFinalResult({ row, decision: 'approved', fromSession: session });
       Toast.success(isConditional ? '조건부 승인 완료되었습니다.' : '승인 완료되었습니다.');
     }
     await projRegLoadList();
@@ -2276,12 +2558,16 @@ async function projRegReject(id) {
       first_approved_at: null,
       first_approved_by: '',
       first_approved_by_name: '',
+      second_approved_at: null,
+      second_approved_by: '',
+      second_approved_by_name: '',
       final_approved_at: null,
       final_approved_by: '',
       final_approved_by_name: '',
       updated_by: String(session.id || ''),
       updated_by_name: session.name || '',
     });
+    _projRegNotifyProjectFinalResult({ row, decision: 'rejected', fromSession: session, reason });
     Toast.success('반려 처리되었습니다.');
     await projRegLoadList();
     if (typeof window.loadApprovalProjectList === 'function') {
@@ -2358,6 +2644,8 @@ window.projRegAddContributorRow = projRegAddContributorRow;
 window.projRegRemoveContributorRow = projRegRemoveContributorRow;
 window.projRegContribUpdate = projRegContribUpdate;
 window.projRegOpenContribModal = projRegOpenContribModal;
+window.projRegOpenContribModalEncoded = projRegOpenContribModalEncoded;
+window.projRegOpenDetailFromApproval = projRegOpenDetailFromApproval;
 window.projRegOpenContractDocModal = projRegOpenContractDocModal;
 window.projRegUnlinkContractDoc = projRegUnlinkContractDoc;
 window.projRegRenderContractDocModal = projRegRenderContractDocModal;
@@ -2377,6 +2665,7 @@ window.SmartlogProjReg = {
   canApproveRow: _projRegCanApproveRow,
   contribCount: _projRegContribRowCount,
   openContribModal: projRegOpenContribModal,
+  openDetailFromApproval: projRegOpenDetailFromApproval,
   openContractDocModal: projRegOpenContractDocModal,
   approve: projRegApprove,
   reject: projRegReject,

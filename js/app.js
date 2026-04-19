@@ -111,7 +111,7 @@ const ROLE_LABEL = {
 const ROLE_LABEL_FULL = {
   admin:    'Administrator',
   director: '본부장 (Director)',
-  top_mgr:  '경영·사업 (Top Mgr)',
+  top_mgr:  'Top Mgr',
   manager:  '팀장 (Manager)',
   staff:    'Staff',
 };
@@ -207,12 +207,22 @@ const Auth = {
   // 기준정보 관리 (고객사·업무분류): admin + director + top_mgr + manager
   canManageRefData: (s) => s && (s.role === 'admin' || s.role === 'director' || s.role === 'top_mgr' || s.role === 'manager'),
 
-  // 프로젝트 등록 (팀장 이상): 기준정보와 동일
+  // 고객사 등록 요청: staff 포함 전 역할 접근 허용 (수정/삭제/업로드는 별도 권한)
+  canRequestClient: (s) => !!(s && (
+    s.role === 'admin' ||
+    s.role === 'director' ||
+    s.role === 'top_mgr' ||
+    s.role === 'manager' ||
+    s.role === 'staff'
+  )),
+
+  // 프로젝트 등록: staff 포함 전 역할 허용 (승인 검증은 제출 단계에서 별도 처리)
   canManageProjectRegister: (s) => s && (
     s.role === 'admin' ||
     s.role === 'director' ||
     s.role === 'top_mgr' ||
     s.role === 'manager' ||
+    s.role === 'staff' ||
     Auth.preferredSheetType(s) === 'daily'
   ),
 
@@ -1539,7 +1549,10 @@ function navigateTo(page) {
 
   const SECTION_ALIAS = {
     'entry-new-hourly': 'entry-new',
+    'entry-new-daily': 'entry-new',
     'my-entries-hourly': 'my-entries',
+    'my-entries-daily': 'my-entries',
+    'project-management': 'project-register',
   };
   const sectionPage = SECTION_ALIAS[page] || page;
 
@@ -1610,6 +1623,7 @@ function setupMenuByRole(session) {
   const isMaster             = Auth.canManageMaster(session);   // admin only
   const canProjectReg        = Auth.canManageProjectRegister(session);
   const canRefData           = Auth.canManageRefData(session);
+  const canRequestClient     = Auth.canRequestClient(session);
 
   // ── Time Sheet 섹션 ────────────────────────────────────────
   const isManagerTimesheetTarget = Auth.isManager(session) && (
@@ -1643,10 +1657,12 @@ function setupMenuByRole(session) {
 
   const delivMenu = document.getElementById('menu-deliverables');
   if (delivMenu) delivMenu.style.display = Auth.canViewProjectDeliverables(session) ? '' : 'none';
+  const projectDashMenu = document.getElementById('menu-project-dashboard');
+  if (projectDashMenu) projectDashMenu.style.display = canViewDeptScope ? '' : 'none';
 
   // ── Management 섹션 타이틀 ─────────────────────────────────
   const mgmtSection = document.getElementById('menu-management-section');
-  const showMgmt = canApprove || canViewDeptScope;
+  const showMgmt = canApprove || canViewDeptScope || canProjectReg;
   if (mgmtSection) mgmtSection.style.display = showMgmt ? '' : 'none';
 
   // ── Approval: manager + director / Admin은 Staff 업무 기록으로 조회 ────
@@ -1660,6 +1676,9 @@ function setupMenuByRole(session) {
   // ── Analysis: director + admin ────────────────────────────
   const analysisMenu = document.getElementById('menu-analysis');
   if (analysisMenu) analysisMenu.style.display = canAnalysis ? '' : 'none';
+  const projectMgmtMenu = document.getElementById('menu-project-management');
+  if (projectMgmtMenu) projectMgmtMenu.style.display = canProjectReg ? '' : 'none';
+  _refreshProjectMgmtMenuVisibility(session, canProjectReg);
 
   // ── 자문 자료실: 모든 역할 접근 허용 ─────────────────────
   const archiveMenu = document.getElementById('menu-archive');
@@ -1675,11 +1694,11 @@ function setupMenuByRole(session) {
   const refLabel = document.getElementById('nav-ref-data-ts-label');
   const clientsMenu = document.querySelector('.nav-item[data-page="master-clients"]');
   const categoriesMenu = document.querySelector('.nav-item[data-page="master-categories"]');
-  const projectRegMenu = document.querySelector('.nav-item[data-page="project-register"]');
-  if (clientsMenu) clientsMenu.style.display = canRefData ? '' : 'none';
+  const projectRegMenu = document.getElementById('menu-project-register-ref');
+  if (clientsMenu) clientsMenu.style.display = (canRefData || canRequestClient) ? '' : 'none';
   if (categoriesMenu) categoriesMenu.style.display = canCategoryReg ? '' : 'none';
   if (projectRegMenu) projectRegMenu.style.display = canProjectReg ? '' : 'none';
-  if (refLabel) refLabel.style.display = (canRefData || canCategoryReg || canProjectReg) ? '' : 'none';
+  if (refLabel) refLabel.style.display = (canRefData || canRequestClient || canCategoryReg || canProjectReg) ? '' : 'none';
 
   // ── Settings 섹션 타이틀: 조직·직원·프로젝트 코드 마스터(admin) ───
   const settingsSection = document.querySelector('.menu-settings-section');
@@ -1687,6 +1706,55 @@ function setupMenuByRole(session) {
 
   // ── 승인자 없는 staff 안내 배너 표시 ──────────────────────
   _showNoApproverBanner(isStaffNoApprover);
+}
+
+async function _refreshProjectMgmtMenuVisibility(session, canProjectReg) {
+  const projectMgmtMenu = document.getElementById('menu-project-management');
+  if (!projectMgmtMenu) return;
+  if (!canProjectReg || !session) {
+    projectMgmtMenu.style.display = 'none';
+    return;
+  }
+  if (Auth.isAdmin(session) || Auth.isTopMgr(session)) {
+    projectMgmtMenu.style.display = '';
+    return;
+  }
+  // 경영지원 본부/팀 소속자는 프로젝트 생성/승인 이력과 무관하게
+  // 세금계산서/정산 운영 기능 접근을 위해 프로젝트관리 메뉴 노출
+  const isFinanceHqOrTeam = [
+    session.hq_name,
+    session.cs_team_name,
+    session.team_name,
+  ].some((v) => String(v || '').includes('경영지원'));
+  if (isFinanceHqOrTeam) {
+    projectMgmtMenu.style.display = '';
+    return;
+  }
+  try {
+    const myIds = new Set([
+      String(session.id || '').trim(),
+      String(session.user_id || '').trim(),
+    ].filter(Boolean));
+    if (!myIds.size) {
+      projectMgmtMenu.style.display = 'none';
+      return;
+    }
+    const rows = await API.listAllPages('registered_projects', { limit: 300, maxPages: 20, sort: 'updated_at' });
+    const hasScopedProject = (rows || []).some((r) => {
+      if (!String(r.project_code || '').trim()) return false;
+      const refs = [
+        String(r.created_by || '').trim(),
+        String(r.first_approved_by || '').trim(),
+        String(r.second_approved_by || '').trim(),
+        String(r.final_approved_by || '').trim(),
+      ].filter(Boolean);
+      return refs.some((id) => myIds.has(id));
+    });
+    projectMgmtMenu.style.display = hasScopedProject ? '' : 'none';
+  } catch (e) {
+    console.warn('[menu] project management scope check failed', e);
+    projectMgmtMenu.style.display = canProjectReg ? '' : 'none';
+  }
 }
 
 // 승인자 미지정 staff에게 안내 배너 표시
@@ -1731,6 +1799,94 @@ function getInitial(name) {
 // ★ 캐시 활용 + 쓰로틀(30초 이내 재호출 방지)
 // ─────────────────────────────────────────────
 let _badgeLastUpdated = 0;
+function _projRegPendingStepForBadge(row) {
+  const st = String((row && row.registration_status) || '').trim().toLowerCase();
+  if (st !== 'pending') return null;
+  const raw = [
+    String((row && row.reg_pa1_id) || '').trim(),
+    String((row && row.reg_pa2_id) || '').trim(),
+    String((row && row.reg_pa3_id) || '').trim(),
+  ].filter(Boolean);
+  const chain = [];
+  raw.forEach((id) => {
+    if (!chain.includes(id)) chain.push(id);
+  });
+  const cnt = chain.length;
+  if (!cnt) return null;
+  if (!row.first_approved_at) return 1;
+  if (cnt >= 3) {
+    if (!row.second_approved_at) return 2;
+    if (!row.final_approved_at) return 3;
+    return null;
+  }
+  if (cnt >= 2 && !row.final_approved_at) return 2;
+  return null;
+}
+
+function _projRegCanApproveForBadge(session, row) {
+  if (!session || !row) return false;
+  if (Auth.isAdmin(session)) return String((row.registration_status || '')).toLowerCase() === 'pending';
+  const step = _projRegPendingStepForBadge(row);
+  if (!step) return false;
+  const sid = String(session.id || '');
+  const raw = [
+    String((row && row.reg_pa1_id) || '').trim(),
+    String((row && row.reg_pa2_id) || '').trim(),
+    String((row && row.reg_pa3_id) || '').trim(),
+  ].filter(Boolean);
+  const chain = [];
+  raw.forEach((id) => {
+    if (!chain.includes(id)) chain.push(id);
+  });
+  const target = String(chain[step - 1] || '');
+  return !!target && sid === target;
+}
+
+async function _countProjectApprovalBadge(session) {
+  if (!session || !session.id) return 0;
+  let rows = [];
+  try {
+    rows = await Cache.get('registered_projects_badge_pending_' + session.id, async () => (
+      API.listAllPages('registered_projects', {
+        filter: 'registration_status=eq.pending',
+        limit: 300,
+        maxPages: 20,
+        sort: 'created_at',
+      })
+    ), 120000);
+  } catch (_) {
+    rows = [];
+  }
+  if (!Array.isArray(rows) || !rows.length) return 0;
+
+  if (Auth.canViewAll(session)) {
+    return rows.filter((r) => _projRegCanApproveForBadge(session, r)).length;
+  }
+
+  let users = [];
+  try {
+    users = await Master.users();
+  } catch (_) {
+    users = [];
+  }
+  const byId = new Map((users || []).map((u) => [String(u.id || ''), u]));
+  const myId = String(session.id || '');
+  const scoped = rows.filter((r) => {
+    const creatorId = String((r && r.created_by) || '');
+    if (!creatorId) {
+      const pa1 = String((r && r.reg_pa1_id) || '');
+      const pa2 = String((r && r.reg_pa2_id) || '');
+      const pa3 = String((r && r.reg_pa3_id) || '');
+      return pa1 === myId || pa2 === myId || pa3 === myId;
+    }
+    if (creatorId === myId) return true;
+    const creator = byId.get(creatorId);
+    if (!creator) return false;
+    return Auth.scopeMatch(session, creator);
+  });
+  return scoped.filter((r) => _projRegCanApproveForBadge(session, r)).length;
+}
+
 async function updateApprovalBadge(session, force = false) {
   const _needsSecondApprovalByCategory = (e) => {
     const n = String(e?.work_category_name || '').trim();
@@ -1763,8 +1919,8 @@ async function updateApprovalBadge(session, force = false) {
     return;
   }
 
-  // manager 또는 director만 (통합 Approval 배지)
-  if (!Auth.canApprove1st(session) && !Auth.canApprove2nd(session)) return;
+  // manager/director/top_mgr 대상 통합 Approval 배지
+  if (!(Auth.canApprove1st(session) || Auth.canApprove2nd(session) || Auth.isTopMgr(session))) return;
   const now = Date.now();
   if (!force && now - _badgeLastUpdated < 30000) return;
   _badgeLastUpdated = now;
@@ -1787,9 +1943,9 @@ async function updateApprovalBadge(session, force = false) {
       return { data: await API.listAllPages('time_entries', { limit: 400, maxPages: 60, sort: 'updated_at' }) };
     }, 120000);
     if (r && r.data) {
-      let count = 0;
+      let tsCount = 0;
       if (Auth.canApprove1st(session)) {
-        count = r.data.filter(e =>
+        tsCount = r.data.filter(e =>
           e.status === 'submitted' && String(e.approver_id) === String(session.id)
         ).length;
       } else if (Auth.canApprove2nd(session)) {
@@ -1809,8 +1965,13 @@ async function updateApprovalBadge(session, force = false) {
           _needsSecondApprovalByCategory(e) &&
           !String(e && e.dept_name || '').trim().toUpperCase().includes('CCB')
         ).length;
-        count = preApproved + managerDirect + ccbFirst;
+        tsCount = preApproved + managerDirect + ccbFirst;
+      } else {
+        tsCount = 0;
       }
+      const pjCount = await _countProjectApprovalBadge(session);
+      const count = tsCount + pjCount;
+      window.__approvalBadgeSplit = { timesheet: tsCount, project: pjCount, total: count };
       const badge = document.getElementById('approval-badge');
       if (badge) {
         badge.textContent = count;

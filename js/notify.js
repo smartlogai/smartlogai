@@ -22,6 +22,7 @@ const NOTIFY_META = {
   pre_approved: { icon: '✅', label: '1차 승인',    color: '#16a34a', bg: '#f0fdf4', target: 'my-entries'  },
   approved:     { icon: '🎉', label: '최종 승인',   color: '#15803d', bg: '#f0fdf4', target: 'my-entries'  },
   rejected:     { icon: '❌', label: '반려',        color: '#dc2626', bg: '#fef2f2', target: 'my-entries'  },
+  invoice_due_remind: { icon: '🧾', label: '발행 리마인드', color: '#7c3aed', bg: '#f5f3ff', target: 'project-management:invoice' },
 };
 
 // ════════════════════════════════════════════════════════════
@@ -229,9 +230,22 @@ async function _onNotifyClick(notifyId, targetMenu, entryId) {
     _setBadge(unread);
   } catch (e) { /* 무시 */ }
 
-  // 메뉴 이동
+  // 메뉴 이동 (예: approval:project / approval:timesheet)
   if (targetMenu && typeof navigateTo === 'function') {
-    navigateTo(targetMenu);
+    const raw = String(targetMenu || '').trim();
+    const [page, subtab] = raw.includes(':') ? raw.split(':', 2) : [raw, ''];
+    navigateTo(page);
+    if (page === 'approval') {
+      const tab = (subtab === 'project' || subtab === 'timesheet') ? subtab : 'timesheet';
+      setTimeout(() => {
+        if (typeof switchApprovalMainTab === 'function') switchApprovalMainTab(tab);
+      }, 0);
+    } else if (page === 'project-register' || page === 'project-management') {
+      const tab = ['progress', 'invoice', 'cost', 'timecharge', 'contract'].includes(subtab) ? subtab : 'progress';
+      setTimeout(() => {
+        if (typeof switchProjectMgmtTab === 'function') switchProjectMgmtTab(tab);
+      }, 0);
+    }
   }
 }
 

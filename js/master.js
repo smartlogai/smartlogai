@@ -816,17 +816,115 @@ async function deleteCsTeam(id, name) {
 // ─────────────────────────────────────────────
 // [4] 고객사 관리 (master-clients)
 // ─────────────────────────────────────────────
+const CLIENT_REQUEST_TABLE = 'client_registration_requests';
+let _clientRequestTableChecked = false;
+let _clientRequestTableAvailable = true;
+
+function _clientCanManageFull(session) {
+  return Auth.canManageRefData(session);
+}
+
+function _clientCanRequest(session) {
+  return !!(Auth.canRequestClient && Auth.canRequestClient(session));
+}
+
+function _clientCanAccessPage(session) {
+  return _clientCanManageFull(session) || _clientCanRequest(session);
+}
+
+function _clientCanRequestOnly(session) {
+  return _clientCanRequest(session) && !_clientCanManageFull(session);
+}
+
+function _clientReqCanHandle(session, row) {
+  if (!session || !row) return false;
+  if (String(row.status || '').toLowerCase() !== 'pending') return false;
+  const sid = String(session.id || '');
+  const approver1Id = String(row.approver1_id || '').trim();
+  return !!(sid && approver1Id && sid === approver1Id);
+}
+
+async function _clientResolveFirstApprover(session) {
+  const fallbackId = String((session && session.approver_id) || '').trim();
+  const fallbackName = String((session && session.approver_name) || '').trim();
+  let approverId = fallbackId;
+  let approverName = fallbackName;
+  try {
+    const users = await Master.users();
+    const me = (users || []).find((u) => String(u && u.id || '') === String(session && session.id || ''));
+    if (me) {
+      approverId = String(me.approver_id || approverId || '').trim();
+      approverName = String(me.approver_name || approverName || '').trim();
+    }
+    if (approverId && !approverName) {
+      const ap = (users || []).find((u) => String(u && u.id || '') === approverId);
+      approverName = String((ap && ap.name) || '').trim();
+    }
+  } catch (_) {}
+  return { id: approverId, name: approverName };
+}
+
+function _clientReqStatusLabel(status) {
+  const s = String(status || '').trim().toLowerCase();
+  if (s === 'approved') return '승인';
+  if (s === 'rejected') return '반려';
+  return '대기';
+}
+
+function _clientReqStatusClass(status) {
+  const s = String(status || '').trim().toLowerCase();
+  if (s === 'approved') return 'badge badge-green';
+  if (s === 'rejected') return 'badge badge-red';
+  return 'badge badge-yellow';
+}
+
+function _clientReqTableMissingError(err) {
+  const msg = String((err && err.message) || '').toLowerCase();
+  return msg.includes('could not find the table') || msg.includes('does not exist');
+}
+
+async function _clientEnsureRequestTable(session) {
+  if (_clientRequestTableChecked) return _clientRequestTableAvailable;
+  _clientRequestTableChecked = true;
+  try {
+    const params = { limit: 1 };
+    if (_clientCanRequestOnly(session) && session && session.id) {
+      params.filter = `requested_by=eq.${session.id}`;
+    }
+    await API.list(CLIENT_REQUEST_TABLE, params);
+    _clientRequestTableAvailable = true;
+  } catch (err) {
+    _clientRequestTableAvailable = !_clientReqTableMissingError(err);
+    if (!_clientRequestTableAvailable) {
+      console.warn('[clients] client request table missing:', err.message);
+    }
+  }
+  return _clientRequestTableAvailable;
+}
+
 async function init_master_clients() {
   const session = getSession();
-  if (!Auth.canManageRefData(session)) {
+  if (!_clientCanAccessPage(session)) {
     navigateTo('dashboard');
     Toast.warning('고객사 관리 권한이 없습니다.');
     return;
   }
+  const canManage = _clientCanManageFull(session);
+  const addBtn = document.getElementById('btn-client-add');
+  const uploadBtn = document.getElementById('btn-client-upload');
+  if (addBtn) {
+    addBtn.innerHTML = canManage
+      ? '<i class="fas fa-plus"></i> 고객사 추가'
+      : '<i class="fas fa-paper-plane"></i> 고객사 등록 요청';
+  }
+  if (uploadBtn) uploadBtn.style.display = canManage ? '' : 'none';
   await loadClients();
+  await loadClientRequests();
 }
 
 async function loadClients() {
+  const session = getSession();
+  const canManage = _clientCanManageFull(session);
   Master.invalidate('clients');
   const clients = await Master.clients();
   const tbody   = document.getElementById('clients-body');
@@ -840,22 +938,33 @@ async function loadClients() {
       <td><strong>${c.company_name}</strong></td>
       <td>${Utils.formatDate(c.created_at)}</td>
       <td style="text-align:center">
-        <div style="display:flex;gap:6px;justify-content:center">
-          <button class="btn btn-sm btn-outline btn-icon"
-            onclick="openClientModal('${c.id}','${esc(c.company_name)}')"><i class="fas fa-edit"></i></button>
-          <button class="btn btn-sm btn-danger btn-icon"
-            onclick="deleteClient('${c.id}','${esc(c.company_name)}')"><i class="fas fa-trash"></i></button>
-        </div>
+        ${canManage
+          ? `<div style="display:flex;gap:6px;justify-content:center">
+               <button class="btn btn-sm btn-outline btn-icon"
+                 onclick="openClientModal('${c.id}','${esc(c.company_name)}')"><i class="fas fa-edit"></i></button>
+               <button class="btn btn-sm btn-danger btn-icon"
+                 onclick="deleteClient('${c.id}','${esc(c.company_name)}')"><i class="fas fa-trash"></i></button>
+             </div>`
+          : '<span style="color:var(--text-muted)">-</span>'
+        }
       </td>
     </tr>`).join('');
 }
 
 function openClientModal(id, name) {
+  const session = getSession();
+  const canManage = _clientCanManageFull(session);
   id   = id   || '';
   name = name || '';
+  if (id && !canManage) {
+    Toast.warning('수정 권한이 없습니다.');
+    return;
+  }
   document.getElementById('client-edit-id').value        = id;
   document.getElementById('client-name-input').value     = name;
-  document.getElementById('clientModalTitle').textContent = id ? '고객사 수정' : '고객사 추가';
+  document.getElementById('clientModalTitle').textContent = id
+    ? '고객사 수정'
+    : (canManage ? '고객사 추가' : '고객사 등록 요청');
   // 힌트 초기화
   var hintEl = document.getElementById('client-name-hint');
   if (hintEl) hintEl.style.display = 'none';
@@ -935,10 +1044,13 @@ async function _onClientNameInput() {
 
 async function saveClient() {
   const session = getSession();
-  if (!Auth.canManageRefData(session)) { Toast.warning('권한이 없습니다.'); return; }
+  const canManage = _clientCanManageFull(session);
+  const canRequest = _clientCanRequest(session);
+  if (!canManage && !canRequest) { Toast.warning('권한이 없습니다.'); return; }
   const id   = document.getElementById('client-edit-id').value;
   const name = document.getElementById('client-name-input').value.trim();
   if (!name) { Toast.warning('고객사명을 입력하세요.'); return; }
+  if (id && !canManage) { Toast.warning('수정 권한이 없습니다.'); return; }
 
   // ── Phase 1: 중복 체크 ──────────────────────────────
   try {
@@ -972,19 +1084,82 @@ async function saveClient() {
     console.warn('client duplicate check error:', e);
   }
 
+  if (!canManage) {
+    const tableOk = await _clientEnsureRequestTable(session);
+    if (!tableOk) {
+      Toast.error('고객사 등록 요청 테이블이 없습니다. SQL 스크립트를 먼저 적용하세요.');
+      return;
+    }
+  }
+
   // ── 저장 ────────────────────────────────────────────
   try {
-    if (id) { await API.update('clients', id, { company_name: name }); Toast.success('수정되었습니다.'); }
-    else    { await API.create('clients', { company_name: name });       Toast.success('추가되었습니다.'); }
+    if (canManage) {
+      if (id) { await API.update('clients', id, { company_name: name }); Toast.success('수정되었습니다.'); }
+      else    { await API.create('clients', { company_name: name });       Toast.success('추가되었습니다.'); }
+    } else {
+      const pendingRows = await API.list(CLIENT_REQUEST_TABLE, { limit: 300, filter: 'status=eq.pending' });
+      const pendingData = (pendingRows && pendingRows.data) ? pendingRows.data : [];
+      const normInput = _normalizeClientName(name);
+      const dupPending = pendingData.find((r) => _normalizeClientName(r.company_name || '') === normInput);
+      if (dupPending) {
+        Toast.warning(`동일한 고객사 요청이 이미 대기 중입니다. (${dupPending.company_name})`);
+        return;
+      }
+      const approver1 = await _clientResolveFirstApprover(session);
+      if (!approver1.id) {
+        Toast.warning('1차 승인자(승인자)가 지정되지 않아 요청할 수 없습니다. 관리자에게 승인자 지정을 요청하세요.');
+        return;
+      }
+      const createdReq = await API.create(CLIENT_REQUEST_TABLE, {
+        company_name: name,
+        normalized_name: normInput,
+        status: 'pending',
+        approver1_id: approver1.id,
+        approver1_name: approver1.name || '',
+        requested_by: String(session.id || ''),
+        requested_by_name: session.name || '',
+        requested_role: session.role || '',
+        requested_at: Date.now(),
+        reviewed_by: '',
+        reviewed_by_name: '',
+        reviewed_at: null,
+        review_note: '',
+        approved_client_id: '',
+        approved_client_name: '',
+      });
+      if (typeof createNotification === 'function') {
+        createNotification({
+          toUserId: approver1.id,
+          toUserName: approver1.name || '',
+          fromUserId: String(session.id || ''),
+          fromUserName: session.name || '',
+          type: 'submitted',
+          entryId: String((createdReq && createdReq.id) || ''),
+          entrySummary: `고객사 등록 요청 · ${name}`,
+          message: `${session.name || '요청자'}님이 고객사 등록 요청을 보냈습니다. (${name})`,
+          targetMenu: 'master-clients',
+        });
+      }
+      Toast.success('고객사 등록 요청이 접수되었습니다.');
+    }
     closeModal('clientModal');
-    Master.invalidate('clients');
+    if (canManage) Master.invalidate('clients');
     await loadClients();
-  } catch(err) { Toast.error('저장 실패: ' + (err && err.message ? err.message : '알 수 없는 오류')); }
+    await loadClientRequests();
+  } catch(err) {
+    const msg = String((err && err.message) || '알 수 없는 오류');
+    if (msg.toLowerCase().includes('row-level security')) {
+      Toast.error('저장 실패: RLS 정책 미적용입니다. docs/sql/dev_add_client_registration_requests.sql을 다시 실행하세요.');
+      return;
+    }
+    Toast.error('저장 실패: ' + msg);
+  }
 }
 
 async function deleteClient(id, name) {
   const session = getSession();
-  if (!Auth.canManageRefData(session)) { Toast.warning('권한이 없습니다.'); return; }
+  if (!_clientCanManageFull(session)) { Toast.warning('권한이 없습니다.'); return; }
   if (!await Confirm.delete(name)) return;
   try {
     await API.delete('clients', id);
@@ -999,11 +1174,188 @@ async function deleteClient(id, name) {
   }
 }
 
-function openClientUploadModal() { openModal('clientUploadModal'); }
+function openClientUploadModal() {
+  const session = getSession();
+  if (!_clientCanManageFull(session)) { Toast.warning('권한이 없습니다.'); return; }
+  openModal('clientUploadModal');
+}
+
+async function loadClientRequests() {
+  const session = getSession();
+  const card = document.getElementById('client-requests-card');
+  const body = document.getElementById('client-requests-body');
+  const title = document.getElementById('client-requests-title');
+  if (!card || !body) return;
+
+  const canManage = _clientCanManageFull(session);
+  const canRequest = _clientCanRequest(session);
+  if (!canRequest) {
+    card.style.display = 'none';
+    return;
+  }
+  const tableOk = await _clientEnsureRequestTable(session);
+  if (!tableOk) {
+    card.style.display = '';
+    body.innerHTML = '<tr><td colspan="9" class="table-empty"><i class="fas fa-database"></i><p>요청 테이블이 없습니다. SQL 스크립트를 적용하세요.</p></td></tr>';
+    return;
+  }
+
+  card.style.display = '';
+  if (title) title.textContent = canManage ? '고객사 등록 요청 (승인/반려)' : '내 고객사 등록 요청';
+  body.innerHTML = '<tr><td colspan="9" class="table-empty"><i class="fas fa-spinner fa-spin"></i><p>불러오는 중…</p></td></tr>';
+
+  try {
+    const params = { limit: 400, sort: 'created_at' };
+    if (canManage) {
+      params.filter = `approver1_id=eq.${session.id}`;
+    } else {
+      params.filter = `requested_by=eq.${session.id}`;
+    }
+    const r = await API.list(CLIENT_REQUEST_TABLE, params);
+    const rows = (r && r.data) ? r.data : [];
+    if (!rows.length) {
+      body.innerHTML = '<tr><td colspan="9" class="table-empty"><i class="fas fa-building"></i><p>등록 요청 데이터가 없습니다.</p></td></tr>';
+      return;
+    }
+    body.innerHTML = rows.map((row, idx) => {
+      const st = String(row.status || 'pending').toLowerCase();
+      const canHandle = canManage && _clientReqCanHandle(session, row);
+      const note = row.review_note ? ` title="${Utils.escHtml(row.review_note)}"` : '';
+      return `<tr>
+        <td>${idx + 1}</td>
+        <td><strong>${Utils.escHtml(row.company_name || '')}</strong></td>
+        <td><span class="${_clientReqStatusClass(st)}">${_clientReqStatusLabel(st)}</span></td>
+        <td>${Utils.escHtml(row.requested_by_name || '-')}</td>
+        <td>${Utils.escHtml(row.approver1_name || '-')}</td>
+        <td>${row.requested_at ? Utils.formatDate(row.requested_at) : (row.created_at ? Utils.formatDate(row.created_at) : '-')}</td>
+        <td>${Utils.escHtml(row.reviewed_by_name || '-')}</td>
+        <td>${row.reviewed_at ? Utils.formatDate(row.reviewed_at) : '-'}</td>
+        <td style="text-align:center">
+          ${canHandle
+            ? `<div style="display:flex;gap:6px;justify-content:center">
+                 <button class="btn btn-sm btn-success" onclick="approveClientRequest('${row.id}')"><i class="fas fa-check"></i> 승인</button>
+                 <button class="btn btn-sm btn-danger" onclick="rejectClientRequest('${row.id}')"><i class="fas fa-ban"></i> 반려</button>
+               </div>`
+            : `<span style="color:var(--text-muted)"${note}>${row.review_note ? '처리완료(메모)' : '-'}</span>`
+          }
+        </td>
+      </tr>`;
+    }).join('');
+  } catch (err) {
+    body.innerHTML = `<tr><td colspan="9" class="table-empty"><i class="fas fa-triangle-exclamation"></i><p>요청 목록 조회 실패: ${Utils.escHtml(err.message || '')}</p></td></tr>`;
+  }
+}
+
+async function approveClientRequest(reqId) {
+  const session = getSession();
+  if (!_clientCanManageFull(session)) { Toast.warning('권한이 없습니다.'); return; }
+  try {
+    const req = await API.get(CLIENT_REQUEST_TABLE, reqId);
+    if (!req) { Toast.warning('요청을 찾을 수 없습니다.'); return; }
+    if (String(req.status || 'pending').toLowerCase() !== 'pending') {
+      Toast.warning('이미 처리된 요청입니다.');
+      return;
+    }
+    if (!_clientReqCanHandle(session, req)) {
+      Toast.warning(`처리 권한이 없습니다. 1차 승인자(${req.approver1_name || req.approver1_id || '-'})만 승인할 수 있습니다.`);
+      return;
+    }
+    const allClients = await Master.clients();
+    const normReq = _normalizeClientName(req.company_name || '');
+    const matched = allClients.find((c) => _normalizeClientName(c.company_name || '') === normReq);
+    let approvedClientId = '';
+    let approvedClientName = '';
+    let note = '';
+
+    if (matched) {
+      approvedClientId = String(matched.id || '');
+      approvedClientName = String(matched.company_name || '');
+      note = `기존 고객사와 중복되어 신규 생성 없이 승인 처리 (${approvedClientName})`;
+    } else {
+      const created = await API.create('clients', { company_name: req.company_name || '' });
+      approvedClientId = String((created && created.id) || '');
+      approvedClientName = String((created && created.company_name) || req.company_name || '');
+      note = '요청 승인으로 고객사가 정식 등록되었습니다.';
+    }
+
+    await API.patch(CLIENT_REQUEST_TABLE, reqId, {
+      status: 'approved',
+      reviewed_by: String(session.id || ''),
+      reviewed_by_name: session.name || '',
+      reviewed_at: Date.now(),
+      review_note: note,
+      approved_client_id: approvedClientId,
+      approved_client_name: approvedClientName,
+    });
+    if (typeof createNotification === 'function') {
+      createNotification({
+        toUserId: String(req.requested_by || ''),
+        toUserName: req.requested_by_name || '',
+        fromUserId: String(session.id || ''),
+        fromUserName: session.name || '',
+        type: 'approved',
+        entryId: String(reqId || ''),
+        entrySummary: `고객사 등록 요청 · ${req.company_name || ''}`,
+        message: `${session.name || '승인자'}님이 고객사 등록 요청을 승인했습니다. (${req.company_name || ''})`,
+        targetMenu: 'master-clients',
+      });
+    }
+    Master.invalidate('clients');
+    await loadClients();
+    await loadClientRequests();
+    Toast.success('요청을 승인했습니다.');
+  } catch (err) {
+    Toast.error('승인 처리 실패: ' + (err && err.message ? err.message : '알 수 없는 오류'));
+  }
+}
+
+async function rejectClientRequest(reqId) {
+  const session = getSession();
+  if (!_clientCanManageFull(session)) { Toast.warning('권한이 없습니다.'); return; }
+  const reason = (window.prompt('반려 사유를 입력하세요. (선택)', '') || '').trim();
+  try {
+    const req = await API.get(CLIENT_REQUEST_TABLE, reqId);
+    if (!req) { Toast.warning('요청을 찾을 수 없습니다.'); return; }
+    if (String(req.status || 'pending').toLowerCase() !== 'pending') {
+      Toast.warning('이미 처리된 요청입니다.');
+      return;
+    }
+    if (!_clientReqCanHandle(session, req)) {
+      Toast.warning(`처리 권한이 없습니다. 1차 승인자(${req.approver1_name || req.approver1_id || '-'})만 반려할 수 있습니다.`);
+      return;
+    }
+    await API.patch(CLIENT_REQUEST_TABLE, reqId, {
+      status: 'rejected',
+      reviewed_by: String(session.id || ''),
+      reviewed_by_name: session.name || '',
+      reviewed_at: Date.now(),
+      review_note: reason || '반려 처리',
+      approved_client_id: '',
+      approved_client_name: '',
+    });
+    if (typeof createNotification === 'function') {
+      createNotification({
+        toUserId: String(req.requested_by || ''),
+        toUserName: req.requested_by_name || '',
+        fromUserId: String(session.id || ''),
+        fromUserName: session.name || '',
+        type: 'rejected',
+        entryId: String(reqId || ''),
+        entrySummary: `고객사 등록 요청 · ${req.company_name || ''}`,
+        message: `${session.name || '승인자'}님이 고객사 등록 요청을 반려했습니다.${reason ? ` (사유: ${reason})` : ''}`,
+        targetMenu: 'master-clients',
+      });
+    }
+    await loadClientRequests();
+    Toast.success('요청을 반려했습니다.');
+  } catch (err) {
+    Toast.error('반려 처리 실패: ' + (err && err.message ? err.message : '알 수 없는 오류'));
+  }
+}
 
 async function uploadClients() {
   const session = getSession();
-  if (!Auth.canManageRefData(session)) { Toast.warning('권한이 없습니다.'); return; }
+  if (!_clientCanManageFull(session)) { Toast.warning('권한이 없습니다.'); return; }
   const file = document.getElementById('client-upload-file').files[0];
   if (!file) { Toast.warning('파일을 선택하세요.'); return; }
 

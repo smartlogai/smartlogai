@@ -409,7 +409,9 @@ body {
   border: 1.5px solid transparent;
   white-space: nowrap;
   outline: none;
+  text-decoration: none;
 }
+.btn:hover { text-decoration: none; }
 .btn-primary {
   background: var(--primary);
   color: #fff;
@@ -889,6 +891,31 @@ textarea.form-control {
 /* 관리 버튼 hover */
 #approval-list-table button:hover {
   background: #eef2f7 !important;
+}
+
+/* ── Approval > 프로젝트 승인 테이블 전용 정렬 보정 ── */
+#approval-project-list-table {
+  table-layout: fixed;
+  width: 100%;
+}
+#approval-project-list-table thead th {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#approval-project-list-table td {
+  vertical-align: middle;
+}
+#approval-project-list-table td:nth-child(1),
+#approval-project-list-table td:nth-child(2),
+#approval-project-list-table td:nth-child(6),
+#approval-project-list-table td:nth-child(7),
+#approval-project-list-table td:nth-child(8),
+#approval-project-list-table td:nth-child(9) {
+  text-align: center;
+}
+#approval-project-list-table td:nth-child(8) {
+  font-variant-numeric: tabular-nums;
 }
 
 /* 빈 테이블 */
@@ -2006,10 +2033,77 @@ textarea.form-control {
   display: inline-flex;
   flex-direction: row;
   align-items: center;
+  justify-content: center;
   gap: 6px;
 }
 .proj-reg-list-act-row--second {
   margin-top: 1px;
+}
+
+/* 프로젝트 등록 목록: 수주참여자 버튼을 더 단정한 아이콘형으로 */
+.proj-reg-contrib-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 88px;
+  padding: 3px 8px;
+  border-color: #c7d2fe;
+  color: #374151;
+  background: #f8fafc;
+}
+.proj-reg-contrib-btn i {
+  font-size: 11px;
+  color: #4b5563;
+}
+.proj-reg-contrib-btn:hover {
+  background: #eef2ff;
+  border-color: #a5b4fc;
+  color: #1f2937;
+}
+
+/* 프로젝트 등록 목록: 코드/프로젝트명/고객사 셀 가독성 보정 */
+.proj-reg-code-cell {
+  font-variant-numeric: tabular-nums;
+}
+.proj-reg-code-empty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 600;
+}
+.proj-reg-name-cell,
+.proj-reg-client-cell {
+  padding-right: 10px;
+}
+
+.entry-daily-proj-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  border-color: #cbd5e1;
+  color: #334155;
+  background: #ffffff;
+}
+.entry-daily-proj-toggle-btn i {
+  font-size: 11px;
+  color: #475569;
+}
+.entry-daily-proj-toggle-btn.is-on {
+  border-color: #94a3b8;
+  background: #f8fafc;
+  color: #1f2937;
+}
+.entry-daily-proj-toggle-btn:hover {
+  border-color: #94a3b8;
+  background: #f1f5f9;
 }
 
 #page-project-register .proj-reg-list-filters-card {
@@ -2070,6 +2164,525 @@ textarea.form-control {
 }
 #page-project-register .proj-reg-list-filters-actions .btn i {
   font-size: 10px;
+}
+
+#page-project-register .pm-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+#page-project-register .pm-tab {
+  border: 1px solid var(--border-light);
+  background: #fff;
+  color: var(--text-secondary);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+#page-project-register .pm-tab.is-active {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+#page-project-register .pm-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 10px;
+}
+#page-project-register .pm-action-row {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+#page-project-register .pm-progress-filter-card {
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+#page-project-register .pm-progress-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  gap: 6px;
+  margin-bottom: 6px;
+}
+#page-project-register .pm-progress-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+#page-project-register .pm-progress-filter-row input[type="date"].form-control {
+  width: 156px;
+  min-height: 30px;
+  border-radius: 8px;
+}
+#page-project-register .pm-progress-filter-card .form-control {
+  min-height: 30px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  font-size: 12px;
+}
+#page-project-register .pm-progress-quick-range-group {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+#page-project-register .pm-progress-quick-range-btn {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #475569;
+  border-radius: 999px;
+  min-height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+#page-project-register .pm-progress-quick-range-btn.is-active {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+#page-project-register .pm-progress-table thead th {
+  vertical-align: middle;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+#page-project-register .pm-progress-table thead th.pm-progress-head-center {
+  text-align: center !important;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+#page-project-register .pm-progress-table tbody td {
+  vertical-align: middle;
+  line-height: 1.25;
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+#page-project-register .pm-progress-table .pm-progress-col-no,
+#page-project-register .pm-progress-table .pm-progress-col-date,
+#page-project-register .pm-progress-table .pm-progress-col-status,
+#page-project-register .pm-progress-table .pm-progress-col-pm {
+  text-align: center;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+#page-project-register .pm-progress-table .pm-progress-col-code {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.1px;
+}
+#page-project-register .pm-progress-table .pm-progress-col-name {
+  text-align: center;
+}
+#page-project-register .pm-progress-table .pm-progress-col-status {
+  white-space: nowrap;
+}
+#page-project-register .pm-progress-table .pm-progress-status-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 20px;
+  line-height: 1;
+}
+#page-project-register .pm-progress-table .pm-progress-override-mark {
+  font-size: 10px;
+  color: #b45309;
+  line-height: 1;
+}
+#page-project-register .pm-progress-table tbody td:nth-child(1),
+#page-project-register .pm-progress-table tbody td:nth-child(2),
+#page-project-register .pm-progress-table tbody td:nth-child(6),
+#page-project-register .pm-progress-table tbody td:nth-child(7) {
+  text-align: center;
+}
+#page-project-register .pm-progress-table tbody tr:hover {
+  background: #f8fafc;
+}
+@media (max-width: 1200px) {
+  #page-project-register .pm-progress-filter-grid {
+    grid-template-columns: repeat(3, minmax(120px, 1fr));
+  }
+}
+@media (max-width: 760px) {
+  #page-project-register .pm-progress-filter-grid {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+}
+#page-project-register .pm-summary-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+#page-project-register #pm-panel-invoice .data-table .pm-inv-list-col-client,
+#page-project-register #pm-panel-invoice .data-table .pm-inv-list-col-pm,
+#page-project-register #pm-panel-invoice .data-table .pm-inv-list-col-team {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#page-project-register #pm-panel-invoice .data-table .pm-inv-list-col-client {
+  max-width: 200px;
+}
+#page-project-register #pm-panel-invoice .data-table .pm-inv-list-col-team {
+  max-width: 140px;
+}
+#page-project-register #pm-panel-invoice .data-table .pm-inv-action-th {
+  border-bottom-color: var(--border-light);
+}
+#page-project-register #pm-panel-invoice .pm-inv-open-row {
+  min-width: 36px;
+  padding: 6px 10px;
+  color: var(--primary);
+}
+#page-project-register #pm-panel-invoice .pm-inv-open-row:hover {
+  color: var(--primary-dark);
+  background: var(--primary-light);
+}
+#pm-inv-detail-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.38);
+  z-index: 2490;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen {
+  position: fixed;
+  top: 64px;
+  left: calc(var(--sidebar-width) + 14px);
+  right: 14px;
+  bottom: 14px;
+  z-index: 2500;
+  background: #fff;
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  box-shadow: 0 18px 44px rgba(2, 6, 23, 0.22);
+  overflow: auto;
+  padding: 14px 14px 10px;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen > * {
+  max-width: 1280px;
+  margin-left: auto;
+  margin-right: auto;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .table-wrapper {
+  max-height: 340px;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen #pm-inv-detail-title {
+  font-size: 16px;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-detail-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin: 0 0 6px;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-detail-toolbar-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-detail-toolbar-buttons .btn {
+  height: 40px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 12px;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-hidden-meta {
+  display: none !important;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 11px 0 8px;
+  padding: 9px 12px;
+  border: 1px solid #e2e8f0;
+  border-left: 3px solid #64748b;
+  border-radius: 9px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: #0f172a;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-section-title i {
+  width: 20px;
+  text-align: center;
+  color: #475569;
+  font-size: 13px;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-section-title:first-child {
+  margin-top: 0;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-history-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 14px;
+  align-items: start;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-detail-main {
+  min-width: 0;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-detail-side {
+  position: sticky;
+  top: 0;
+  display: grid;
+  gap: 10px;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-side-card {
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 10px 12px;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-side-card h4 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #334155;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-side-card ul {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-detail-grid-main {
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 6px;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-detail-grid-note {
+  grid-template-columns: 1fr !important;
+  gap: 6px;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-filter-grid {
+  margin-bottom: 6px;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .form-group {
+  margin: 0 !important;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .form-label {
+  margin-bottom: 4px;
+  font-size: 11px;
+  line-height: 1.15;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .form-control {
+  min-height: 30px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  font-size: 12px;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-action-row {
+  margin-top: 6px;
+  margin-bottom: 6px !important;
+  gap: 6px;
+  justify-content: flex-end;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen #pm-inv-expected-pay-date + div {
+  margin-top: 3px !important;
+  font-size: 10px !important;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen #pm-inv-detail-body td,
+#pm-inv-detail-wrap.pm-inv-detail-screen #pm-inv-detail-body th {
+  font-size: 12px;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-history-table thead th {
+  vertical-align: middle;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-history-table tbody td {
+  vertical-align: middle;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  max-width: none;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-history-table .pm-inv-history-status,
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-history-table .pm-inv-history-paid,
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-history-table .pm-inv-history-issued,
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-history-table .pm-inv-history-paid-date,
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-history-table .pm-inv-history-confirmer,
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-history-table .pm-inv-history-invno,
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-history-table .pm-inv-history-outstanding {
+  text-align: center;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-history-table .pm-inv-history-issued input,
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-history-table .pm-inv-history-paid-date input {
+  width: 124px;
+  margin: 0 auto;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-history-table .pm-inv-history-status select {
+  width: 88px;
+  margin: 0 auto;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-history-table .pm-inv-history-paid input {
+  width: 104px;
+  margin: 0 auto;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-history-table .pm-inv-history-invno input {
+  width: 140px;
+  margin: 0 auto;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-detail-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  white-space: nowrap;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-detail-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-row-save-btn {
+  min-width: 0;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-icon-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-icon-btn i {
+  font-size: 12px;
+}
+#pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-detail-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.25;
+}
+@media (max-width: 1100px) {
+  #pm-inv-detail-wrap.pm-inv-detail-screen {
+    left: 10px;
+    right: 10px;
+    top: 56px;
+    bottom: 10px;
+  }
+  #pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-detail-grid-main {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+  }
+  #pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-detail-grid-note {
+    grid-template-columns: 1fr !important;
+  }
+  #pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-detail-layout {
+    grid-template-columns: 1fr;
+  }
+  #pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-detail-side {
+    position: static;
+  }
+  #pm-inv-detail-wrap.pm-inv-detail-screen .pm-inv-detail-toolbar-buttons .btn {
+    height: 36px;
+    padding: 0 12px;
+  }
+}
+#page-project-register .pm-kpi-card {
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 12px;
+}
+#page-project-register .pm-kpi-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+#page-project-register .pm-kpi-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+#page-project-register .pm-kpi-sub {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+#page-project-dashboard .pm-kpi-card {
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 12px;
+}
+#page-project-dashboard .pm-kpi-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+#page-project-dashboard .pm-kpi-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+#page-project-dashboard .pm-kpi-sub {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+#page-project-register .pm-tc-table input[type="number"] {
+  width: 100%;
+  min-height: 28px;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 12px;
+  text-align: right;
+}
+#page-project-register .pm-tc-table input[type="text"] {
+  width: 100%;
+  min-height: 28px;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+#page-project-register .pm-tc-table select {
+  width: 100%;
+  min-height: 28px;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  font-size: 12px;
+}
+@media (max-width: 980px) {
+  #page-project-register .pm-filter-grid {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  #page-project-register .pm-filter-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* 프로젝트 등록 청구표: data-table 기본 ellipsis·max-width:0 제거 (조건 textarea 표시) */

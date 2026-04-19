@@ -429,16 +429,17 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
 // ─────────────────────────────────────────────
 const PAGE_TITLES = {
   dashboard: 'Dashboard',
+  'project-dashboard': '프로젝트 대시보드',
   'entry-new': 'New Entry',
   'entry-new-hourly': '업무 등록 (시간제)',
-  'entry-new-daily': '업무 등록 (일일 · 분리모듈)',
+  'entry-new-daily': 'Time Entry',
   'my-entries': 'My Time Sheet',
   'my-entries-hourly': 'My Time Sheet',
-  'my-entries-daily': 'Daily Time Sheet (분리모듈)',
-  'project-deliverables': '프로젝트 산출물',
+  'my-entries-daily': 'My Time Sheet',
+  'project-deliverables': 'Project Outputs',
   approval: 'Approval',
   analysis: 'Analysis',
-  archive: '자문 자료실',
+  archive: 'Advisory Library',
   'master-teams': 'Teams',
   'master-clients': 'Clients',
   'master-categories': 'Categories',
@@ -448,17 +449,19 @@ const PAGE_TITLES = {
   'master-csteams': '고객지원팀 관리',
   users: 'Staff 관리',
   'project-register': '프로젝트 등록',
+  'project-management': 'Project Management',
 };
 
 // page init 함수 매핑
 const PAGE_INIT_MAP = {
   'dashboard': 'init_dashboard',
+  'project-dashboard': 'init_project_dashboard',
   'entry-new': 'init_entry_new',
   'entry-new-hourly': 'init_entry_new',
-  'entry-new-daily': 'init_entry_new_daily',
+  'entry-new-daily': 'init_entry_new',
   'my-entries': 'init_my_entries',
   'my-entries-hourly': 'init_my_entries',
-  'my-entries-daily': 'init_my_entries_daily',
+  'my-entries-daily': 'init_my_entries',
   'project-deliverables': 'init_project_deliverables',
   'approval': 'init_approval',
   'analysis': 'init_analysis',
@@ -472,6 +475,7 @@ const PAGE_INIT_MAP = {
   'master-csteams': 'init_master_csteams',
   'users': 'init_users',
   'project-register': 'init_project_register',
+  'project-management': 'init_project_register',
 };
 
 // ─────────────────────────────────────────────
@@ -479,20 +483,47 @@ const PAGE_INIT_MAP = {
 // Settings 메뉴(master-*, users) 진입 시에만 동적 로드 (초기 81KB 절감)
 // ─────────────────────────────────────────────
 const _LAZY_SCRIPTS = {
-  'master-teams'      : 'js/master.js?v=20260405b',
-  'master-clients'    : 'js/master.js?v=20260405b',
-  'master-categories' : 'js/master.js?v=20260405b',
+  'master-teams'      : 'js/master.js?v=20260419clientApproverRouting1',
+  'master-clients'    : 'js/master.js?v=20260419clientApproverRouting1',
+  'master-categories' : 'js/master.js?v=20260419clientApproverRouting1',
   'master-project-codes': 'js/project-code-master.js?v=20260416pcmAdminOnly1',
-  'master-org'        : 'js/master.js?v=20260405b',
-  'master-departments': 'js/master.js?v=20260405b',
-  'master-csteams'    : 'js/master.js?v=20260405b',
+  'master-org'        : 'js/master.js?v=20260419clientApproverRouting1',
+  'master-departments': 'js/master.js?v=20260419clientApproverRouting1',
+  'master-csteams'    : 'js/master.js?v=20260419clientApproverRouting1',
   'users'             : 'js/users.js?v=20260416tsopt1',
-  'project-register'  : 'js/project-register.js?v=20260417realUploadContractModal1',
+  'project-register'  : 'js/project-register.js?v=20260419projectMgmtAllIn4',
+  'project-management': 'js/project-register.js?v=20260419projectMgmtAllIn4',
 };
 const _lazyLoaded = {};  // 이미 로드된 파일 추적
 
 function _lazyLoadScript(src) {
   if (_lazyLoaded[src]) return _lazyLoaded[src];
+  // 다른 경로(예: approval.js)에서 이미 project-register.js가 로드된 경우
+  // 동일 스크립트를 다시 주입하면 전역 let 재선언 오류가 발생하므로 즉시 재사용한다.
+  if (src.includes('project-register.js')) {
+    if (typeof window !== 'undefined' && window.SmartlogProjReg) {
+      _lazyLoaded[src] = Promise.resolve();
+      return _lazyLoaded[src];
+    }
+    const existedProjReg = document.querySelector('script[src*="project-register.js"]');
+    if (existedProjReg) {
+      _lazyLoaded[src] = new Promise((resolve, reject) => {
+        const done = () => {
+          if (window.SmartlogProjReg) resolve();
+          else reject(new Error('project-register already injected but not initialized'));
+        };
+        if (window.SmartlogProjReg) {
+          resolve();
+          return;
+        }
+        existedProjReg.addEventListener('load', done, { once: true });
+        existedProjReg.addEventListener('error', () => reject(new Error('기존 project-register 스크립트 로드 실패')), { once: true });
+        // 이미 로드 완료되었는데 SmartlogProjReg가 아직 안 보이면 짧게 대기 후 재확인
+        setTimeout(done, 150);
+      });
+      return _lazyLoaded[src];
+    }
+  }
   _lazyLoaded[src] = new Promise((resolve, reject) => {
     const s = document.createElement('script');
     s.src = src;
