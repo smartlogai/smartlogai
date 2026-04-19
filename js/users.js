@@ -942,3 +942,73 @@ async function downloadUserTemplate() {
   xlsxDownload(wb, '직원_업로드_양식.xlsx');
   Toast.info('양식을 다운로드했습니다. D열 권한: staff/manager/director/top_mgr/admin, E열 승인자 이메일을 입력하세요.');
 }
+
+// ─────────────────────────────────────────────
+// 직원 데이터 다운로드 (실데이터)
+// ─────────────────────────────────────────────
+async function exportUsersToExcel() {
+  const session = getSession();
+  if (!Auth.canManageMaster(session)) {
+    Toast.warning('직원 관리 권한이 없습니다.');
+    return;
+  }
+  try {
+    Master.invalidate('users');
+    const users = await Master.users();
+    const rows = (users || []).filter(u => u && u.deleted !== true);
+
+    if (typeof XLSX === 'undefined') await LibLoader.load('xlsx');
+    const wb = XLSX.utils.book_new();
+
+    const headers = [
+      '이름', '이메일', '권한',
+      '사업부', '본부', '고객지원팀',
+      '1차승인자', '2차승인자',
+      '활성여부(Y/N)', '타임시트대상',
+      '시간제(Y/N)', '일일(Y/N)',
+    ];
+    const body = rows.map((u) => {
+      const role = String(u.role || '');
+      const isStaffLike = role === 'staff' || role === 'manager';
+      const isActive = u.is_active === false ? 'N' : 'Y';
+      const tsTarget = isStaffLike
+        ? ((u.is_timesheet_target === false || u.is_timesheet_target === 'false') ? '비대상' : '대상')
+        : '해당없음';
+      const tsHourly = isStaffLike
+        ? ((u.timesheet_hourly === false || u.timesheet_hourly === 'false') ? 'N' : 'Y')
+        : '';
+      const tsDaily = isStaffLike
+        ? ((u.timesheet_daily === true || u.timesheet_daily === 'true') ? 'Y' : 'N')
+        : '';
+      return [
+        u.name || '',
+        u.email || '',
+        role,
+        u.dept_name || '',
+        u.hq_name || '',
+        u.cs_team_name || '',
+        u.approver_name || '',
+        u.reviewer2_name || '',
+        isActive,
+        tsTarget,
+        tsHourly,
+        tsDaily,
+      ];
+    });
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...body]);
+    ws['!cols'] = [
+      { wch: 12 }, { wch: 28 }, { wch: 12 },
+      { wch: 12 }, { wch: 14 }, { wch: 14 },
+      { wch: 14 }, { wch: 14 },
+      { wch: 13 }, { wch: 12 }, { wch: 10 }, { wch: 10 },
+    ];
+    XLSX.utils.book_append_sheet(wb, ws, '직원데이터');
+
+    const d = new Date();
+    const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    await xlsxDownload(wb, `직원관리_데이터_${ymd}.xlsx`);
+    Toast.success(`직원 데이터 ${rows.length}건을 다운로드했습니다.`);
+  } catch (err) {
+    Toast.error('직원 데이터 다운로드 실패: ' + (err?.message || ''));
+  }
+}

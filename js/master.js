@@ -1665,6 +1665,87 @@ async function downloadCategoryTemplate() {
   xlsxDownload(wb, '업무카테고리_업로드_양식.xlsx');
 }
 
+async function exportCategoriesToExcel() {
+  const session = getSession();
+  if (!Auth.canManageRefData(session)) {
+    Toast.warning('기준정보 관리 권한이 없습니다.');
+    return;
+  }
+  try {
+    Master.invalidate('categories');
+    Master.invalidate('subcategories');
+    const [cats, subs] = await Promise.all([Master.categories(), Master.subcategories()]);
+
+    if (typeof XLSX === 'undefined') await LibLoader.load('xlsx');
+    const wb = XLSX.utils.book_new();
+
+    const sortedCats = [...(cats || [])].sort((a, b) => {
+      const oa = Number(a?.sort_order ?? 0);
+      const ob = Number(b?.sort_order ?? 0);
+      if (oa !== ob) return oa - ob;
+      return String(a?.category_name || '').localeCompare(String(b?.category_name || ''));
+    });
+    const subByCat = new Map();
+    for (const s of (subs || [])) {
+      const key = String(s?.category_id || '');
+      if (!subByCat.has(key)) subByCat.set(key, []);
+      subByCat.get(key).push(s);
+    }
+    for (const [key, arr] of subByCat.entries()) {
+      arr.sort((a, b) => {
+        const oa = Number(a?.sort_order ?? 0);
+        const ob = Number(b?.sort_order ?? 0);
+        if (oa !== ob) return oa - ob;
+        return String(a?.sub_category_name || '').localeCompare(String(b?.sub_category_name || ''));
+      });
+      subByCat.set(key, arr);
+    }
+
+    const headers = ['대분류', '유형(client/internal)', '대분류정렬순서', '소분류', '소분류정렬순서'];
+    const body = [];
+    sortedCats.forEach((c) => {
+      const cid = String(c?.id || '');
+      const catSubs = subByCat.get(cid) || [];
+      if (!catSubs.length) {
+        body.push([
+          c?.category_name || '',
+          c?.category_type || 'client',
+          Number(c?.sort_order ?? 0),
+          '',
+          '',
+        ]);
+        return;
+      }
+      catSubs.forEach((s) => {
+        body.push([
+          c?.category_name || '',
+          c?.category_type || 'client',
+          Number(c?.sort_order ?? 0),
+          s?.sub_category_name || '',
+          Number(s?.sort_order ?? 0),
+        ]);
+      });
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...body]);
+    ws['!cols'] = [
+      { wch: 20 },
+      { wch: 22 },
+      { wch: 14 },
+      { wch: 24 },
+      { wch: 14 },
+    ];
+    XLSX.utils.book_append_sheet(wb, ws, '업무분류데이터');
+
+    const d = new Date();
+    const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    await xlsxDownload(wb, `업무분류_데이터_${ymd}.xlsx`);
+    Toast.success(`업무분류 데이터 ${body.length}행을 다운로드했습니다.`);
+  } catch (err) {
+    Toast.error('업무분류 데이터 다운로드 실패: ' + (err?.message || ''));
+  }
+}
+
 // ─────────────────────────────────────────────
 // 유틸: HTML 특수문자 이스케이프 (인라인 이벤트용)
 // ─────────────────────────────────────────────
