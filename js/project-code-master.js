@@ -47,11 +47,10 @@ function _pcmFillMainFilter() {
   if (cur && mains.includes(cur)) sel.value = cur;
 }
 
-function renderProjectCodeTypes() {
-  const tbody = document.getElementById('project-code-types-body');
+/** 화면 필터·검색과 동일한 정렬된 행 (목록 렌더·엑셀보내기 공용) */
+function _pcmGetFilteredRows() {
   const kw = (document.getElementById('project-code-search')?.value || '').trim().toLowerCase();
   const mainF = document.getElementById('project-code-filter-main')?.value || '';
-
   let rows = _pcmRows.slice();
   if (mainF) rows = rows.filter((r) => r.main_category === mainF);
   if (kw) {
@@ -65,6 +64,12 @@ function renderProjectCodeTypes() {
     if (mc !== 0) return mc;
     return String(a.sub_code || '').localeCompare(String(b.sub_code || ''));
   });
+  return rows;
+}
+
+function renderProjectCodeTypes() {
+  const tbody = document.getElementById('project-code-types-body');
+  const rows = _pcmGetFilteredRows();
 
   if (!rows.length) {
     tbody.innerHTML = '<tr><td colspan="8" class="table-empty"><i class="fas fa-code"></i><p>등록된 프로젝트 코드 유형이 없습니다.</p></td></tr>';
@@ -279,6 +284,37 @@ async function downloadProjectCodeTemplate() {
   await xlsxDownload(wb, '프로젝트코드_DB_업로드_양식.xlsx');
 }
 
+/** 현재 목록(필터·검색 적용)을 업로드와 동일한 열 구조로 엑셀 저장 */
+async function downloadProjectCodeTypesExport() {
+  const session = getSession();
+  if (!Auth.isAdmin(session)) {
+    Toast.warning('프로젝트 코드보내기는 관리자만 사용할 수 있습니다.');
+    return;
+  }
+  const rows = _pcmGetFilteredRows();
+  if (!rows.length) {
+    Toast.warning('보낼 데이터가 없습니다. 새로고침 후 다시 시도하세요.');
+    return;
+  }
+  if (typeof XLSX === 'undefined') await LibLoader.load('xlsx');
+  const aoa = [
+    ['대분류', '대분류Code', '소분류', '소분류Code', '프로젝트명'],
+    ...rows.map((r) => [
+      r.main_category || '',
+      r.main_code || '',
+      r.sub_category || '',
+      r.sub_code || '',
+      r.project_name_en || '',
+    ]),
+  ];
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  XLSX.utils.book_append_sheet(wb, ws, '프로젝트코드');
+  const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  await xlsxDownload(wb, `프로젝트코드_보내기_${day}.xlsx`);
+  Toast.success(`엑셀 ${rows.length}건을 저장했습니다.`);
+}
+
 window.init_master_project_codes = init_master_project_codes;
 window.loadProjectCodeTypes = loadProjectCodeTypes;
 window.renderProjectCodeTypes = renderProjectCodeTypes;
@@ -288,3 +324,4 @@ window.deleteProjectCodeType = deleteProjectCodeType;
 window.openProjectCodeUploadModal = openProjectCodeUploadModal;
 window.uploadProjectCodeTypes = uploadProjectCodeTypes;
 window.downloadProjectCodeTemplate = downloadProjectCodeTemplate;
+window.downloadProjectCodeTypesExport = downloadProjectCodeTypesExport;
