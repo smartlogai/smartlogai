@@ -14,7 +14,7 @@ let _approvalModalAtts = []; // 승인 모달 첨부파일 임시 저장 (index 
 
 /** Approval 상단 탭: timesheet | project (main.js lazy 버전과 맞출 것) */
 let _approvalMainTab = 'timesheet';
-const APPROVAL_PROJ_REG_SCRIPT_VER = '20260420approvalFix1';
+const APPROVAL_PROJ_REG_SCRIPT_VER = '20260420approvalFix2';
 
 function _approvalApplyTabCountLabels(counts) {
   const data = counts || window.__approvalBadgeSplit || {};
@@ -806,7 +806,16 @@ async function init_approval() {
 
   const pjTabBtn = document.getElementById('approval-tab-project');
   if (pjTabBtn) {
-    pjTabBtn.style.display = Auth.canManageProjectRegister(session) ? '' : 'none';
+    // 프로젝트 승인 탭: 승인/검토 권한자는 기본 노출
+    const canProjectApproval = !!(
+      Auth.canManageProjectRegister(session) ||
+      Auth.canApprove1st(session) ||
+      Auth.canApprove2nd(session) ||
+      Auth.canViewDeptScope(session) ||
+      Auth.isTopMgr(session) ||
+      Auth.isAdmin(session)
+    );
+    pjTabBtn.style.display = canProjectApproval ? '' : 'none';
   }
   try {
     await updateApprovalBadge(session, true);
