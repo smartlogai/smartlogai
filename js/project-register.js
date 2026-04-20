@@ -113,7 +113,14 @@ function _projRegYymmToMonthValue(yymm) {
 }
 
 function _projRegIsOwner(session, r) {
-  return r && String(r.created_by || '') === String(session.id || '');
+  if (!r || !session) return false;
+  const creatorId = String(r.created_by || '').trim();
+  if (!creatorId) return false;
+  const myIds = new Set([
+    String(session.id || '').trim(),
+    String(session.user_id || '').trim(),
+  ].filter(Boolean));
+  return myIds.has(creatorId);
 }
 
 async function _projRegRegistrantSnapshot(session) {
@@ -193,10 +200,14 @@ function _projRegCanApproveRow(session, row) {
   if (session && session.role === 'admin') return _projRegNormStatus(row) === 'pending';
   const step = _projRegPendingStep(row);
   if (!step) return false;
-  const sid = String(session.id || '');
+  const myIds = new Set([
+    String(session && session.id || '').trim(),
+    String(session && session.user_id || '').trim(),
+  ].filter(Boolean));
+  if (!myIds.size) return false;
   const eff = _projRegEffectiveApprovers(row);
   const targetId = String((eff.chain && eff.chain[step - 1]) || '');
-  if (targetId) return sid === targetId;
+  if (targetId) return myIds.has(targetId);
   return false;
 }
 
@@ -1533,16 +1544,24 @@ function projRegRenderContractDocModal() {
       ? `<a class="btn btn-sm btn-outline" href="${Utils.escHtml(d.fileUrl)}" target="_blank" rel="noopener noreferrer">열기</a>`
       : '<span style="font-size:12px;color:var(--text-muted)">URL 없음</span>';
     const unlinkBtn = `<button type="button" class="btn btn-sm btn-danger" onclick="projRegUnlinkContractDoc('${Utils.escHtml(d.projectId)}','${d.kind}')" title="문서 연결 해제">연결해제</button>`;
+    const escCode = Utils.escHtml(code);
+    const escPn = Utils.escHtml(pn);
+    const escCl = Utils.escHtml(cl);
+    const escFn = Utils.escHtml(d.fileName || '-');
+    const titleCode = Utils.escHtml(String(code));
+    const titlePn = Utils.escHtml(String(pn));
+    const titleCl = Utils.escHtml(String(cl));
+    const titleFn = Utils.escHtml(String(d.fileName || ''));
     return `<tr>
       <td>${i + 1}</td>
       <td><span class="badge badge-gray">${Utils.escHtml(d.kindLabel)}</span></td>
-      <td><strong>${Utils.escHtml(code)}</strong></td>
-      <td>${Utils.escHtml(pn)}</td>
-      <td>${Utils.escHtml(cl)}</td>
-      <td>${Utils.escHtml(d.fileName || '-')}</td>
+      <td class="pm-contract-ellipsis" title="${titleCode}"><strong>${escCode}</strong></td>
+      <td class="pm-contract-ellipsis" title="${titlePn}">${escPn}</td>
+      <td class="pm-contract-ellipsis" title="${titleCl}">${escCl}</td>
+      <td class="pm-contract-ellipsis" title="${titleFn}">${escFn}</td>
       <td style="font-size:12px">${Utils.escHtml(String(upAt))}</td>
       <td style="font-size:12px">${Utils.escHtml(d.createdByName || '-')}</td>
-      <td style="text-align:center;white-space:nowrap">${openBtn} ${unlinkBtn}</td>
+      <td class="pm-contract-doc-td-actions" style="text-align:center;white-space:nowrap">${openBtn} ${unlinkBtn}</td>
     </tr>`;
   }).join('');
 }

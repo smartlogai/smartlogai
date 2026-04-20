@@ -1026,6 +1026,136 @@ const Utils = {
     const d = new Date();
     return d.toISOString().substring(0,10);
   },
+
+  /** HTML date 입력 허용 범위 (연도 4자리·달력 UI 안정화용 min/max와 동일) */
+  DATE_INPUT_MIN: '1900-01-01',
+  DATE_INPUT_MAX: '2100-12-31',
+  MONTH_INPUT_MIN: '1900-01',
+  MONTH_INPUT_MAX: '2100-12',
+
+  /** YYYY-MM-DD 검증·정규화 (불가면 빈 문자열) */
+  normalizeISODateString(v) {
+    const s = String(v || '').trim();
+    if (!s) return '';
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return '';
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+    if (y < 1900 || y > 2100) return '';
+    const dt = new Date(y, mo - 1, d);
+    if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return '';
+    return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  },
+
+  /** YYYY-MM (month input) */
+  normalizeISOMonthString(v) {
+    const s = String(v || '').trim();
+    if (!s) return '';
+    const m = s.match(/^(\d{4})-(\d{2})$/);
+    if (!m) return '';
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    if (y < 1900 || y > 2100 || mo < 1 || mo > 12) return '';
+    return `${y}-${String(mo).padStart(2, '0')}`;
+  },
+
+  /** datetime-local (YYYY-MM-DDTHH:mm) */
+  normalizeDatetimeLocalString(v) {
+    const s = String(v || '').trim();
+    if (!s) return '';
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+    if (!m) return '';
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+    const hh = Number(m[4]);
+    const mm = Number(m[5]);
+    if (y < 1900 || y > 2100) return '';
+    if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return '';
+    const dt = new Date(y, mo - 1, d, hh, mm, 0, 0);
+    if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return '';
+    if (dt.getHours() !== hh || dt.getMinutes() !== mm) return '';
+    return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+  },
+
+  applyDateInputConstraints(el) {
+    if (!el || el.tagName !== 'INPUT') return;
+    const t = el.type;
+    if (t === 'date') {
+      if (!el.getAttribute('min')) el.setAttribute('min', Utils.DATE_INPUT_MIN);
+      if (!el.getAttribute('max')) el.setAttribute('max', Utils.DATE_INPUT_MAX);
+    } else if (t === 'month') {
+      if (!el.getAttribute('min')) el.setAttribute('min', Utils.MONTH_INPUT_MIN);
+      if (!el.getAttribute('max')) el.setAttribute('max', Utils.MONTH_INPUT_MAX);
+    } else if (t === 'datetime-local') {
+      if (!el.getAttribute('min')) el.setAttribute('min', '1900-01-01T00:00');
+      if (!el.getAttribute('max')) el.setAttribute('max', '2100-12-31T23:59');
+    }
+  },
+
+  normalizeDateInputElement(el) {
+    if (!el || el.tagName !== 'INPUT') return;
+    const t = el.type;
+    if (t === 'date') {
+      const v = el.value;
+      if (!v) return;
+      const n = Utils.normalizeISODateString(v);
+      if (n !== v) el.value = n;
+      if (!n) el.value = '';
+      return;
+    }
+    if (t === 'month') {
+      const v = el.value;
+      if (!v) return;
+      const n = Utils.normalizeISOMonthString(v);
+      if (n !== v) el.value = n;
+      if (!n) el.value = '';
+      return;
+    }
+    if (t === 'datetime-local') {
+      const v = el.value;
+      if (!v) return;
+      const n = Utils.normalizeDatetimeLocalString(v);
+      if (n !== v) el.value = n;
+      if (!n) el.value = '';
+    }
+  },
+
+  /** 전역: 기존·동적 삽입 날짜 필드에 min/max·검증(연도 4자리·유효일) */
+  initDateInputControls() {
+    const applyAll = (root) => {
+      if (!root || !root.querySelectorAll) return;
+      root.querySelectorAll('input[type="date"],input[type="month"],input[type="datetime-local"]').forEach((el) => {
+        Utils.applyDateInputConstraints(el);
+      });
+    };
+    applyAll(document);
+
+    const mo = new MutationObserver((muts) => {
+      for (const rec of muts) {
+        rec.addedNodes.forEach((node) => {
+          if (node.nodeType !== 1) return;
+          const tag = node.tagName;
+          if (tag === 'INPUT') {
+            const t = node.type;
+            if (t === 'date' || t === 'month' || t === 'datetime-local') Utils.applyDateInputConstraints(node);
+          }
+          applyAll(node);
+        });
+      }
+    });
+    mo.observe(document.documentElement, { childList: true, subtree: true });
+
+    const onCommit = (e) => {
+      const el = e.target;
+      if (!el || el.tagName !== 'INPUT') return;
+      if (!['date', 'month', 'datetime-local'].includes(el.type)) return;
+      Utils.normalizeDateInputElement(el);
+    };
+    document.addEventListener('change', onCommit, true);
+    document.addEventListener('blur', onCommit, true);
+  },
 };
 
 // ─────────────────────────────────────────────
@@ -2107,6 +2237,18 @@ const GlobalBusy = (() => {
 //   admin 계정으로 로그인 후 브라우저 콘솔에서:
 //   migrateDirectorsToAdmin() 실행
 // ─────────────────────────────────────────────
+(function _bootDateInputControls() {
+  function run() {
+    try {
+      if (typeof Utils !== 'undefined' && Utils.initDateInputControls) Utils.initDateInputControls();
+    } catch (e) {
+      console.warn('[date-inputs] init failed', e);
+    }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+})();
+
 async function migrateDirectorsToAdmin() {
   const TARGET_NAMES = ['하두식', '박주경', '안만복'];
   const session = getSession();

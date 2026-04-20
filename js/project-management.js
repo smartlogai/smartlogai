@@ -2101,7 +2101,14 @@ async function loadProjectMgmtCosts() {
 async function loadProjectMgmtContracts() {
   const body = document.getElementById('pm-contract-body');
   const summary = document.getElementById('pm-contract-summary');
+  const table = document.getElementById('pm-contract-table');
   if (!body) return;
+  if (table) {
+    // 강제 레이아웃 적용: CSS 캐시/우선순위와 무관하게 프로젝트코드 가시성 확보
+    table.style.tableLayout = 'fixed';
+    table.style.width = '1386px';
+    table.style.minWidth = '1386px';
+  }
   const session = getSession ? getSession() : null;
   try {
     const rows = await API.listAllPages('registered_projects', { limit: 500, maxPages: 20, sort: 'updated_at' });
@@ -2113,6 +2120,16 @@ async function loadProjectMgmtContracts() {
       return;
     }
     let missingCount = 0;
+    const fileCellTd = (name, url) => {
+      if (!name) return '<td class="pm-contract-td-file" style="text-align:center"><span style="color:var(--text-muted)">-</span></td>';
+      const n = String(name);
+      const t = _pmEsc(n);
+      const hasUrl = !!String(url || '').trim();
+      const inner = hasUrl
+        ? `<a href="${_pmEsc(url)}" target="_blank" rel="noopener noreferrer" class="pm-contract-file-pill">첨부</a>`
+        : `<span class="pm-contract-file-pill" style="cursor:default;background:#f1f5f9;color:#64748b;border-color:#cbd5e1">첨부</span>`;
+      return `<td class="pm-contract-td-file" style="text-align:center" title="${t}">${inner}</td>`;
+    };
     body.innerHTML = list.map((r, i) => {
       const contractName = String(r.contract_file_name || '').trim();
       const contractUrl = String(r.contract_file_url || '').trim();
@@ -2125,24 +2142,36 @@ async function loadProjectMgmtContracts() {
       const statusTxt = isMissing ? '누락' : '정상';
       const statusColor = isMissing ? '#b45309' : '#047857';
       const statusBg = isMissing ? '#fef3c7' : '#d1fae5';
-      const fileCell = (name, url) => {
-        if (!name) return '<span style="color:var(--text-muted)">-</span>';
-        if (!url) return `<span title="${_pmEsc(name)}">${_pmEsc(name)}</span>`;
-        return `<a href="${_pmEsc(url)}" target="_blank" rel="noopener noreferrer" title="${_pmEsc(name)}">${_pmEsc(name)}</a>`;
-      };
+      const codeT = _pmEsc(String(r.project_code || ''));
+      const nameT = _pmEsc(String(r.project_name || ''));
+      const clientT = _pmEsc(String(r.client_name || ''));
       return `<tr>
-        <td style="text-align:center">${i + 1}</td>
-        <td>${_pmEsc(r.project_code || '-')}</td>
-        <td title="${_pmEsc(r.project_name || '')}">${_pmEsc(r.project_name || '-')}</td>
-        <td title="${_pmEsc(r.client_name || '')}">${_pmEsc(r.client_name || '-')}</td>
-        <td style="text-align:center">
+        <td class="pm-contract-td-no" style="text-align:center;width:44px;min-width:44px;max-width:52px">${i + 1}</td>
+        <td class="pm-contract-code-cell" style="width:560px;min-width:560px;max-width:none;overflow:visible;text-overflow:clip;white-space:normal;word-break:break-all;font-variant-numeric:tabular-nums;letter-spacing:0.01em" title="${codeT}">${_pmEsc(r.project_code || '-')}</td>
+        <td class="pm-contract-ellipsis" style="width:240px;min-width:240px;max-width:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${nameT}">${_pmEsc(r.project_name || '-')}</td>
+        <td class="pm-contract-ellipsis" style="width:220px;min-width:220px;max-width:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${clientT}">${_pmEsc(r.client_name || '-')}</td>
+        <td class="pm-contract-td-status" style="text-align:center;width:72px;min-width:72px;max-width:88px">
           <span style="display:inline-flex;align-items:center;justify-content:center;min-width:56px;padding:2px 8px;border-radius:999px;background:${statusBg};color:${statusColor};font-size:11px;font-weight:700">${statusTxt}</span>
         </td>
-        <td>${fileCell(contractName, contractUrl)}</td>
-        <td>${fileCell(evidenceName, evidenceUrl)}</td>
-        <td>${fileCell(routeName, routeUrl)}</td>
+        ${fileCellTd(contractName, contractUrl)}
+        ${fileCellTd(evidenceName, evidenceUrl)}
+        ${fileCellTd(routeName, routeUrl)}
       </tr>`;
     }).join('');
+    // 최후 보정: 코드 열은 말줄임을 절대 사용하지 않음 (스타일 충돌/캐시 우회)
+    Array.from(body.querySelectorAll('tr')).forEach((tr) => {
+      const codeTd = tr.children && tr.children[1];
+      if (!codeTd) return;
+      codeTd.classList.add('pm-contract-code-cell');
+      codeTd.style.setProperty('overflow', 'visible', 'important');
+      codeTd.style.setProperty('text-overflow', 'clip', 'important');
+      codeTd.style.setProperty('white-space', 'normal', 'important');
+      codeTd.style.setProperty('word-break', 'break-all', 'important');
+      codeTd.style.setProperty('max-width', 'none', 'important');
+      codeTd.style.setProperty('width', '560px', 'important');
+      codeTd.style.setProperty('min-width', '560px', 'important');
+      codeTd.style.setProperty('line-height', '1.3', 'important');
+    });
     if (summary) summary.textContent = `계약서 누락 ${missingCount}건 / 전체 ${list.length}건`;
   } catch (e) {
     console.error(e);

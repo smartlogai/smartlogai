@@ -491,8 +491,8 @@ const _LAZY_SCRIPTS = {
   'master-departments': 'js/master.js?v=20260419clientApproverRouting1',
   'master-csteams'    : 'js/master.js?v=20260419clientApproverRouting1',
   'users'             : 'js/users.js?v=20260416tsopt1',
-  'project-register'  : 'js/project-register.js?v=20260419projectMgmtAllIn4',
-  'project-management': 'js/project-register.js?v=20260419projectMgmtAllIn4',
+  'project-register'  : 'js/project-register.js?v=20260420approvalFix1',
+  'project-management': 'js/project-register.js?v=20260420approvalFix1',
 };
 const _lazyLoaded = {};  // 이미 로드된 파일 추적
 

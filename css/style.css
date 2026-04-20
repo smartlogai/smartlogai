@@ -54,6 +54,22 @@ body {
   line-height: 1.5;
 }
 
+/* 네이티브 날짜·시간: 폭이 좁으면 Chromium에서 연도 필드가 6자리처럼 겹쳐 보일 수 있음 */
+input[type="date"],
+input[type="datetime-local"] {
+  min-width: 10.5rem;
+  font-variant-numeric: tabular-nums;
+}
+input[type="month"] {
+  min-width: 8.75rem;
+  font-variant-numeric: tabular-nums;
+}
+input[type="date"]::-webkit-datetime-edit-year-field,
+input[type="datetime-local"]::-webkit-datetime-edit-year-field {
+  min-width: 4.5ch;
+  padding-inline: 1px;
+}
+
 /* ============================================
    레이아웃
    ============================================ */
@@ -646,6 +662,167 @@ textarea.form-control {
   text-overflow: ellipsis;
   max-width: 0;   /* table-layout:fixed 에서 ellipsis 동작 필수 */
 }
+
+/* 프로젝트관리 — 계약서 관리
+   근본원인: .data-table td { max-width:0 } 가 fixed 레이아웃에서 col 너비를 무력화·균등분배시킴.
+   → 이 테이블만 max-width 해제(!important) + th/td에 열별 width·min-width 명시 */
+#page-project-register #pm-contract-table {
+  table-layout: fixed;
+  width: 1386px !important;
+  min-width: 1386px !important;
+}
+#page-project-register #pm-contract-table > thead > tr > th,
+#page-project-register #pm-contract-table > tbody > tr > td {
+  max-width: none !important;
+  box-sizing: border-box;
+}
+#page-project-register #pm-contract-table > thead > tr > th:nth-child(1),
+#page-project-register #pm-contract-table > tbody > tr > td:nth-child(1) {
+  width: 44px;
+  min-width: 44px;
+  max-width: 52px;
+}
+/* 프로젝트코드: 식별자 전체가 보이도록 최소 폭 확보 (말줄임 최소화) */
+#page-project-register #pm-contract-table > thead > tr > th:nth-child(2),
+#page-project-register #pm-contract-table > tbody > tr > td:nth-child(2) {
+  width: 560px;
+  min-width: 560px;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-all;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+#page-project-register #pm-contract-table > thead > tr > th:nth-child(3),
+#page-project-register #pm-contract-table > tbody > tr > td:nth-child(3) {
+  width: 240px;
+  min-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#page-project-register #pm-contract-table > thead > tr > th:nth-child(4),
+#page-project-register #pm-contract-table > tbody > tr > td:nth-child(4) {
+  width: 220px;
+  min-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#page-project-register #pm-contract-table > thead > tr > th:nth-child(5),
+#page-project-register #pm-contract-table > tbody > tr > td:nth-child(5) {
+  width: 72px;
+  min-width: 72px;
+  max-width: 88px;
+}
+#page-project-register #pm-contract-table > thead > tr > th:nth-child(6),
+#page-project-register #pm-contract-table > tbody > tr > td:nth-child(6) {
+  width: 80px;
+  min-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#page-project-register #pm-contract-table > thead > tr > th:nth-child(7),
+#page-project-register #pm-contract-table > tbody > tr > td:nth-child(7),
+#page-project-register #pm-contract-table > thead > tr > th:nth-child(8),
+#page-project-register #pm-contract-table > tbody > tr > td:nth-child(8) {
+  width: 80px;
+  min-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#page-project-register #pm-contract-table > thead > tr > th:nth-child(8),
+#page-project-register #pm-contract-table > tbody > tr > td:nth-child(8) {
+  width: 90px;
+  min-width: 90px;
+}
+#page-project-register #pm-contract-table > tbody > tr > td.pm-contract-td-no,
+#page-project-register #pm-contract-table > tbody > tr > td.pm-contract-td-status {
+  overflow: visible;
+  text-overflow: clip;
+}
+#page-project-register #pm-contract-table > tbody > tr > td.pm-contract-code-cell {
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+  word-break: break-all !important;
+  line-height: 1.3;
+}
+/* 최후 보정: 계약서 관리 탭에서 프로젝트코드 가시성 우선 */
+#pm-contract-table td:nth-child(2),
+#pm-contract-table td.pm-contract-code-cell {
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+  word-break: break-all !important;
+  line-height: 1.3 !important;
+}
+#pm-contract-table td:nth-child(6),
+#pm-contract-table td:nth-child(7) {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+.pm-contract-file-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+/* 계약서 관리현황 모달 — 동일하게 max-width:0 무력화 + 열별 폭 */
+#projRegContractDocModal .pm-contract-doc-table {
+  table-layout: fixed;
+  min-width: 1492px;
+  width: 1492px !important;
+}
+#projRegContractDocModal .pm-contract-doc-table > thead > tr > th,
+#projRegContractDocModal .pm-contract-doc-table > tbody > tr > td {
+  max-width: none !important;
+  box-sizing: border-box;
+}
+#projRegContractDocModal .pm-contract-doc-table > thead > tr > th:nth-child(1),
+#projRegContractDocModal .pm-contract-doc-table > tbody > tr > td:nth-child(1) { width: 44px; min-width: 44px; max-width: 52px; }
+#projRegContractDocModal .pm-contract-doc-table > thead > tr > th:nth-child(2),
+#projRegContractDocModal .pm-contract-doc-table > tbody > tr > td:nth-child(2) { width: 112px; min-width: 112px; }
+#projRegContractDocModal .pm-contract-doc-table > thead > tr > th:nth-child(3),
+#projRegContractDocModal .pm-contract-doc-table > tbody > tr > td:nth-child(3) {
+  width: 300px;
+  min-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+#projRegContractDocModal .pm-contract-doc-table > thead > tr > th:nth-child(4),
+#projRegContractDocModal .pm-contract-doc-table > tbody > tr > td:nth-child(4) { width: 200px; min-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#projRegContractDocModal .pm-contract-doc-table > thead > tr > th:nth-child(5),
+#projRegContractDocModal .pm-contract-doc-table > tbody > tr > td:nth-child(5) { width: 160px; min-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#projRegContractDocModal .pm-contract-doc-table > thead > tr > th:nth-child(6),
+#projRegContractDocModal .pm-contract-doc-table > tbody > tr > td:nth-child(6) { width: 260px; min-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#projRegContractDocModal .pm-contract-doc-table > thead > tr > th:nth-child(7),
+#projRegContractDocModal .pm-contract-doc-table > tbody > tr > td:nth-child(7) { width: 108px; min-width: 108px; }
+#projRegContractDocModal .pm-contract-doc-table > thead > tr > th:nth-child(8),
+#projRegContractDocModal .pm-contract-doc-table > tbody > tr > td:nth-child(8) { width: 100px; min-width: 100px; }
+#projRegContractDocModal .pm-contract-doc-table > thead > tr > th:nth-child(9),
+#projRegContractDocModal .pm-contract-doc-table > tbody > tr > td:nth-child(9) { width: 200px; min-width: 200px; }
+#projRegContractDocModal .pm-contract-doc-table td.pm-contract-doc-td-actions {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
 /* 배지·버튼 셀: 내용 중앙 정렬 */
 .data-table td.td-badge,
 .data-table td.td-action {
@@ -807,18 +984,6 @@ textarea.form-control {
   text-align: center;
   overflow: visible;
   padding: 9px 6px;
-}
-/* 관리자 Staff 업무 기록에서 우측 관리열이 가려지지 않도록 고정 */
-#my-entries-table th.th-action,
-#my-entries-table td.td-action {
-  position: sticky;
-  right: 0;
-  background: #fff;
-  z-index: 2;
-}
-#my-entries-table thead th.th-action {
-  background: #f7f9fc;
-  z-index: 3;
 }
 
 /* 소분류 열: 내용이 길어도 좌우 균형 있게 */
@@ -2094,6 +2259,20 @@ textarea.form-control {
 .proj-reg-client-cell {
   padding-right: 10px;
 }
+#proj-reg-list-table {
+  table-layout: fixed;
+  width: 1410px !important;
+  min-width: 1410px !important;
+}
+#proj-reg-list-table > thead > tr > th,
+#proj-reg-list-table > tbody > tr > td {
+  max-width: none !important;
+  box-sizing: border-box;
+}
+#proj-reg-list-table > tbody > tr > td:nth-child(3) {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
 
 .entry-daily-proj-toggle-btn {
   display: inline-flex;
@@ -2770,6 +2949,12 @@ table.proj-reg-bill-table input[type="date"].form-control::-webkit-datetime-edit
   display: flex;
   align-items: center;
   padding: 0;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+table.proj-reg-bill-table input[type="date"].form-control::-webkit-datetime-edit-year-field {
+  flex-shrink: 0;
+  min-width: 4.5ch;
 }
 table.proj-reg-bill-table input[type="date"].form-control::-webkit-calendar-picker-indicator {
   cursor: pointer;
@@ -4958,19 +5143,6 @@ select.ep-ctrl {
 #page-my-entries.admin-all-entries th.my-entries-col-author,
 #page-my-entries.admin-all-entries td.my-entries-col-author {
   display: table-cell;
-}
-
-/* 관리자 Staff 업무 기록: 한 화면 밀도 최적화 (가로 스크롤 최소화) */
-#page-my-entries.admin-all-entries #my-entries-table thead th {
-  padding: 8px 6px;
-  font-size: 11px;
-}
-#page-my-entries.admin-all-entries #my-entries-table td {
-  padding: 7px 6px;
-  font-size: 11.5px;
-}
-#page-my-entries.admin-all-entries #my-entries-table td.td-written {
-  font-size: 11px;
 }
 
 /* ── 반응형 ── */

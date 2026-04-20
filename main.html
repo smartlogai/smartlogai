@@ -26,7 +26,7 @@
   <script src="https://cdn.jsdelivr.net/npm/turndown/dist/turndown.js" defer></script>
   <!-- turndown-plugin-gfm: 테이블 등 GFM 확장 지원 -->
   <script src="https://cdn.jsdelivr.net/npm/turndown-plugin-gfm/dist/turndown-plugin-gfm.js" defer></script>
-  <link rel="stylesheet" href="css/style.css?v=20260419invoiceActionCol" />
+  <link rel="stylesheet" href="css/style.css?v=20260420pmContractTable8" />
   <!-- Chart.js: 대시보드/분석에서 사용 → defer로 DOM 파싱 차단 방지 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
   <!-- ★ 무거운 라이브러리는 필요한 시점에 동적으로 로드 (초기 blocking 제거) -->
@@ -840,9 +840,9 @@
           <div class="filter-group filter-group-period filter-group-modern-period">
             <span class="filter-label">기간</span>
             <div class="filter-period-row" style="display:flex;align-items:center;gap:4px">
-              <input type="date" class="filter-control" id="filter-entry-date-from" style="width:122px" />
+              <input type="date" class="filter-control" id="filter-entry-date-from" />
               <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">~</span>
-              <input type="date" class="filter-control" id="filter-entry-date-to" style="width:122px" />
+              <input type="date" class="filter-control" id="filter-entry-date-to" />
             </div>
             <div class="entry-quick-range-group">
               <button type="button" class="entry-quick-range-btn" data-entry-range="today">당일</button>
@@ -964,9 +964,9 @@
           <div class="filter-group filter-group-period filter-group-modern-period">
             <span class="filter-label">기간</span>
             <div class="filter-period-row" style="display:flex;align-items:center;gap:4px">
-              <input type="date" class="filter-control" id="filter-approval-date-from" style="width:122px" />
+              <input type="date" class="filter-control" id="filter-approval-date-from" />
               <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">~</span>
-              <input type="date" class="filter-control" id="filter-approval-date-to" style="width:122px" />
+              <input type="date" class="filter-control" id="filter-approval-date-to" />
             </div>
             <div class="approval-quick-range-group">
               <button type="button" class="approval-quick-range-btn" data-approval-range="today">당일</button>
@@ -1149,9 +1149,9 @@
                   </span>
                 </div>
                 <div style="display:flex;align-items:center;gap:4px">
-                  <input type="date" class="filter-control" id="filter-analysis-date-from" style="width:130px" />
+                  <input type="date" class="filter-control" id="filter-analysis-date-from" />
                   <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">~</span>
-                  <input type="date" class="filter-control" id="filter-analysis-date-to" style="width:130px" />
+                  <input type="date" class="filter-control" id="filter-analysis-date-to" />
                 </div>
               </div>
               <!-- 사업부 -->
@@ -1301,9 +1301,9 @@
               <div class="filter-group" style="grid-column:span 2">
                 <span class="filter-label">기간</span>
                 <div style="display:flex;align-items:center;gap:4px">
-                  <input type="date" class="filter-control" id="filter-staff-date-from" style="width:130px" />
+                  <input type="date" class="filter-control" id="filter-staff-date-from" />
                   <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">~</span>
-                  <input type="date" class="filter-control" id="filter-staff-date-to" style="width:130px" />
+                  <input type="date" class="filter-control" id="filter-staff-date-to" />
                 </div>
               </div>
               <!-- 사업부 -->
@@ -1477,11 +1477,11 @@
           <div class="filter-bar" style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-top:4px">
             <div class="filter-group">
               <span class="filter-label">배부 기간 From</span>
-              <input type="date" class="filter-control" id="filter-labor-date-from" style="width:150px" onchange="loadLaborAnalysis()" />
+              <input type="date" class="filter-control" id="filter-labor-date-from" onchange="loadLaborAnalysis()" />
             </div>
             <div class="filter-group">
               <span class="filter-label">To</span>
-              <input type="date" class="filter-control" id="filter-labor-date-to" style="width:150px" onchange="loadLaborAnalysis()" />
+              <input type="date" class="filter-control" id="filter-labor-date-to" onchange="loadLaborAnalysis()" />
             </div>
             <span style="font-size:11px;color:var(--text-muted);align-self:center;max-width:420px;line-height:1.4">
               비우면 해당 연도 1/1~12/31 전체. 연 인건비 × (기간 내 고객사 업무시간 ÷ 해당 연도 고객사 업무시간)으로 배분합니다.
@@ -1858,7 +1858,6 @@
             <div class="card-actions">
               <button class="btn btn-sm btn-ghost" onclick="openCategoryUploadModal()"><i class="fas fa-file-excel"></i> 엑셀 업로드</button>
               <button class="btn btn-sm btn-outline" onclick="downloadCategoryTemplate()"><i class="fas fa-download"></i> 양식 다운로드</button>
-              <button class="btn btn-sm btn-outline" onclick="exportCategoriesToExcel()"><i class="fas fa-file-download"></i> 데이터 다운로드</button>
               <button class="btn btn-sm btn-primary" onclick="openCategoryModal()"><i class="fas fa-plus"></i> 대분류 추가</button>
             </div>
           </div>
@@ -2077,18 +2076,29 @@
             </div>
             <div class="card-body" style="padding:0">
               <div class="table-wrapper" style="border:none;border-radius:0">
-                <table class="data-table">
+                <table id="proj-reg-list-table" class="data-table" style="table-layout:fixed;width:1410px">
+                  <colgroup>
+                    <col style="width:44px" />
+                    <col style="width:96px" />
+                    <col style="width:220px" />
+                    <col style="width:300px" />
+                    <col style="width:220px" />
+                    <col style="width:124px" />
+                    <col style="width:120px" />
+                    <col style="width:110px" />
+                    <col style="width:176px" />
+                  </colgroup>
                   <thead>
                     <tr>
-                      <th style="width:44px;text-align:center">No</th>
-                      <th style="width:96px;text-align:center">상태</th>
-                      <th style="width:156px">프로젝트 코드</th>
-                      <th style="width:260px">프로젝트명</th>
-                      <th style="width:180px">고객사</th>
-                      <th style="width:124px;text-align:center">수주참여자</th>
+                      <th style="text-align:center">No</th>
+                      <th style="text-align:center">상태</th>
+                      <th>프로젝트 코드</th>
+                      <th>프로젝트명</th>
+                      <th>고객사</th>
+                      <th style="text-align:center">수주참여자</th>
                       <th style="text-align:center">CPM</th>
                       <th style="text-align:center">등록일</th>
-                      <th style="min-width:120px;text-align:center">관리</th>
+                      <th style="text-align:center">관리</th>
                     </tr>
                   </thead>
                   <tbody id="proj-reg-list-body">
@@ -2724,17 +2734,27 @@
             </div>
             <div class="card-body" style="padding:0">
               <div class="table-wrapper" style="border:none;border-radius:0;overflow:auto">
-                <table class="data-table">
+                <table id="pm-contract-table" class="data-table pm-contract-table" style="table-layout:fixed;width:1386px">
+                  <colgroup>
+                    <col class="pm-col-no" style="width:44px" />
+                    <col class="pm-col-code" style="width:560px" />
+                    <col class="pm-col-name" style="width:240px" />
+                    <col class="pm-col-client" style="width:220px" />
+                    <col class="pm-col-status" style="width:72px" />
+                    <col class="pm-col-file" style="width:80px" />
+                    <col class="pm-col-file" style="width:80px" />
+                    <col class="pm-col-file" style="width:90px" />
+                  </colgroup>
                   <thead>
                     <tr>
-                      <th style="width:42px;text-align:center">No</th>
-                      <th style="width:116px">프로젝트코드</th>
-                      <th style="width:180px">프로젝트명</th>
-                      <th style="width:150px">고객사</th>
-                      <th style="width:96px;text-align:center">상태</th>
-                      <th style="width:200px">계약서 파일</th>
-                      <th style="width:180px">합의근거 파일</th>
-                      <th style="width:180px">수주증빙 파일</th>
+                      <th style="text-align:center">No</th>
+                      <th>프로젝트코드</th>
+                      <th>프로젝트명</th>
+                      <th>고객사</th>
+                      <th style="text-align:center">상태</th>
+                      <th>계약서 파일</th>
+                      <th>합의근거 파일</th>
+                      <th>수주증빙 파일</th>
                     </tr>
                   </thead>
                   <tbody id="pm-contract-body">
@@ -2757,7 +2777,6 @@
             <div class="card-actions">
               <button class="btn btn-sm btn-ghost" onclick="openUserUploadModal()"><i class="fas fa-file-excel"></i> 엑셀 업로드</button>
               <button class="btn btn-sm btn-outline" onclick="downloadUserTemplate()"><i class="fas fa-download"></i> 양식 다운로드</button>
-              <button class="btn btn-sm btn-outline" onclick="exportUsersToExcel()"><i class="fas fa-file-download"></i> 데이터 다운로드</button>
               <button class="btn btn-sm btn-warning" onclick="openBulkPwModal()" style="background:#f59e0b;color:#fff;border-color:#f59e0b"><i class="fas fa-key"></i> 비밀번호 일괄 초기화</button>
               <button class="btn btn-sm btn-primary" onclick="openUserModal()"><i class="fas fa-user-plus"></i> 직원 추가</button>
             </div>
@@ -3520,18 +3539,29 @@
         </div>
       </div>
       <div class="table-wrapper" style="border:1px solid var(--border-light);border-radius:10px">
-        <table class="data-table" style="min-width:980px">
+        <table class="data-table pm-contract-doc-table" style="table-layout:fixed;width:1492px">
+          <colgroup>
+            <col style="width:44px" />
+            <col style="width:120px" />
+            <col style="width:300px" />
+            <col style="width:200px" />
+            <col style="width:160px" />
+            <col style="width:260px" />
+            <col style="width:108px" />
+            <col style="width:100px" />
+            <col style="width:200px" />
+          </colgroup>
           <thead>
             <tr>
-              <th style="width:44px">No</th>
-              <th style="width:116px">문서유형</th>
-              <th style="width:170px">프로젝트코드</th>
+              <th>No</th>
+              <th>문서유형</th>
+              <th>프로젝트코드</th>
               <th>프로젝트명</th>
-              <th style="width:160px">고객사</th>
-              <th style="width:220px">파일명</th>
-              <th style="width:104px">등록일</th>
-              <th style="width:100px">등록자</th>
-              <th style="width:190px;text-align:center">관리</th>
+              <th>고객사</th>
+              <th>파일명</th>
+              <th>등록일</th>
+              <th>등록자</th>
+              <th style="text-align:center">관리</th>
             </tr>
           </thead>
           <tbody id="proj-reg-contract-doc-body">
@@ -4297,20 +4327,20 @@
 </div>
 
 <!-- JS 파일들 -->
-<script src="js/app.js?v=20260419pmMenuScope3"></script>
+<script src="js/app.js?v=20260420dateInputs1"></script>
 <script src="js/kw-example-maps.js?v=20260407a"></script>
 <script src="js/llm-proxy.js?v=20260409a"></script>
 <script src="js/notify.js?v=20260419invoiceDueRemind2"></script>
 <script src="js/dashboard.js?v=20260410a"></script>
-<script src="js/entry.js?v=20260419projectOutputs1"></script>
+  <script src="js/entry.js?v=20260419projectOutputs1"></script>
 <script src="js/daily-module.js?v=20260419dailyModePlan1"></script>
-<script src="js/approval.js?v=20260419projRegSplit1"></script>
+<script src="js/approval.js?v=20260420approvalFix1"></script>
 <script src="js/analysis.js?v=20260410a"></script>
 <script src="js/archive.js?v=20260410d"></script>
-<script src="js/project-management.js?v=20260419invoiceActionCol"></script>
+<script src="js/project-management.js?v=20260420pmContractTable8"></script>
 <script src="js/project-dashboard.js?v=20260419projectDashboard1"></script>
 <!-- master.js / users.js: Settings 메뉴 진입 시 동적 로드 (초기 81KB 절감) -->
-<script src="js/main.js?v=20260419smartLogMenu1"></script>
+<script src="js/main.js?v=20260420approvalFix1"></script>
 
 
 </body>
