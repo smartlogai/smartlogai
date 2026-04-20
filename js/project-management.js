@@ -652,10 +652,22 @@ function _pmBuildProgressFilters(rows) {
     client: clientEl?.value || '',
     pm: pmEl?.value || '',
   };
+
+  // 연쇄 드롭다운:
+  // 사업부 선택 -> 본부 옵션 축소
+  // 본부 선택    -> 고객지원팀 옵션 축소
   const depts = uniq(rows.map((r) => r._dept_name));
-  const hqs = uniq(rows.map((r) => r._hq_name));
-  const css = uniq(rows.map((r) => r._cs_team_name));
-  const clients = uniq(rows.map((r) => r.client_name));
+  const deptScopedRows = prev.dept ? rows.filter((r) => String(r._dept_name || '') === prev.dept) : rows;
+  const hqs = uniq(deptScopedRows.map((r) => r._hq_name));
+
+  const hqStillValid = !prev.hq || hqs.includes(prev.hq);
+  const safeHq = hqStillValid ? prev.hq : '';
+  const hqScopedRows = safeHq ? deptScopedRows.filter((r) => String(r._hq_name || '') === safeHq) : deptScopedRows;
+  const css = uniq(hqScopedRows.map((r) => r._cs_team_name));
+
+  const csStillValid = !prev.cs || css.includes(prev.cs);
+  const safeCs = csStillValid ? prev.cs : '';
+
   const pms = uniq(rows.map((r) => r.cpm_user_name));
   if (deptEl) {
     deptEl.innerHTML = '<option value="">사업부 전체</option>' + depts.map((v) => `<option value="${_pmEsc(v)}">${_pmEsc(v)}</option>`).join('');
@@ -663,16 +675,14 @@ function _pmBuildProgressFilters(rows) {
   }
   if (hqEl) {
     hqEl.innerHTML = '<option value="">본부 전체</option>' + hqs.map((v) => `<option value="${_pmEsc(v)}">${_pmEsc(v)}</option>`).join('');
-    if (prev.hq && [...hqEl.options].some((o) => o.value === prev.hq)) hqEl.value = prev.hq;
+    if (safeHq && [...hqEl.options].some((o) => o.value === safeHq)) hqEl.value = safeHq;
   }
   if (csEl) {
     csEl.innerHTML = '<option value="">고객지원팀 전체</option>' + css.map((v) => `<option value="${_pmEsc(v)}">${_pmEsc(v)}</option>`).join('');
-    if (prev.cs && [...csEl.options].some((o) => o.value === prev.cs)) csEl.value = prev.cs;
+    if (safeCs && [...csEl.options].some((o) => o.value === safeCs)) csEl.value = safeCs;
   }
-  if (clientEl) {
-    clientEl.innerHTML = '<option value="">고객사 전체</option>' + clients.map((v) => `<option value="${_pmEsc(v)}">${_pmEsc(v)}</option>`).join('');
-    if (prev.client && [...clientEl.options].some((o) => o.value === prev.client)) clientEl.value = prev.client;
-  }
+  // 고객사는 텍스트 검색(input) 방식이므로 값만 유지
+  if (clientEl) clientEl.value = prev.client;
   if (pmEl) {
     pmEl.innerHTML = '<option value="">PM 전체</option>' + pms.map((v) => `<option value="${_pmEsc(v)}">${_pmEsc(v)}</option>`).join('');
     if (prev.pm && [...pmEl.options].some((o) => o.value === prev.pm)) pmEl.value = prev.pm;
@@ -848,8 +858,13 @@ async function init_project_management() {
   if (!PM_STATE.initialized) {
     document.getElementById('pm-progress-refresh-btn')?.addEventListener('click', loadProjectMgmtProgress);
     document.getElementById('pm-progress-search-btn')?.addEventListener('click', loadProjectMgmtProgress);
-    ['pm-progress-filter-dept','pm-progress-filter-hq','pm-progress-filter-csteam','pm-progress-filter-client','pm-progress-filter-pm','pm-progress-filter-status']
+    ['pm-progress-filter-dept','pm-progress-filter-hq','pm-progress-filter-csteam','pm-progress-filter-pm','pm-progress-filter-status']
       .forEach((id) => document.getElementById(id)?.addEventListener('change', loadProjectMgmtProgress));
+    const progressClient = document.getElementById('pm-progress-filter-client');
+    if (progressClient && !progressClient.dataset.boundInput) {
+      progressClient.dataset.boundInput = '1';
+      progressClient.addEventListener('input', loadProjectMgmtProgress);
+    }
     const progressFrom = document.getElementById('pm-progress-date-from');
     const progressTo = document.getElementById('pm-progress-date-to');
     if (progressFrom && !progressFrom.value) progressFrom.value = _pmTodayDateText().slice(0, 8) + '01';
@@ -1015,11 +1030,26 @@ async function loadProjectMgmtProgress() {
       if (fDept && String(r._dept_name || '') !== fDept) return false;
       if (fHq && String(r._hq_name || '') !== fHq) return false;
       if (fCs && String(r._cs_team_name || '') !== fCs) return false;
-      if (fClient && String(r.client_name || '') !== fClient) return false;
+      if (fClient) {
+        const clientName = String(r.client_name || '').toLowerCase();
+        if (!clientName.includes(fClient.toLowerCase())) return false;
+      }
       if (fPm && String(r.cpm_user_name || '') !== fPm) return false;
       if (fStatus && String(x.life.code || '') !== fStatus) return false;
       return true;
-    }).sort((a, b) => Number(b.approvedTs || 0) - Number(a.approvedTs || 0));
+    }).sort((a, b) => {
+      const order = {
+        contract_completed: 0,
+        in_progress: 1,
+        work_closed: 2,
+        settled_done: 3,
+      };
+      const ao = Object.prototype.hasOwnProperty.call(order, a.life.code) ? order[a.life.code] : 99;
+      const bo = Object.prototype.hasOwnProperty.call(order, b.life.code) ? order[b.life.code] : 99;
+      if (ao !== bo) return ao - bo;
+      // 동일 상태 그룹 내 최신순
+      return Number(b.approvedTs || 0) - Number(a.approvedTs || 0);
+    });
 
     if (!withMeta.length) {
       body.innerHTML = '<tr><td colspan="7" class="table-empty"><i class="fas fa-inbox"></i><p>조건에 맞는 프로젝트가 없습니다.</p></td></tr>';

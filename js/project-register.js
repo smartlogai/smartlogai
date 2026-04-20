@@ -135,10 +135,9 @@ async function _projRegRegistrantSnapshot(session) {
   const pa1Name = String((u && u.approver_name) || session.approver_name || '').trim();
   const pa2Id = String((u && u.reviewer2_id) || session.reviewer2_id || '').trim();
   const pa2Name = String((u && u.reviewer2_name) || session.reviewer2_name || '').trim();
-  // 프로젝트 승인(인센티브): staff 등록 건은 3차(사업부장/top_mgr) 최종 승인
-  let pa3Id = '';
-  let pa3Name = '';
-  if (myRole === 'staff' && Array.isArray(users) && users.length) {
+
+  const pickTopMgr = () => {
+    if (!Array.isArray(users) || !users.length) return { id: '', name: '' };
     const pickScore = (cand) => {
       if (!cand || String(cand.role || '').toLowerCase() !== 'top_mgr') return -1;
       let s = 0;
@@ -148,19 +147,56 @@ async function _projRegRegistrantSnapshot(session) {
       return s;
     };
     const sorted = users
-      .filter((x) => String(x && x.role || '').toLowerCase() === 'top_mgr')
+      .filter((x) => String((x && x.role) || '').toLowerCase() === 'top_mgr')
       .map((x) => ({ x, score: pickScore(x) }))
       .sort((a, b) => {
         if (a.score !== b.score) return b.score - a.score;
         return String(a.x.name || '').localeCompare(String(b.x.name || ''));
       });
     const picked = sorted.length ? sorted[0].x : null;
-    if (picked) {
-      pa3Id = String(picked.id || '').trim();
-      pa3Name = String(picked.name || '').trim();
-    }
+    return {
+      id: String((picked && picked.id) || '').trim(),
+      name: String((picked && picked.name) || '').trim(),
+    };
+  };
+
+  const topMgr = pickTopMgr();
+
+  // 승인체계
+  // - staff   : 1차(pa1) -> 2차(pa2) -> 최종(top_mgr)
+  // - manager : 1차(pa1) -> 최종(top_mgr)
+  // - director: 최종(top_mgr) 1단계
+  if (myRole === 'staff') {
+    return {
+      pa1Id,
+      pa1Name,
+      pa2Id,
+      pa2Name,
+      pa3Id: topMgr.id,
+      pa3Name: topMgr.name,
+    };
   }
-  return { pa1Id, pa1Name, pa2Id, pa2Name, pa3Id, pa3Name };
+  if (myRole === 'manager') {
+    return {
+      pa1Id,
+      pa1Name,
+      pa2Id: topMgr.id,
+      pa2Name: topMgr.name,
+      pa3Id: '',
+      pa3Name: '',
+    };
+  }
+  if (myRole === 'director') {
+    return {
+      pa1Id: topMgr.id,
+      pa1Name: topMgr.name,
+      pa2Id: '',
+      pa2Name: '',
+      pa3Id: '',
+      pa3Name: '',
+    };
+  }
+  return { pa1Id, pa1Name, pa2Id, pa2Name, pa3Id: '', pa3Name: '' };
 }
 
 function _projRegEffectiveApprovers(row) {
@@ -194,6 +230,76 @@ function _projRegPendingStep(row) {
   }
   if (cnt >= 2 && !row.final_approved_at) return 2;
   return null;
+}
+
+function _projRegSortBucket(row) {
+  const st = _projRegNormStatus(row);
+  // 최우선: 반려/임시저장
+  if (st === 'rejected') return 0;
+  if (st === 'draft') return 1;
+  if (st === 'pending') {
+    const step = _projRegPendingStep(row);
+    // 승인대기 -> 1차승인 -> 2차승인
+    if (step === 1) return 2;
+    if (step === 2) return 3;
+    if (step === 3) return 4;
+    return 2;
+  }
+  // 최종승인(승인완료/조건부승인)
+  if (st === 'approved') return 5;
+  return 9;
+}
+
+function _projRegSortTimeAsc(row) {
+  const t = new Date((row && row.created_at) || 0).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+function _projRegSortTimeDescForApproved(row) {
+  const t = new Date(
+    (row && row.final_approved_at)
+    || (row && row.second_approved_at)
+    || (row && row.first_approved_at)
+    || (row && row.created_at)
+    || 0
+  ).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+function _projRegListComparator(a, b) {
+  const ba = _projRegSortBucket(a);
+  const bb = _projRegSortBucket(b);
+  if (ba !== bb) return ba - bb;
+
+  // 반려/임시저장은 과거건 우선(오름차순)
+  if (ba <= 1) {
+    const ta = _projRegSortTimeAsc(a);
+    const tb = _projRegSortTimeAsc(b);
+    if (ta !== tb) return ta - tb;
+    return String((a && a.project_code) || '').localeCompare(String((b && b.project_code) || ''));
+  }
+
+  // 승인대기/1차승인/2차승인은 과거건 우선(오름차순)
+  if (ba >= 2 && ba <= 4) {
+    const ta = _projRegSortTimeAsc(a);
+    const tb = _projRegSortTimeAsc(b);
+    if (ta !== tb) return ta - tb;
+    return String((a && a.project_code) || '').localeCompare(String((b && b.project_code) || ''));
+  }
+
+  // 최종승인은 최신순(내림차순)
+  if (ba === 5) {
+    const ta = _projRegSortTimeDescForApproved(a);
+    const tb = _projRegSortTimeDescForApproved(b);
+    if (ta !== tb) return tb - ta;
+    return String((a && a.project_code) || '').localeCompare(String((b && b.project_code) || ''));
+  }
+
+  // 기타 상태는 최신순 유지
+  const ta = _projRegSortTimeAsc(a);
+  const tb = _projRegSortTimeAsc(b);
+  if (ta !== tb) return tb - ta;
+  return String((a && a.project_code) || '').localeCompare(String((b && b.project_code) || ''));
 }
 
 function _projRegCanApproveRow(session, row) {
@@ -739,7 +845,6 @@ async function init_project_register() {
   projRegBindProgress();
   await projRegLoadTypes();
   _projRegPopulateListMainSelect();
-  _projRegPopulateListSubSelect();
   await projRegFillDropdowns();
   _projRegBindListFiltersOnce();
   projRegBindContractDocFiltersOnce();
@@ -1218,6 +1323,31 @@ function _projRegRowMainCode(r) {
   return t ? String(t.main_code || '').trim() : '';
 }
 
+function _projRegCreatorUser(row) {
+  const creatorId = String((row && row.created_by) || '').trim();
+  if (!creatorId) return null;
+  return (_projRegUsers || []).find((u) => String(u.id || '').trim() === creatorId) || null;
+}
+
+function _projRegOrgLabel(row) {
+  const u = _projRegCreatorUser(row);
+  const dept = String((u && u.dept_name) || (row && row.dept_name) || '').trim();
+  const hq = String((u && u.hq_name) || (row && row.hq_name) || '').trim();
+  if (dept && hq) return `${dept} / ${hq}`;
+  return dept || hq || '-';
+}
+
+function _projRegOrgParts(row) {
+  const u = _projRegCreatorUser(row);
+  const dept = String((u && u.dept_name) || (row && row.dept_name) || '').trim();
+  const hq = String((u && u.hq_name) || (row && row.hq_name) || '').trim();
+  return { dept, hq };
+}
+
+function _projRegNormalizeOrgFilter(v) {
+  return String(v || '').replace(/\s*\/\s*/g, '/').trim();
+}
+
 function _projRegDateStr(v) {
   if (v == null || v === '') return '';
   return String(v).slice(0, 10);
@@ -1255,63 +1385,57 @@ function _projRegPopulateListMainSelect() {
   if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
 }
 
-function _projRegPopulateListSubSelect() {
-  const mainSel = document.getElementById('proj-reg-filter-main');
-  const subSel = document.getElementById('proj-reg-filter-sub');
-  if (!subSel) return;
-  const prev = subSel.value;
-  const mc = (mainSel && mainSel.value) ? String(mainSel.value).trim() : '';
-  subSel.innerHTML = '<option value="">소분류 전체</option>';
-  const list = mc
-    ? _projRegTypes.filter((t) => String(t.main_code || '').trim() === mc)
-    : _projRegTypes.slice();
-  list.forEach((t) => {
-    const sc = String(t.sub_code || '').trim();
-    const o = document.createElement('option');
-    o.value = t.id;
-    const subLab = String(t.sub_category || '').trim() || sc;
-    o.textContent = `${subLab} (${sc})`;
-    subSel.appendChild(o);
-  });
-  if (prev && [...subSel.options].some((o) => o.value === prev)) subSel.value = prev;
-}
-
 function _projRegPopulateListFilterDropdowns() {
-  const fCpm = document.getElementById('proj-reg-filter-cpm');
-  if (fCpm) {
-    const p2 = fCpm.value;
-    fCpm.innerHTML = '<option value="">PM 전체</option>';
-    (_projRegUsers || [])
-      .filter((u) => u.deleted !== true && u.is_active !== false && _projRegIsCpmEligible(u))
-      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
-      .forEach((u) => {
-        const o = document.createElement('option');
-        o.value = u.id;
-        o.textContent = u.name || String(u.id || '');
-        fCpm.appendChild(o);
-      });
-    if (p2 && [...fCpm.options].some((o) => o.value === p2)) fCpm.value = p2;
+  const orgSel = document.getElementById('proj-reg-filter-org');
+  if (orgSel) {
+    const prev = orgSel.value;
+    const orgSet = new Set();
+
+    // 우선: 현재 화면에 실제 표시 가능한 행 기준으로 조직 옵션 구성
+    // - 사업부 단독(예: CRB)
+    // - 사업부/본부 조합(예: CRB / 수입통관업무본부)
+    (_projRegRows || []).forEach((r) => {
+      const parts = _projRegOrgParts(r);
+      const dept = String(parts.dept || '').trim();
+      const hq = String(parts.hq || '').trim();
+      if (dept) orgSet.add(dept);
+      if (dept && hq) orgSet.add(`${dept} / ${hq}`);
+      else if (!dept && hq) orgSet.add(hq);
+    });
+
+    // 목록 데이터가 아직 없을 때만 사용자 기준으로 보조 구성
+    if (!orgSet.size) {
+      (_projRegUsers || [])
+        .filter((u) => u.deleted !== true && u.is_active !== false)
+        .forEach((u) => {
+          const dept = String(u.dept_name || '').trim();
+          const hq = String(u.hq_name || '').trim();
+          if (dept) orgSet.add(dept);
+          if (dept && hq) orgSet.add(`${dept} / ${hq}`);
+          else if (!dept && hq) orgSet.add(hq);
+        });
+    }
+
+    orgSel.innerHTML = '<option value="">사업부+본부 전체</option>';
+    [...orgSet].sort((a, b) => a.localeCompare(b, 'ko')).forEach((label) => {
+      const o = document.createElement('option');
+      o.value = label;
+      o.textContent = label;
+      orgSel.appendChild(o);
+    });
+    if (prev && [...orgSel.options].some((o) => o.value === prev)) orgSel.value = prev;
   }
 }
 
 function _projRegBindListFiltersOnce() {
   if (_projRegListFiltersBound) return;
   const main = document.getElementById('proj-reg-filter-main');
-  if (main) {
-    main.addEventListener('change', () => {
-      _projRegPopulateListSubSelect();
-      projRegRenderList();
-    });
-  }
-  ['proj-reg-filter-sub', 'proj-reg-filter-status', 'proj-reg-filter-cpm'].forEach((id) => {
+  if (main) main.addEventListener('change', () => projRegRenderList());
+  ['proj-reg-filter-org', 'proj-reg-filter-status'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', () => projRegRenderList());
   });
-  ['proj-reg-filter-period-from', 'proj-reg-filter-period-to'].forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('change', () => projRegRenderList());
-  });
-  ['proj-reg-filter-client', 'proj-reg-filter-registrant'].forEach((id) => {
+  ['proj-reg-filter-client'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('input', () => projRegRenderList());
   });
@@ -1321,49 +1445,49 @@ function _projRegBindListFiltersOnce() {
 function projRegResetListFilters() {
   [
     'proj-reg-filter-main',
-    'proj-reg-filter-sub',
+    'proj-reg-filter-org',
     'proj-reg-filter-client',
     'proj-reg-filter-status',
-    'proj-reg-filter-period-from',
-    'proj-reg-filter-period-to',
-    'proj-reg-filter-registrant',
-    'proj-reg-filter-cpm',
   ].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
-  _projRegPopulateListSubSelect();
   projRegRenderList();
 }
 
 function _projRegApplyListFilters(rowsIn) {
   const mainMc = (document.getElementById('proj-reg-filter-main')?.value || '').trim();
-  const subId = (document.getElementById('proj-reg-filter-sub')?.value || '').trim();
+  const orgFilter = (document.getElementById('proj-reg-filter-org')?.value || '').trim();
   const clientKw = (document.getElementById('proj-reg-filter-client')?.value || '').trim().toLowerCase();
   const stF = (document.getElementById('proj-reg-filter-status')?.value || '').trim().toLowerCase();
-  const pFrom = (document.getElementById('proj-reg-filter-period-from')?.value || '').trim();
-  const pTo = (document.getElementById('proj-reg-filter-period-to')?.value || '').trim();
-  const regKw = (document.getElementById('proj-reg-filter-registrant')?.value || '').trim().toLowerCase();
-  const cpmId = (document.getElementById('proj-reg-filter-cpm')?.value || '').trim();
 
   return rowsIn.filter((r) => {
     const st = _projRegNormStatus(r);
-    if (subId) {
-      if (String(r.project_code_type_id || '') !== String(subId)) return false;
-    } else if (mainMc) {
-      if (_projRegRowMainCode(r) !== mainMc) return false;
+    if (mainMc && _projRegRowMainCode(r) !== mainMc) return false;
+    if (orgFilter) {
+      const { dept, hq } = _projRegOrgParts(r);
+      const picked = _projRegNormalizeOrgFilter(orgFilter);
+      // 사업부만 선택하면 해당 사업부 전체(본부 무관) 포함
+      if (!picked.includes('/')) {
+        if (!dept || dept !== picked) return false;
+      } else {
+        const rowOrg = _projRegNormalizeOrgFilter(dept && hq ? `${dept}/${hq}` : (dept || hq || ''));
+        if (rowOrg !== picked) return false;
+      }
     }
     if (clientKw) {
       const cb = [r.client_name, r.client_id].map((x) => String(x || '').toLowerCase()).join(' ');
       if (!cb.includes(clientKw)) return false;
     }
-    if (stF && st !== stF) return false;
-    if (!_projRegCreatedAtInRange(r, pFrom, pTo)) return false;
-    if (regKw) {
-      const nb = [r.created_by_name, r.created_by].map((x) => String(x || '').toLowerCase()).join(' ');
-      if (!nb.includes(regKw)) return false;
+    if (stF) {
+      if (stF === 'conditional') {
+        if (!(st === 'approved' && r.conditional_approval === true)) return false;
+      } else if (stF === 'approved') {
+        if (!(st === 'approved' && r.conditional_approval !== true)) return false;
+      } else if (st !== stF) {
+        return false;
+      }
     }
-    if (cpmId && String(r.cpm_user_id || '') !== String(cpmId)) return false;
     return true;
   });
 }
@@ -1371,7 +1495,7 @@ function _projRegApplyListFilters(rowsIn) {
 async function projRegLoadList() {
   const tbody = document.getElementById('proj-reg-list-body');
   if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="9" class="table-empty"><i class="fas fa-spinner fa-spin"></i><p>불러오는 중…</p></td></tr>';
+  tbody.innerHTML = '<tr><td colspan="8" class="table-empty"><i class="fas fa-spinner fa-spin"></i><p>불러오는 중…</p></td></tr>';
   const session = getSession();
   try {
     const allRows = await API.listAllPages('registered_projects', { limit: 500, maxPages: 10, sort: 'created_at' });
@@ -1380,6 +1504,7 @@ async function projRegLoadList() {
     _projRegRows = [];
     Toast.error('목록 조회 실패: ' + (e.message || '') + ' — SQL 스키마를 적용했는지 확인하세요.');
   }
+  _projRegPopulateListFilterDropdowns();
   projRegRenderList();
 }
 
@@ -1418,46 +1543,31 @@ async function _projRegScopeRowsForSession(rows, session) {
 function projRegRenderList() {
   const tbody = document.getElementById('proj-reg-list-body');
   if (!tbody) return;
-  const session = getSession();
   let rows = _projRegApplyListFilters(_projRegRows.slice());
-  // 기본 정렬: 최신 등록일(created_at) 우선
-  rows.sort((a, b) => {
-    const ta = new Date(a && a.created_at || 0).getTime();
-    const tb = new Date(b && b.created_at || 0).getTime();
-    return tb - ta;
-  });
+  // 정렬: 승인대기 -> 1차 -> 2차(각 과거 우선) -> 최종승인(최신 우선)
+  rows.sort(_projRegListComparator);
   if (!rows.length) {
     const emptyMsg = !_projRegRows.length
       ? '등록된 프로젝트가 없습니다.'
       : '조건에 맞는 프로젝트가 없습니다.';
-    tbody.innerHTML = `<tr><td colspan="9" class="table-empty"><i class="fas fa-clipboard-list"></i><p>${Utils.escHtml(emptyMsg)}</p></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="table-empty"><i class="fas fa-clipboard-list"></i><p>${Utils.escHtml(emptyMsg)}</p></td></tr>`;
     return;
   }
   tbody.innerHTML = rows.map((r, i) => {
     const cd = r.created_at ? Utils.formatDate(r.created_at) : '-';
     const st = _projRegNormStatus(r);
     const codeDisp = (r.project_code && String(r.project_code).trim()) ? String(r.project_code) : '';
-    const owner = _projRegIsOwner(session, r);
-    const canDel = (st === 'draft' || st === 'rejected') && (owner || session.role === 'admin');
-    const editBtn = `<button type="button" class="btn btn-sm btn-outline btn-icon" onclick="projRegShowForm('${r.id}')" title="상세"><i class="fas fa-edit"></i></button>`;
-    const delBtn = `<button type="button" class="btn btn-sm btn-danger btn-icon" onclick="projRegDelete('${r.id}')" title="삭제"><i class="fas fa-trash"></i></button>`;
-    const row1 = `<div class="proj-reg-list-act-row">${editBtn}${canDel ? delBtn : ''}</div>`;
-    const actionHtml = `<div class="proj-reg-list-actions">${row1}</div>`;
-    const contribCount = _projRegContribRowCount(r.order_contributors_text || '');
-    const contribLabel = r.project_code || r.project_name || `프로젝트 ${i + 1}`;
-    const contribBtn = contribCount
-      ? `<button type="button" class="btn btn-sm btn-outline proj-reg-contrib-btn" onclick="projRegOpenContribModalEncoded('${_projRegEncClickArg(r.order_contributors_text || '')}','${_projRegEncClickArg(contribLabel)}')" title="수주 참여자 보기"><i class="fas fa-users"></i><span>참여 ${contribCount}</span></button>`
-      : '<span style="color:var(--text-muted)">-</span>';
-    return `<tr>
+    const orgLabel = _projRegOrgLabel(r);
+    const registrant = String(r.created_by_name || r.created_by || '-');
+    return `<tr class="proj-reg-clickable-row" onclick="projRegShowForm('${r.id}')" title="클릭하여 상세 보기">
       <td class="text-center">${i + 1}</td>
-      <td class="text-center"><span class="${_projRegStatusBadgeClass(st, r)}">${Utils.escHtml(_projRegStatusLabel(st, r))}</span></td>
+      <td class="text-center" title="${Utils.escHtml(registrant)}">${Utils.escHtml(registrant)}</td>
+      <td class="text-center" style="font-size:12px">${Utils.escHtml(cd)}</td>
+      <td title="${Utils.escHtml(orgLabel)}">${Utils.escHtml(orgLabel)}</td>
+      <td class="proj-reg-client-cell" title="${Utils.escHtml(r.client_name || '')}">${Utils.escHtml(r.client_name || '')}</td>
       <td class="proj-reg-code-cell">${codeDisp ? `<strong>${Utils.escHtml(codeDisp)}</strong>` : '<span class="proj-reg-code-empty">코드생성전</span>'}</td>
       <td class="proj-reg-name-cell" title="${Utils.escHtml(r.project_name || '')}">${Utils.escHtml(r.project_name || '')}</td>
-      <td class="proj-reg-client-cell" title="${Utils.escHtml(r.client_name || '')}">${Utils.escHtml(r.client_name || '')}</td>
-      <td class="text-center">${contribBtn}</td>
-      <td class="text-center">${Utils.escHtml(r.cpm_user_name || '-')}</td>
-      <td class="text-center" style="font-size:12px">${Utils.escHtml(cd)}</td>
-      <td class="text-center">${actionHtml}</td>
+      <td class="text-center"><span class="${_projRegStatusBadgeClass(st, r)}">${Utils.escHtml(_projRegStatusLabel(st, r))}</span></td>
     </tr>`;
   }).join('');
 }
@@ -2190,16 +2300,23 @@ async function projRegSubmitForApproval() {
   const has3 = !!snap.pa3Id;
   const myRole = String(session.role || '').trim().toLowerCase();
   const isStaffRegistrant = myRole === 'staff';
-  const isCcbAutoApprove =
-    (myRole === 'director' || myRole === 'top_mgr') &&
-    typeof Auth !== 'undefined' &&
-    typeof Auth.preferredSheetType === 'function' &&
-    Auth.preferredSheetType(session) === 'daily';
-  const autoApprove = isCcbAutoApprove || (!isStaffRegistrant && !has1 && !has2 && !has3);
+  const isManagerRegistrant = myRole === 'manager';
+  const isDirectorRegistrant = myRole === 'director';
+  // 요청 정책에 맞게 staff/manager/director 자동승인은 허용하지 않음
+  const autoApprove = (!isStaffRegistrant && !isManagerRegistrant && !isDirectorRegistrant)
+    && !has1 && !has2 && !has3;
 
-  // staff는 최소 1차 승인자 지정이 있어야 승인 요청 가능 (무승인 자동승인 차단)
-  if (isStaffRegistrant && !has1) {
-    Toast.warning('승인 요청할 수 없습니다. 1차 승인자(팀장) 지정 후 다시 시도하세요.');
+  // 역할별 승인자 구성 검증
+  if (isStaffRegistrant && (!has1 || !has2 || !has3)) {
+    Toast.warning('승인 요청할 수 없습니다. Staff는 1차/2차 승인자와 사업부장 최종 승인자가 모두 지정되어야 합니다.');
+    return;
+  }
+  if (isManagerRegistrant && (!has1 || !has2)) {
+    Toast.warning('승인 요청할 수 없습니다. Manager는 1차 승인자와 사업부장(2차) 승인자가 모두 지정되어야 합니다.');
+    return;
+  }
+  if (isDirectorRegistrant && !has1) {
+    Toast.warning('승인 요청할 수 없습니다. 본부장은 사업부장 최종 승인자가 지정되어야 합니다.');
     return;
   }
 

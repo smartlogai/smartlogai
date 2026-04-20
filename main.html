@@ -26,7 +26,7 @@
   <script src="https://cdn.jsdelivr.net/npm/turndown/dist/turndown.js" defer></script>
   <!-- turndown-plugin-gfm: 테이블 등 GFM 확장 지원 -->
   <script src="https://cdn.jsdelivr.net/npm/turndown-plugin-gfm/dist/turndown-plugin-gfm.js" defer></script>
-  <link rel="stylesheet" href="css/style.css?v=20260420pmContractTable11" />
+  <link rel="stylesheet" href="css/style.css?v=20260420projRegFocus2" />
   <!-- Chart.js: 대시보드/분석에서 사용 → defer로 DOM 파싱 차단 방지 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
   <!-- ★ 무거운 라이브러리는 필요한 시점에 동적으로 로드 (초기 blocking 제거) -->
@@ -1966,9 +1966,7 @@
                 <select id="pm-progress-filter-csteam" class="form-control">
                   <option value="">고객지원팀 전체</option>
                 </select>
-                <select id="pm-progress-filter-client" class="form-control">
-                  <option value="">고객사 전체</option>
-                </select>
+                <input type="search" id="pm-progress-filter-client" class="form-control" placeholder="고객사 검색" />
                 <select id="pm-progress-filter-pm" class="form-control">
                   <option value="">PM 전체</option>
                 </select>
@@ -2031,42 +2029,26 @@
               <div class="proj-reg-list-filters" id="proj-reg-list-filters">
                 <div class="proj-reg-list-filters-grid">
                   <div class="form-group" style="margin:0">
-                    <label class="form-label" for="proj-reg-filter-main">대분류</label>
-                    <select id="proj-reg-filter-main" class="form-control" title="프로젝트 코드 대분류"></select>
-                  </div>
-                  <div class="form-group" style="margin:0">
-                    <label class="form-label" for="proj-reg-filter-sub">소분류</label>
-                    <select id="proj-reg-filter-sub" class="form-control" title="프로젝트 코드 소분류(유형)"></select>
+                    <label class="form-label" for="proj-reg-filter-org">조직 (사업부/본부)</label>
+                    <select id="proj-reg-filter-org" class="form-control" title="조직(사업부/본부)"></select>
                   </div>
                   <div class="form-group" style="margin:0">
                     <label class="form-label" for="proj-reg-filter-client">고객사</label>
                     <input type="search" id="proj-reg-filter-client" class="form-control" placeholder="고객사 검색" title="고객사명 검색" />
                   </div>
                   <div class="form-group" style="margin:0">
+                    <label class="form-label" for="proj-reg-filter-main">프로젝트 유형 (대분류)</label>
+                    <select id="proj-reg-filter-main" class="form-control" title="프로젝트 유형 대분류"></select>
+                  </div>
+                  <div class="form-group" style="margin:0">
                     <label class="form-label" for="proj-reg-filter-status">상태</label>
                     <select id="proj-reg-filter-status" class="form-control" title="등록 상태">
                       <option value="">전체</option>
-                      <option value="draft">임시저장</option>
                       <option value="pending">승인대기</option>
                       <option value="approved">승인완료</option>
+                      <option value="conditional">조건부승인</option>
                       <option value="rejected">반려</option>
                     </select>
-                  </div>
-                  <div class="form-group" style="margin:0">
-                    <label class="form-label" for="proj-reg-filter-period-from">등록일 시작</label>
-                    <input type="date" id="proj-reg-filter-period-from" class="form-control" title="등록일 기준 시작일" />
-                  </div>
-                  <div class="form-group" style="margin:0">
-                    <label class="form-label" for="proj-reg-filter-period-to">등록일 종료</label>
-                    <input type="date" id="proj-reg-filter-period-to" class="form-control" title="등록일 기준 종료일" />
-                  </div>
-                  <div class="form-group" style="margin:0">
-                    <label class="form-label" for="proj-reg-filter-registrant">등록자</label>
-                    <input type="search" id="proj-reg-filter-registrant" class="form-control" placeholder="이름·ID" title="등록자" />
-                  </div>
-                  <div class="form-group" style="margin:0">
-                    <label class="form-label" for="proj-reg-filter-cpm">총괄 PM</label>
-                    <select id="proj-reg-filter-cpm" class="form-control" title="CPM"></select>
                   </div>
                 </div>
                 <div class="proj-reg-list-filters-actions">
@@ -2078,31 +2060,29 @@
               <div class="table-wrapper" style="border:none;border-radius:0">
                 <table id="proj-reg-list-table" class="data-table" style="table-layout:fixed;width:100%">
                   <colgroup>
-                    <col style="width:44px" />
-                    <col style="width:96px" />
+                    <col style="width:52px" />
+                    <col style="width:130px" />
+                    <col style="width:100px" />
+                    <col style="width:170px" />
+                    <col style="width:180px" />
                     <col style="width:180px" />
                     <col />
-                    <col style="width:190px" />
-                    <col style="width:116px" />
-                    <col style="width:96px" />
-                    <col style="width:100px" />
-                    <col style="width:96px" />
+                    <col style="width:110px" />
                   </colgroup>
                   <thead>
                     <tr>
                       <th style="text-align:center">No</th>
-                      <th style="text-align:center">상태</th>
-                      <th>프로젝트 코드</th>
-                      <th>프로젝트명</th>
+                      <th style="text-align:center">등록자</th>
+                      <th style="text-align:center">등록일자</th>
+                      <th>소속</th>
                       <th>고객사</th>
-                      <th style="text-align:center">수주참여자</th>
-                      <th style="text-align:center">CPM</th>
-                      <th style="text-align:center">등록일</th>
-                      <th style="text-align:center">관리</th>
+                      <th>프로젝트코드</th>
+                      <th>프로젝트명</th>
+                      <th style="text-align:center">상태</th>
                     </tr>
                   </thead>
                   <tbody id="proj-reg-list-body">
-                    <tr><td colspan="9" class="table-empty"><i class="fas fa-clipboard-list"></i><p>등록된 프로젝트가 없습니다.</p></td></tr>
+                    <tr><td colspan="8" class="table-empty"><i class="fas fa-clipboard-list"></i><p>등록된 프로젝트가 없습니다.</p></td></tr>
                   </tbody>
                 </table>
               </div>
@@ -4337,10 +4317,10 @@
 <script src="js/approval.js?v=20260420approvalFix2"></script>
 <script src="js/analysis.js?v=20260410a"></script>
 <script src="js/archive.js?v=20260410d"></script>
-<script src="js/project-management.js?v=20260420pmContractTable10"></script>
+<script src="js/project-management.js?v=20260420pmProgressCascade3"></script>
 <script src="js/project-dashboard.js?v=20260419projectDashboard1"></script>
 <!-- master.js / users.js: Settings 메뉴 진입 시 동적 로드 (초기 81KB 절감) -->
-<script src="js/main.js?v=20260420approvalFix2"></script>
+<script src="js/main.js?v=20260420projRegFlowRole1"></script>
 
 
 </body>
