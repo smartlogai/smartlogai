@@ -668,8 +668,8 @@ textarea.form-control {
    → 이 테이블만 max-width 해제(!important) + th/td에 열별 width·min-width 명시 */
 #page-project-register #pm-contract-table {
   table-layout: fixed;
-  width: 1386px !important;
-  min-width: 1386px !important;
+  width: 100% !important;
+  min-width: 1116px !important;
 }
 #page-project-register #pm-contract-table > thead > tr > th,
 #page-project-register #pm-contract-table > tbody > tr > td {
@@ -685,27 +685,26 @@ textarea.form-control {
 /* 프로젝트코드: 식별자 전체가 보이도록 최소 폭 확보 (말줄임 최소화) */
 #page-project-register #pm-contract-table > thead > tr > th:nth-child(2),
 #page-project-register #pm-contract-table > tbody > tr > td:nth-child(2) {
-  width: 560px;
-  min-width: 560px;
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-  word-break: break-all;
+  width: 220px;
+  min-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
 }
 #page-project-register #pm-contract-table > thead > tr > th:nth-child(3),
 #page-project-register #pm-contract-table > tbody > tr > td:nth-child(3) {
-  width: 240px;
-  min-width: 240px;
+  width: 260px;
+  min-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 #page-project-register #pm-contract-table > thead > tr > th:nth-child(4),
 #page-project-register #pm-contract-table > tbody > tr > td:nth-child(4) {
-  width: 220px;
-  min-width: 220px;
+  width: 200px;
+  min-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -718,8 +717,8 @@ textarea.form-control {
 }
 #page-project-register #pm-contract-table > thead > tr > th:nth-child(6),
 #page-project-register #pm-contract-table > tbody > tr > td:nth-child(6) {
-  width: 80px;
-  min-width: 80px;
+  width: 100px;
+  min-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -728,16 +727,16 @@ textarea.form-control {
 #page-project-register #pm-contract-table > tbody > tr > td:nth-child(7),
 #page-project-register #pm-contract-table > thead > tr > th:nth-child(8),
 #page-project-register #pm-contract-table > tbody > tr > td:nth-child(8) {
-  width: 80px;
-  min-width: 80px;
+  width: 100px;
+  min-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 #page-project-register #pm-contract-table > thead > tr > th:nth-child(8),
 #page-project-register #pm-contract-table > tbody > tr > td:nth-child(8) {
-  width: 90px;
-  min-width: 90px;
+  width: 120px;
+  min-width: 120px;
 }
 #page-project-register #pm-contract-table > tbody > tr > td.pm-contract-td-no,
 #page-project-register #pm-contract-table > tbody > tr > td.pm-contract-td-status {
@@ -745,19 +744,19 @@ textarea.form-control {
   text-overflow: clip;
 }
 #page-project-register #pm-contract-table > tbody > tr > td.pm-contract-code-cell {
-  overflow: visible !important;
-  text-overflow: clip !important;
-  white-space: normal !important;
-  word-break: break-all !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  word-break: normal !important;
   line-height: 1.3;
 }
 /* 최후 보정: 계약서 관리 탭에서 프로젝트코드 가시성 우선 */
 #pm-contract-table td:nth-child(2),
 #pm-contract-table td.pm-contract-code-cell {
-  overflow: visible !important;
-  text-overflow: clip !important;
-  white-space: normal !important;
-  word-break: break-all !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  word-break: normal !important;
   line-height: 1.3 !important;
 }
 #pm-contract-table td:nth-child(6),

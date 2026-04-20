@@ -26,7 +26,7 @@
   <script src="https://cdn.jsdelivr.net/npm/turndown/dist/turndown.js" defer></script>
   <!-- turndown-plugin-gfm: 테이블 등 GFM 확장 지원 -->
   <script src="https://cdn.jsdelivr.net/npm/turndown-plugin-gfm/dist/turndown-plugin-gfm.js" defer></script>
-  <link rel="stylesheet" href="css/style.css?v=20260420pmContractTable8" />
+  <link rel="stylesheet" href="css/style.css?v=20260420pmContractTable10" />
   <!-- Chart.js: 대시보드/분석에서 사용 → defer로 DOM 파싱 차단 방지 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
   <!-- ★ 무거운 라이브러리는 필요한 시점에 동적으로 로드 (초기 blocking 제거) -->
@@ -2734,16 +2734,16 @@
             </div>
             <div class="card-body" style="padding:0">
               <div class="table-wrapper" style="border:none;border-radius:0;overflow:auto">
-                <table id="pm-contract-table" class="data-table pm-contract-table" style="table-layout:fixed;width:1386px">
+                <table id="pm-contract-table" class="data-table pm-contract-table" style="table-layout:fixed;width:100%;min-width:1116px">
                   <colgroup>
                     <col class="pm-col-no" style="width:44px" />
-                    <col class="pm-col-code" style="width:560px" />
-                    <col class="pm-col-name" style="width:240px" />
-                    <col class="pm-col-client" style="width:220px" />
+                    <col class="pm-col-code" style="width:220px" />
+                    <col class="pm-col-name" style="width:260px" />
+                    <col class="pm-col-client" style="width:200px" />
                     <col class="pm-col-status" style="width:72px" />
-                    <col class="pm-col-file" style="width:80px" />
-                    <col class="pm-col-file" style="width:80px" />
-                    <col class="pm-col-file" style="width:90px" />
+                    <col class="pm-col-file" style="width:100px" />
+                    <col class="pm-col-file" style="width:100px" />
+                    <col class="pm-col-file" style="width:120px" />
                   </colgroup>
                   <thead>
                     <tr>
@@ -4337,7 +4337,7 @@
 <script src="js/approval.js?v=20260420approvalFix2"></script>
 <script src="js/analysis.js?v=20260410a"></script>
 <script src="js/archive.js?v=20260410d"></script>
-<script src="js/project-management.js?v=20260420pmContractTable9"></script>
+<script src="js/project-management.js?v=20260420pmContractTable10"></script>
 <script src="js/project-dashboard.js?v=20260419projectDashboard1"></script>
 <!-- master.js / users.js: Settings 메뉴 진입 시 동적 로드 (초기 81KB 절감) -->
 <script src="js/main.js?v=20260420approvalFix2"></script>

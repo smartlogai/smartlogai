@@ -2104,10 +2104,10 @@ async function loadProjectMgmtContracts() {
   const table = document.getElementById('pm-contract-table');
   if (!body) return;
   if (table) {
-    // 강제 레이아웃 적용: CSS 캐시/우선순위와 무관하게 프로젝트코드 가시성 확보
+    // 강제 레이아웃 적용: 화면별 스타일 충돌 방지
     table.style.setProperty('table-layout', 'fixed', 'important');
-    table.style.setProperty('width', '1386px', 'important');
-    table.style.setProperty('min-width', '1386px', 'important');
+    table.style.setProperty('width', '100%', 'important');
+    table.style.setProperty('min-width', '1116px', 'important');
   }
   const session = getSession ? getSession() : null;
   try {
@@ -2147,9 +2147,9 @@ async function loadProjectMgmtContracts() {
       const clientT = _pmEsc(String(r.client_name || ''));
       return `<tr>
         <td class="pm-contract-td-no" style="text-align:center;width:44px;min-width:44px;max-width:52px">${i + 1}</td>
-        <td class="pm-contract-code-cell" style="width:560px;min-width:560px;max-width:none;overflow:visible;text-overflow:clip;font-variant-numeric:tabular-nums;letter-spacing:0.01em" title="${codeT}"><span style="display:inline-block;max-width:100%;white-space:normal;word-break:break-all;overflow-wrap:anywhere;line-height:1.3">${_pmEsc(r.project_code || '-')}</span></td>
-        <td class="pm-contract-ellipsis" style="width:240px;min-width:240px;max-width:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${nameT}">${_pmEsc(r.project_name || '-')}</td>
-        <td class="pm-contract-ellipsis" style="width:220px;min-width:220px;max-width:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${clientT}">${_pmEsc(r.client_name || '-')}</td>
+        <td class="pm-contract-code-cell" style="width:220px;min-width:220px;max-width:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums;letter-spacing:0.01em" title="${codeT}">${_pmEsc(r.project_code || '-')}</td>
+        <td class="pm-contract-ellipsis" style="width:260px;min-width:260px;max-width:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${nameT}">${_pmEsc(r.project_name || '-')}</td>
+        <td class="pm-contract-ellipsis" style="width:200px;min-width:200px;max-width:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${clientT}">${_pmEsc(r.client_name || '-')}</td>
         <td class="pm-contract-td-status" style="text-align:center;width:72px;min-width:72px;max-width:88px">
           <span style="display:inline-flex;align-items:center;justify-content:center;min-width:56px;padding:2px 8px;border-radius:999px;background:${statusBg};color:${statusColor};font-size:11px;font-weight:700">${statusTxt}</span>
         </td>
@@ -2159,7 +2159,7 @@ async function loadProjectMgmtContracts() {
       </tr>`;
     }).join('');
     // 최후 보정: 컬럼 폭/스타일을 JS에서 직접 강제 (반응형/캐시 충돌 우회)
-    const colWidths = ['44px', '560px', '240px', '220px', '72px', '80px', '80px', '90px'];
+    const colWidths = ['44px', '220px', '260px', '200px', '72px', '100px', '100px', '120px'];
     const headerRow = table ? table.querySelector('thead tr') : null;
     if (headerRow) {
       colWidths.forEach((w, idx) => {
@@ -2179,14 +2179,13 @@ async function loadProjectMgmtContracts() {
       const codeTd = tr.children && tr.children[1];
       if (!codeTd) return;
       codeTd.classList.add('pm-contract-code-cell');
-      codeTd.style.setProperty('overflow', 'visible', 'important');
-      codeTd.style.setProperty('text-overflow', 'clip', 'important');
-      codeTd.style.setProperty('white-space', 'normal', 'important');
-      codeTd.style.setProperty('word-break', 'break-all', 'important');
-      codeTd.style.setProperty('overflow-wrap', 'anywhere', 'important');
+      codeTd.style.setProperty('overflow', 'hidden', 'important');
+      codeTd.style.setProperty('text-overflow', 'ellipsis', 'important');
+      codeTd.style.setProperty('white-space', 'nowrap', 'important');
+      codeTd.style.setProperty('word-break', 'normal', 'important');
       codeTd.style.setProperty('max-width', 'none', 'important');
-      codeTd.style.setProperty('width', '560px', 'important');
-      codeTd.style.setProperty('min-width', '560px', 'important');
+      codeTd.style.setProperty('width', '220px', 'important');
+      codeTd.style.setProperty('min-width', '220px', 'important');
       codeTd.style.setProperty('line-height', '1.3', 'important');
     });
     if (summary) summary.textContent = `계약서 누락 ${missingCount}건 / 전체 ${list.length}건`;
