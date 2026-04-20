@@ -437,6 +437,7 @@ const PAGE_TITLES = {
   'my-entries-hourly': 'My Time Sheet',
   'my-entries-daily': 'My Time Sheet',
   'project-deliverables': 'Project Outputs',
+  'helpdesk': 'Help Desk',
   approval: 'Approval',
   analysis: 'Analysis',
   archive: 'Advisory Library',
@@ -463,6 +464,7 @@ const PAGE_INIT_MAP = {
   'my-entries-hourly': 'init_my_entries',
   'my-entries-daily': 'init_my_entries',
   'project-deliverables': 'init_project_deliverables',
+  'helpdesk': 'init_helpdesk',
   'approval': 'init_approval',
   'analysis': 'init_analysis',
   'archive': 'init_archive',
@@ -493,6 +495,7 @@ const _LAZY_SCRIPTS = {
   'users'             : 'js/users.js?v=20260416tsopt1',
   'project-register'  : 'js/project-register.js?v=20260420projRegFlowRole1',
   'project-management': 'js/project-register.js?v=20260420projRegFlowRole1',
+  'helpdesk'          : 'js/helpdesk.js?v=20260420helpdesk7',
 };
 const _lazyLoaded = {};  // 이미 로드된 파일 추적
 

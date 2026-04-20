@@ -282,23 +282,27 @@ try {
   window.SmartLogFlags.llmProxyEnabled = false;
 }
 
+// Help Desk 운영 단계 플래그
+// - internal : 내부 유지보수 운영(기본)
+// - hybrid   : 내부+외주 병행(이관 준비)
+// - vendor   : 외주 주도 운영
+window.SmartLogHelpDesk = window.SmartLogHelpDesk || {};
+try {
+  const phaseRaw = String(localStorage.getItem('smartlog_helpdesk_phase') || 'internal').trim().toLowerCase();
+  const phase = ['internal', 'hybrid', 'vendor'].includes(phaseRaw) ? phaseRaw : 'internal';
+  const portalRaw = String(localStorage.getItem('smartlog_helpdesk_external_portal') || '').trim().toLowerCase();
+  window.SmartLogHelpDesk.phase = phase;
+  window.SmartLogHelpDesk.externalPortalEnabled = portalRaw === '1' || portalRaw === 'true';
+  // 외주 포털 URL은 이관 시점에 localStorage 또는 배포 스크립트로 주입
+  window.SmartLogHelpDesk.externalPortalUrl = String(localStorage.getItem('smartlog_helpdesk_external_portal_url') || '').trim();
+} catch (_) {
+  window.SmartLogHelpDesk.phase = 'internal';
+  window.SmartLogHelpDesk.externalPortalEnabled = false;
+  window.SmartLogHelpDesk.externalPortalUrl = '';
+}
+
 function renderEnvBadge() {
-  const wrap = document.getElementById('headerActions');
-  if (!wrap) return;
-  if (wrap.querySelector('[data-smartlog-env-badge="1"]')) return;
-  const badge = document.createElement('span');
-  badge.dataset.smartlogEnvBadge = '1';
-  badge.style.cssText =
-    'display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;' +
-    'font-size:12px;font-weight:800;letter-spacing:-0.2px;border:1px solid var(--border-light);' +
-    (SMARTLOG_ENV_LABEL === 'PROD'
-      ? 'background:#fef2f2;color:#991b1b;border-color:#fecaca'
-      : 'background:#eff6ff;color:#1e40af;border-color:#bfdbfe');
-  badge.title = '현재 접속 환경';
-  badge.innerHTML =
-    `<span style="width:7px;height:7px;border-radius:50%;background:${SMARTLOG_ENV_LABEL === 'PROD' ? '#ef4444' : '#3b82f6'}"></span>` +
-    `ENV: ${Utils.escHtml(String(SMARTLOG_ENV_LABEL))}`;
-  wrap.appendChild(badge);
+  // 정책 변경: ENV 배지는 헤더에서 노출하지 않음.
 }
 window.renderEnvBadge = renderEnvBadge;
 

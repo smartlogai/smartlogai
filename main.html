@@ -254,8 +254,20 @@
       <h1 id="pageTitle">Dashboard</h1>
       <div class="header-actions" id="headerActions"></div>
 
-      <!-- 🔔 알림 버튼 -->
+      <!-- 🎧 Help Desk 버튼 -->
       <div style="position:relative;margin-left:8px;flex-shrink:0">
+        <button id="helpdesk-btn" title="Help Desk" onclick="navigateTo('helpdesk')"
+          style="position:relative;background:none;border:none;cursor:pointer;
+                 padding:6px 10px;border-radius:8px;color:#6b7280;font-size:14px;font-weight:700;
+                 display:flex;align-items:center;transition:background 0.15s"
+          onmouseover="this.style.background='#f3f4f6'"
+          onmouseout="this.style.background='none'">
+          <i class="fas fa-headset" style="font-size:16px;margin-right:6px"></i><span>Help Desk</span>
+        </button>
+      </div>
+
+      <!-- 🔔 알림 버튼 -->
+      <div style="position:relative;margin-left:2px;flex-shrink:0">
         <button id="notify-btn" title="알림"
           style="position:relative;background:none;border:none;cursor:pointer;
                  padding:6px 8px;border-radius:8px;color:#6b7280;font-size:18px;
@@ -375,6 +387,153 @@
                     <tr><td colspan="7" class="table-empty"><i class="fas fa-layer-group"></i><p>데이터를 불러오는 중입니다.</p></td></tr>
                   </tbody>
                 </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="page-section" id="page-helpdesk">
+        <div class="card" style="margin-bottom:12px">
+          <div class="card-header">
+            <h2><i class="fas fa-headset" style="color:var(--primary)"></i> Help Desk</h2>
+          </div>
+          <div class="card-body" style="font-size:12.5px;color:var(--text-secondary);line-height:1.6">
+            운영 중 발생한 오류/개선요청을 등록하고 처리 이력을 추적합니다.
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:minmax(320px,420px) minmax(0,1fr);gap:12px;align-items:start">
+          <div class="card">
+            <div class="card-header"><h2>이슈 등록</h2></div>
+            <div class="card-body">
+              <div class="form-group">
+                <label class="form-label">유형</label>
+                <select id="hd-form-category" class="form-control">
+                  <option value="bug">오류</option>
+                  <option value="improvement">개선</option>
+                  <option value="question">문의</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">심각도</label>
+                <select id="hd-form-severity" class="form-control">
+                  <option value="low">낮음</option>
+                  <option value="medium" selected>보통</option>
+                  <option value="high">높음</option>
+                  <option value="critical">긴급</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">화면/메뉴 코드</label>
+                <input type="text" id="hd-form-page-code" class="form-control" placeholder="예: project-management / approval" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">제목</label>
+                <input type="text" id="hd-form-title" class="form-control" placeholder="문제 핵심을 간단히 입력" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">상세 내용</label>
+                <textarea id="hd-form-description" class="form-control" rows="4" placeholder="현상, 영향 범위, 발생 시점"></textarea>
+              </div>
+              <div class="form-group">
+                <label class="form-label">재현 절차</label>
+                <textarea id="hd-form-repro" class="form-control" rows="3" placeholder="1) ... 2) ..."></textarea>
+              </div>
+              <div style="display:flex;gap:8px;justify-content:flex-end">
+                <button type="button" class="btn btn-sm btn-outline" id="hd-form-reset-btn"><i class="fas fa-undo"></i> 초기화</button>
+                <button type="button" class="btn btn-sm btn-primary" id="hd-form-submit-btn"><i class="fas fa-paper-plane"></i> 등록</button>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:grid;gap:12px">
+            <div class="card">
+              <div class="card-header">
+                <h2>티켓 목록</h2>
+                <div id="hd-list-summary" style="font-size:12px;color:var(--text-muted)">0건</div>
+              </div>
+              <div class="card-body" style="padding-bottom:10px">
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:10px">
+                  <select id="hd-filter-status" class="form-control">
+                    <option value="">상태 전체</option>
+                    <option value="open">접수</option>
+                    <option value="triaged">분석중</option>
+                    <option value="in_progress">처리중</option>
+                    <option value="waiting_user">사용자확인대기</option>
+                    <option value="resolved">해결</option>
+                    <option value="closed">종결</option>
+                    <option value="rejected">반려</option>
+                  </select>
+                  <select id="hd-filter-category" class="form-control">
+                    <option value="">유형 전체</option>
+                    <option value="bug">오류</option>
+                    <option value="improvement">개선</option>
+                    <option value="question">문의</option>
+                  </select>
+                  <select id="hd-filter-scope" class="form-control">
+                    <option value="mine">내 티켓</option>
+                    <option value="all">전체</option>
+                    <option value="assigned">내 담당</option>
+                  </select>
+                  <input type="search" id="hd-filter-q" class="form-control" placeholder="티켓번호/제목/등록자 검색" />
+                  <button type="button" class="btn btn-sm btn-outline" id="hd-refresh-btn"><i class="fas fa-sync-alt"></i> 새로고침</button>
+                </div>
+                <div class="table-wrapper" style="border:1px solid var(--border-light);border-radius:8px;overflow:auto;max-height:340px">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th style="width:120px">티켓번호</th>
+                        <th style="width:84px;text-align:center">상태</th>
+                        <th style="width:76px;text-align:center">유형</th>
+                        <th style="width:70px;text-align:center">심각도</th>
+                        <th>제목</th>
+                        <th style="width:90px;text-align:center">등록자</th>
+                        <th style="width:98px;text-align:center">등록일</th>
+                      </tr>
+                    </thead>
+                    <tbody id="hd-list-body">
+                      <tr><td colspan="7" class="table-empty"><i class="fas fa-inbox"></i><p>등록된 티켓이 없습니다.</p></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header"><h2>티켓 상세</h2></div>
+              <div class="card-body" id="hd-detail-wrap">
+                <div id="hd-detail-empty" class="table-empty"><i class="fas fa-ticket-alt"></i><p>목록에서 티켓을 선택하세요.</p></div>
+                <div id="hd-detail-card" style="display:none">
+                  <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px">
+                    <strong id="hd-detail-title">-</strong>
+                    <span id="hd-detail-status-badge"></span>
+                  </div>
+                  <div id="hd-detail-meta" style="font-size:12px;color:var(--text-muted);margin-bottom:10px"></div>
+                  <div id="hd-detail-description" style="white-space:pre-wrap;font-size:13px;line-height:1.5;background:#f8fafc;border:1px solid var(--border-light);border-radius:8px;padding:10px;margin-bottom:10px"></div>
+
+                  <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:10px">
+                    <select id="hd-detail-status" class="form-control">
+                      <option value="open">접수</option>
+                      <option value="triaged">분석중</option>
+                      <option value="in_progress">처리중</option>
+                      <option value="waiting_user">사용자확인대기</option>
+                      <option value="resolved">해결</option>
+                      <option value="closed">종결</option>
+                      <option value="rejected">반려</option>
+                    </select>
+                    <input type="text" id="hd-detail-assignee-id" class="form-control" placeholder="담당자 ID" />
+                    <input type="text" id="hd-detail-assignee-name" class="form-control" placeholder="담당자명" />
+                    <button type="button" class="btn btn-sm btn-primary" id="hd-detail-save-btn"><i class="fas fa-save"></i> 저장</button>
+                  </div>
+
+                  <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">처리 이력</div>
+                  <div id="hd-comment-list" style="display:grid;gap:8px;max-height:180px;overflow:auto;padding-right:2px;margin-bottom:10px"></div>
+                  <div style="display:grid;grid-template-columns:1fr auto;gap:8px">
+                    <textarea id="hd-comment-input" class="form-control" rows="2" placeholder="코멘트를 남기세요"></textarea>
+                    <button type="button" class="btn btn-sm btn-outline" id="hd-comment-submit-btn"><i class="fas fa-comment-dots"></i> 등록</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -4320,7 +4479,7 @@
 <script src="js/project-management.js?v=20260420pmProgressCascade3"></script>
 <script src="js/project-dashboard.js?v=20260419projectDashboard1"></script>
 <!-- master.js / users.js: Settings 메뉴 진입 시 동적 로드 (초기 81KB 절감) -->
-<script src="js/main.js?v=20260420projRegFlowRole1"></script>
+<script src="js/main.js?v=20260420helpdesk7"></script>
 
 
 </body>

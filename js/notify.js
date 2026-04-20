@@ -23,6 +23,9 @@ const NOTIFY_META = {
   approved:     { icon: '🎉', label: '최종 승인',   color: '#15803d', bg: '#f0fdf4', target: 'my-entries'  },
   rejected:     { icon: '❌', label: '반려',        color: '#dc2626', bg: '#fef2f2', target: 'my-entries'  },
   invoice_due_remind: { icon: '🧾', label: '발행 리마인드', color: '#7c3aed', bg: '#f5f3ff', target: 'project-management:invoice' },
+  helpdesk_new_ticket: { icon: '🎧', label: 'Help Desk 접수', color: '#1d4ed8', bg: '#dbeafe', target: 'helpdesk' },
+  helpdesk_status_updated: { icon: '🛠️', label: 'Help Desk 업데이트', color: '#0f766e', bg: '#ccfbf1', target: 'helpdesk' },
+  helpdesk_comment: { icon: '💬', label: 'Help Desk 코멘트', color: '#7c3aed', bg: '#f3e8ff', target: 'helpdesk' },
 };
 
 // ════════════════════════════════════════════════════════════
@@ -234,6 +237,9 @@ async function _onNotifyClick(notifyId, targetMenu, entryId) {
   if (targetMenu && typeof navigateTo === 'function') {
     const raw = String(targetMenu || '').trim();
     const [page, subtab] = raw.includes(':') ? raw.split(':', 2) : [raw, ''];
+    if (page === 'helpdesk' && entryId) {
+      window.__HD_OPEN_TICKET_ID__ = String(entryId || '').trim();
+    }
     navigateTo(page);
     if (page === 'approval') {
       const tab = (subtab === 'project' || subtab === 'timesheet') ? subtab : 'timesheet';
