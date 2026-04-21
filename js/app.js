@@ -1732,11 +1732,103 @@ function navigateTo(page) {
   document.querySelectorAll('.nav-item').forEach(item => {
     item.classList.toggle('active', item.dataset.page === page);
   });
+  if (!_sidebarSections.length) refreshSidebarSectionCollapse();
+  const activeItem = document.querySelector(`.nav-item[data-page="${page}"].active`);
+  if (activeItem) {
+    const sectionOfItem = _sidebarSections.find((s) => s.items.includes(activeItem));
+    if (sectionOfItem) toggleSidebarSection(sectionOfItem.id, true);
+    try { activeItem.scrollIntoView({ block: 'nearest' }); } catch (_) {}
+  }
   document.querySelector('.sidebar')?.classList.remove('open');
 }
 
 function toggleSidebar() {
   document.querySelector('.sidebar')?.classList.toggle('open');
+}
+
+const SIDEBAR_SECTION_STORAGE_KEY = 'smartlog_sidebar_section_state_v1';
+let _sidebarSections = [];
+
+function _getSidebarSectionState() {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_SECTION_STORAGE_KEY) || '{}';
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function _saveSidebarSectionState(state) {
+  try { localStorage.setItem(SIDEBAR_SECTION_STORAGE_KEY, JSON.stringify(state || {})); } catch (_) {}
+}
+
+function _sidebarSectionId(titleEl, idx) {
+  const base = String(titleEl.id || titleEl.textContent || `section-${idx}`).trim().toLowerCase();
+  return base.replace(/[^a-z0-9_-]+/g, '-');
+}
+
+function _collectSidebarSections() {
+  const nav = document.querySelector('.sidebar-nav');
+  if (!nav) return [];
+  const children = Array.from(nav.children || []);
+  const sections = [];
+  let current = null;
+  children.forEach((el, idx) => {
+    if (el.classList && el.classList.contains('nav-section-title')) {
+      current = { id: _sidebarSectionId(el, idx), title: el, items: [] };
+      sections.push(current);
+      return;
+    }
+    if (current) current.items.push(el);
+  });
+  return sections;
+}
+
+function _applySidebarSectionCollapsed(section, collapsed) {
+  if (!section || !section.title) return;
+  section.title.classList.add('nav-section-title--collapsible');
+  section.title.dataset.collapsed = collapsed ? '1' : '0';
+  section.title.setAttribute('role', 'button');
+  section.title.tabIndex = 0;
+  section.items.forEach((el) => {
+    if (!el || !el.classList) return;
+    el.classList.toggle('nav-collapsed-item', !!collapsed);
+  });
+}
+
+function _bindSidebarSectionTitle(section) {
+  if (!section || !section.title || section.title.dataset.sectionBound === '1') return;
+  const onToggle = () => toggleSidebarSection(section.id);
+  section.title.addEventListener('click', onToggle);
+  section.title.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onToggle();
+    }
+  });
+  section.title.dataset.sectionBound = '1';
+}
+
+function refreshSidebarSectionCollapse() {
+  _sidebarSections = _collectSidebarSections();
+  const state = _getSidebarSectionState();
+  _sidebarSections.forEach((section) => {
+    _bindSidebarSectionTitle(section);
+    _applySidebarSectionCollapsed(section, !!state[section.id]);
+  });
+}
+
+function toggleSidebarSection(sectionId, forceExpand) {
+  if (!_sidebarSections.length) refreshSidebarSectionCollapse();
+  const section = _sidebarSections.find((s) => s.id === sectionId);
+  if (!section) return;
+  const state = _getSidebarSectionState();
+  const currentCollapsed = !!state[sectionId];
+  const nextCollapsed = forceExpand === true ? false : !currentCollapsed;
+  state[sectionId] = nextCollapsed;
+  _saveSidebarSectionState(state);
+  _applySidebarSectionCollapsed(section, nextCollapsed);
 }
 
 // ─────────────────────────────────────────────
@@ -1858,6 +1950,7 @@ function setupMenuByRole(session) {
 
   // ── 승인자 없는 staff 안내 배너 표시 ──────────────────────
   _showNoApproverBanner(isStaffNoApprover);
+  refreshSidebarSectionCollapse();
 }
 
 async function _refreshProjectMgmtMenuVisibility(session, canProjectReg) {
@@ -2248,6 +2341,14 @@ const GlobalBusy = (() => {
     } catch (e) {
       console.warn('[date-inputs] init failed', e);
     }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+})();
+
+(function _bootSidebarSectionCollapse() {
+  function run() {
+    try { refreshSidebarSectionCollapse(); } catch (e) { console.warn('[sidebar] section collapse init failed', e); }
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
   else run();

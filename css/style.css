@@ -33,6 +33,8 @@
   --text-muted: #9aa4b2;
   --border: #dde3ec;
   --border-light: #edf1f5;
+  --table-grid: #d4dde9;
+  --table-head-bg: #f3f7fc;
 
   --radius: 12px;
   --radius-sm: 8px;
@@ -99,7 +101,10 @@ input[type="datetime-local"]::-webkit-datetime-edit-year-field {
 
 .sidebar-nav {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
   padding: 14px 0 12px;
 }
 .sidebar-nav::-webkit-scrollbar { width: 4px; }
@@ -112,6 +117,26 @@ input[type="datetime-local"]::-webkit-datetime-edit-year-field {
   text-transform: uppercase;
   letter-spacing: 0.8px;
   padding: 10px 16px 4px;
+}
+.nav-section-title--collapsible {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.nav-section-title--collapsible::after {
+  content: '▾';
+  font-size: 9px;
+  color: rgba(255,255,255,0.5);
+  transition: transform 0.15s ease;
+}
+.nav-section-title--collapsible[data-collapsed="1"]::after {
+  transform: rotate(-90deg);
+}
+.nav-collapsed-item {
+  display: none !important;
 }
 .nav-item {
   display: flex;
@@ -608,7 +633,7 @@ textarea.form-control {
 .table-wrapper {
   overflow-x: auto;
   border-radius: var(--radius);
-  border: 1px solid var(--border-light);
+  border: 1px solid var(--table-grid);
 }
 .data-table {
   width: 100%;
@@ -636,19 +661,23 @@ textarea.form-control {
   line-height: 1.4;
 }
 .data-table thead th {
-  background: #f7f9fc;
+  background: var(--table-head-bg);
   padding: 7px 8px;
   text-align: left;
   font-size: 11.5px;
   font-weight: 700;
   color: var(--text-secondary);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--table-grid);
+  border-right: 1px solid var(--table-grid);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.data-table thead th:last-child {
+  border-right: none;
+}
 .data-table tbody tr {
-  border-bottom: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--table-grid);
   transition: background 0.1s;
 }
 .data-table tbody tr:last-child { border-bottom: none; }
@@ -657,10 +686,14 @@ textarea.form-control {
   padding: 6px 7px;
   color: var(--text-primary);
   vertical-align: middle;
+  border-right: 1px solid var(--table-grid);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 0;   /* table-layout:fixed 에서 ellipsis 동작 필수 */
+}
+.data-table td:last-child {
+  border-right: none;
 }
 
 /* 프로젝트관리 — 계약서 관리
