@@ -1064,7 +1064,7 @@ async function loadApprovalList() {
 
     const tbody = document.getElementById('approval-list-body');
     if (paged.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="13" class="table-empty"><i class="fas fa-check-circle" style="color:var(--success)"></i><p>검토 대기 중인 항목이 없습니다.</p></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="12" class="table-empty"><i class="fas fa-check-circle" style="color:var(--success)"></i><p>검토 대기 중인 항목이 없습니다.</p></td></tr>`;
     } else {
       const canDoApprove = Auth.canApprove(session); // manager만 true
 
@@ -1113,7 +1113,7 @@ async function loadApprovalList() {
         const legacySub = String(e.work_subcategory_name || '').trim();
         const primarySub = (isProjRow && hasPcode) ? (projSub || legacySub || '—') : (legacySub || '—');
         const subMainLabel = Utils.escHtml(primarySub);
-        const subHtml = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12.5px"
+        const subHtml = `<span style="display:block;font-size:12.5px;white-space:normal;word-break:keep-all;line-height:1.35"
               title="${subMainLabel}">
           ${subMainLabel}
         </span>`;
@@ -1137,9 +1137,6 @@ async function loadApprovalList() {
           <td style="font-size:12px;white-space:nowrap;color:var(--text-secondary)">${writtenAt}${docNoHtml}</td>
           <td style="padding:0 8px">
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12.5px;font-weight:600" title="${Utils.escHtml(e.user_name||'')}">${Utils.escHtml(e.user_name||'—')}</span>
-          </td>
-          <td style="padding:0 8px">
-            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12px;color:var(--text-secondary)" title="${Utils.escHtml(e.approver_name||'')}">${Utils.escHtml(e.approver_name||'—')}</span>
           </td>
           <td style="padding:0 8px">
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12px;color:var(--text-secondary)" title="${Utils.escHtml(e.team_name||'')}">${Utils.escHtml(e.team_name||'—')}</span>
