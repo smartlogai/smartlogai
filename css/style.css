@@ -33,8 +33,6 @@
   --text-muted: #9aa4b2;
   --border: #dde3ec;
   --border-light: #edf1f5;
-  --table-grid: #d4dde9;
-  --table-head-bg: #f3f7fc;
 
   --radius: 12px;
   --radius-sm: 8px;
@@ -633,7 +631,7 @@ textarea.form-control {
 .table-wrapper {
   overflow-x: auto;
   border-radius: var(--radius);
-  border: 1px solid var(--table-grid);
+  border: 1px solid var(--border-light);
 }
 .data-table {
   width: 100%;
@@ -661,23 +659,19 @@ textarea.form-control {
   line-height: 1.4;
 }
 .data-table thead th {
-  background: var(--table-head-bg);
+  background: #f7f9fc;
   padding: 7px 8px;
   text-align: left;
   font-size: 11.5px;
   font-weight: 700;
   color: var(--text-secondary);
-  border-bottom: 1px solid var(--table-grid);
-  border-right: 1px solid var(--table-grid);
+  border-bottom: 1px solid var(--border);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.data-table thead th:last-child {
-  border-right: none;
-}
 .data-table tbody tr {
-  border-bottom: 1px solid var(--table-grid);
+  border-bottom: 1px solid var(--border-light);
   transition: background 0.1s;
 }
 .data-table tbody tr:last-child { border-bottom: none; }
@@ -686,14 +680,10 @@ textarea.form-control {
   padding: 6px 7px;
   color: var(--text-primary);
   vertical-align: middle;
-  border-right: 1px solid var(--table-grid);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 0;   /* table-layout:fixed 에서 ellipsis 동작 필수 */
-}
-.data-table td:last-child {
-  border-right: none;
 }
 
 /* 프로젝트관리 — 계약서 관리
