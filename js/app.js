@@ -228,6 +228,10 @@ const Auth = {
 
   // 분석 열람: manager + director + top_mgr + admin
   canViewAnalysis: (s) => s && (s.role === 'director' || s.role === 'top_mgr' || s.role === 'admin' || s.role === 'manager'),
+  // 고과분석 열람: director + top_mgr + admin
+  canViewStaffAnalysis: (s) => s && (s.role === 'director' || s.role === 'top_mgr' || s.role === 'admin'),
+  // 프로젝트 매출·이익분석 열람: director + top_mgr + admin
+  canViewProjectProfitAnalysis: (s) => s && (s.role === 'director' || s.role === 'top_mgr' || s.role === 'admin'),
 
   // 자문 자료실: 모든 역할
   canViewArchive: (s) => !!s,

@@ -3201,6 +3201,13 @@ async function _doSaveEntry(status, approverInfo, autoApprove = false) {
       project_code = (document.getElementById('entry-daily-project-code')?.value || '').trim();
       project_name = (document.getElementById('entry-daily-project-name')?.value || '').trim();
       work_location = (document.getElementById('entry-work-location')?.value || '').trim();
+      const projectSubName = await _entryResolveProjectSubcategoryByCode(project_code);
+      if (projectSubName) {
+        persistSubName = projectSubName;
+        const subs = (_allSubcategories || []).filter((s) => String(s.category_id) === String(catId));
+        const exact = subs.find((s) => String(s.sub_category_name || '').trim() === projectSubName);
+        persistSubId = exact ? String(exact.id || '') : '';
+      }
     }
     let effClientId = (catTypeEff === 'client' || isClearance) ? clientId : '';
     let effClientName = (catTypeEff === 'client' || isClearance) ? clientName : '';
@@ -3471,6 +3478,24 @@ async function _entryEnsureProjectCodeTypes() {
     if (mc && sc) _entryProjectTypeByMainSub[`${mc}|${sc}`] = r;
   });
   return _entryProjectCodeTypeRows;
+}
+
+async function _entryResolveProjectSubcategoryByCode(projectCode) {
+  const code = String(projectCode || '').trim();
+  if (!code) return '';
+  await _entryEnsureProjectCodeTypes();
+  const parts = code.split('_').map((s) => String(s || '').trim()).filter(Boolean);
+  const mainCode = parts[0] || '';
+  const subCode = parts[1] || '';
+  let typeRow = (mainCode && subCode) ? (_entryProjectTypeByMainSub || {})[`${mainCode}|${subCode}`] : null;
+  if (!typeRow) {
+    const picked = (_dailyOpenProjectRows || []).find((r) => String(r.project_code || '').trim() === code);
+    const typeId = String((picked && picked.project_code_type_id) || '').trim();
+    if (typeId) {
+      typeRow = (_entryProjectCodeTypeRows || []).find((r) => String(r.id || '').trim() === typeId) || null;
+    }
+  }
+  return typeRow ? String(typeRow.sub_category || '').trim() : '';
 }
 
 function _entryFilterIsProjectMainValue(v) {

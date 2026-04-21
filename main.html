@@ -338,6 +338,36 @@
           </div>
         </div>
 
+        <div class="card" style="margin-bottom:12px">
+          <div class="card-header">
+            <h2><i class="fas fa-chart-line" style="color:var(--primary)"></i> 실시간 손익 요약</h2>
+            <div class="card-actions" style="font-size:12px;color:var(--text-muted)">
+              제안확정단가 > 프로젝트개별단가 > 코드설정단가
+            </div>
+          </div>
+          <div class="card-body" style="padding:0">
+            <div class="table-wrapper" style="border:none;border-radius:0;overflow:auto">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th style="width:42px;text-align:center">No</th>
+                    <th style="width:130px">프로젝트코드</th>
+                    <th>프로젝트명</th>
+                    <th style="width:120px;text-align:right">프로젝트매출액</th>
+                    <th style="width:120px;text-align:right">실시간투입원가</th>
+                    <th style="width:120px;text-align:right">운영이익</th>
+                    <th style="width:96px;text-align:right">운영이익율</th>
+                    <th style="width:82px;text-align:center">리스크</th>
+                  </tr>
+                </thead>
+                <tbody id="project-dash-profit-body">
+                  <tr><td colspan="8" class="table-empty"><i class="fas fa-spinner fa-spin"></i><p>실시간 손익을 계산하는 중입니다.</p></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
         <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px">
           <div class="card">
             <div class="card-header">
@@ -1288,6 +1318,11 @@
                    color:var(--text-secondary);border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s">
             <i class="fas fa-coins" style="margin-right:5px"></i>인건비 분석
           </button>
+          <button id="analysis-tab-project-profit" onclick="switchAnalysisTab('project-profit')"
+            style="padding:9px 20px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;
+                   color:var(--text-secondary);border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s">
+            <i class="fas fa-chart-line" style="margin-right:5px"></i>프로젝트 매출·이익 분석
+          </button>
         </div>
 
         <!-- ══════════════════════════════
@@ -1728,6 +1763,90 @@
           </div>
 
         </div><!-- /analysis-panel-labor -->
+
+        <!-- ══════════════════════════════
+             서브탭4: 프로젝트 매출·이익 분석
+        ══════════════════════════════ -->
+        <div id="analysis-panel-project-profit" style="display:none">
+          <div style="background:#fff;border:1px solid var(--border-light);border-radius:10px;padding:12px 16px;margin-bottom:16px;">
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px 16px;align-items:end;">
+              <div class="filter-group" style="grid-column:span 2">
+                <span class="filter-label">비용 반영기간(월배부 기준)</span>
+                <div style="display:flex;align-items:center;gap:4px">
+                  <input type="date" class="filter-control" id="filter-project-profit-date-from" />
+                  <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">~</span>
+                  <input type="date" class="filter-control" id="filter-project-profit-date-to" />
+                </div>
+              </div>
+              <div class="filter-group">
+                <span class="filter-label">사업부</span>
+                <select class="filter-control" id="filter-project-profit-dept">
+                  <option value="">전체 사업부</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <span class="filter-label">본부</span>
+                <select class="filter-control" id="filter-project-profit-hq">
+                  <option value="">전체 본부</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <span class="filter-label">고객지원팀</span>
+                <select class="filter-control" id="filter-project-profit-csteam">
+                  <option value="">전체 팀</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <span class="filter-label">상태</span>
+                <select class="filter-control" id="filter-project-profit-status">
+                  <option value="closed">업무종료/정산완료</option>
+                  <option value="work_closed">업무종료</option>
+                  <option value="settled_done">정산완료</option>
+                  <option value="">전체 상태</option>
+                </select>
+              </div>
+              <div class="filter-actions" style="display:flex;gap:6px;align-items:flex-end;padding-top:16px">
+                <button class="btn btn-primary btn-sm" onclick="loadProjectProfitAnalysis()"><i class="fas fa-calculator"></i> 분석</button>
+                <button class="btn btn-ghost btn-sm" onclick="resetProjectProfitFilter()" title="초기화"><i class="fas fa-redo"></i></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="kpi-grid" id="analysis-project-profit-kpi" style="margin-bottom:16px"></div>
+
+          <div class="card">
+            <div class="card-header">
+              <h2><i class="fas fa-table" style="color:var(--primary)"></i>&nbsp; 프로젝트별 매출·비용·이익율</h2>
+              <div class="card-actions">
+                <span style="font-size:11px;color:var(--text-muted)">매출=계약금액 우선(없으면 청구일정 합계)</span>
+              </div>
+            </div>
+            <div class="card-body" style="padding:0">
+              <div class="table-wrapper" style="border:none;border-radius:0;overflow:auto">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th style="width:42px;text-align:center">No</th>
+                      <th style="width:110px">상태</th>
+                      <th style="width:120px">프로젝트코드</th>
+                      <th>프로젝트명</th>
+                      <th style="width:120px;text-align:right">매출(계약기준)</th>
+                      <th style="width:110px;text-align:right">직접인건비</th>
+                      <th style="width:110px;text-align:right">직접비용</th>
+                      <th style="width:100px;text-align:right">간접비</th>
+                      <th style="width:120px;text-align:right">총비용</th>
+                      <th style="width:110px;text-align:right">이익</th>
+                      <th style="width:90px;text-align:right">이익율</th>
+                    </tr>
+                  </thead>
+                  <tbody id="analysis-project-profit-body">
+                    <tr><td colspan="11" class="table-empty"><i class="fas fa-chart-line"></i><p>분석 실행 후 표시됩니다.</p></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div><!-- /analysis-panel-project-profit -->
 
       </section>
 
@@ -2830,6 +2949,48 @@
                 <button type="button" class="btn btn-sm btn-primary" id="pm-cost-save-btn"><i class="fas fa-plus"></i> 비용 추가</button>
                 <button type="button" class="btn btn-sm btn-outline" id="pm-cost-load-btn"><i class="fas fa-search"></i> 조회</button>
                 <span id="pm-cost-summary" class="pm-summary-text">총 비용 0원</span>
+              </div>
+              <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border-light)">
+                <div style="display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+                  <div class="form-group" style="margin:0;min-width:140px">
+                    <label class="form-label">배부기준월</label>
+                    <input type="month" id="pm-cost-upload-month" class="form-control" />
+                  </div>
+                  <span style="font-size:12px;color:var(--text-muted)">직접인건비/간접비는 타임차지 시간 비율로 프로젝트별 배부합니다.</span>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px">
+                  <div style="border:1px solid var(--border-light);border-radius:8px;padding:10px">
+                    <div style="font-weight:700;color:var(--text-primary);margin-bottom:8px">월 직접인건비 배부</div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap">
+                      <button type="button" class="btn btn-sm btn-ghost" onclick="pmDownloadMonthlyLaborTemplate()"><i class="fas fa-download"></i> 양식</button>
+                      <label class="btn btn-sm btn-outline" style="cursor:pointer;margin:0">
+                        <i class="fas fa-file-excel"></i> 업로드
+                        <input type="file" accept=".xlsx,.xls" style="display:none" onchange="pmUploadMonthlyLaborCostExcel(this)" />
+                      </label>
+                    </div>
+                  </div>
+                  <div style="border:1px solid var(--border-light);border-radius:8px;padding:10px">
+                    <div style="font-weight:700;color:var(--text-primary);margin-bottom:8px">월 간접비 배부</div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap">
+                      <button type="button" class="btn btn-sm btn-ghost" onclick="pmDownloadMonthlyIndirectTemplate()"><i class="fas fa-download"></i> 양식</button>
+                      <label class="btn btn-sm btn-outline" style="cursor:pointer;margin:0">
+                        <i class="fas fa-file-excel"></i> 업로드
+                        <input type="file" accept=".xlsx,.xls" style="display:none" onchange="pmUploadMonthlyIndirectCostExcel(this)" />
+                      </label>
+                    </div>
+                  </div>
+                  <div style="border:1px solid var(--border-light);border-radius:8px;padding:10px">
+                    <div style="font-weight:700;color:var(--text-primary);margin-bottom:8px">프로젝트 직접비용 반영</div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap">
+                      <button type="button" class="btn btn-sm btn-ghost" onclick="pmDownloadProjectDirectCostTemplate()"><i class="fas fa-download"></i> 양식</button>
+                      <label class="btn btn-sm btn-outline" style="cursor:pointer;margin:0">
+                        <i class="fas fa-file-excel"></i> 업로드
+                        <input type="file" accept=".xlsx,.xls" style="display:none" onchange="pmUploadProjectDirectCostExcel(this)" />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+                <div id="pm-cost-upload-result" style="display:none;margin-top:10px"></div>
               </div>
             </div>
             <div class="card-body" style="padding:0">

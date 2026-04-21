@@ -73,6 +73,115 @@ function _pmAddMonths(dateStr, months) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+async function _pmEnsureXlsx() {
+  if (typeof XLSX !== 'undefined') return true;
+  try {
+    if (typeof LibLoader !== 'undefined' && LibLoader.load) {
+      await LibLoader.load('xlsx');
+    } else {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'js/xlsx.full.min.js';
+        s.onload = resolve;
+        s.onerror = () => reject(new Error('XLSX 로드 실패'));
+        document.head.appendChild(s);
+      });
+    }
+  } catch (e) {
+    console.error(e);
+    return false;
+  }
+  return typeof XLSX !== 'undefined';
+}
+
+function _pmCostUploadMonth() {
+  const ym = String(document.getElementById('pm-cost-upload-month')?.value || '').trim();
+  if (/^\d{4}-\d{2}$/.test(ym)) return ym;
+  return '';
+}
+
+function _pmCostDateInRange(costDate, from, to) {
+  const d = String(costDate || '').slice(0, 10);
+  if (!d) return false;
+  if (from && d < from) return false;
+  if (to && d > to) return false;
+  return true;
+}
+
+function _pmCostUploadMessage(type, message) {
+  const el = document.getElementById('pm-cost-upload-result');
+  if (!el) return;
+  const color = {
+    success: { bg: '#dcfce7', bd: '#86efac', fg: '#166534', icon: 'fa-check-circle' },
+    warning: { bg: '#fef9c3', bd: '#fde047', fg: '#854d0e', icon: 'fa-exclamation-triangle' },
+    error: { bg: '#fee2e2', bd: '#fca5a5', fg: '#991b1b', icon: 'fa-times-circle' },
+  }[type] || { bg: '#e2e8f0', bd: '#cbd5e1', fg: '#334155', icon: 'fa-info-circle' };
+  el.style.display = '';
+  el.innerHTML = `<div style="padding:9px 12px;background:${color.bg};border:1px solid ${color.bd};border-radius:6px;font-size:12.5px;color:${color.fg};line-height:1.6"><i class="fas ${color.icon}" style="margin-right:5px"></i>${message}</div>`;
+}
+
+function _pmParseXlsxRows(rows) {
+  return Array.isArray(rows) ? rows : [];
+}
+
+function _pmParseMoney(val) {
+  const n = Number(String(val == null ? '' : val).replace(/,/g, '').trim());
+  return Number.isFinite(n) ? n : 0;
+}
+
+function _pmCostTypeNorm(type) {
+  const t = String(type || '').trim().toLowerCase();
+  if (!t) return '직접비용';
+  if (t.includes('간접')) return '간접비';
+  if (t.includes('직접인건') || t.includes('인건비') || t.includes('labor')) return '직접인건비';
+  return '직접비용';
+}
+
+async function _pmDeleteAutoRowsByTag(ym, tag) {
+  const mark = `[AUTO_COST_ALLOC:${tag}:${ym}]`;
+  const allowedCodes = new Set((PM_STATE.projects || []).map((p) => String(p.project_code || '').trim()).filter(Boolean));
+  let rows = await API.listAllPages('project_cost_items', { limit: 3000, maxPages: 50, sort: 'updated_at' }).catch(() => []);
+  rows = rows.filter((r) =>
+    allowedCodes.has(String(r.project_code || '').trim()) &&
+    String(r.note || '').includes(mark)
+  );
+  for (const r of rows) {
+    await API.delete('project_cost_items', r.id);
+  }
+  return rows.length;
+}
+
+async function _pmCreateAllocatedProjectCostRows({ ym, tag, costType, amountByCode, noteTail }) {
+  const session = getSession();
+  const costDate = `${ym}-01`;
+  const mark = `[AUTO_COST_ALLOC:${tag}:${ym}]`;
+  let created = 0;
+  for (const [code, amountRaw] of Object.entries(amountByCode || {})) {
+    const amount = Math.round(Number(amountRaw || 0));
+    if (!(amount > 0)) continue;
+    if (!_pmHasProjectAccess(code)) continue;
+    const p = PM_STATE.projectByCode[code] || {};
+    await API.create('project_cost_items', {
+      project_id: p.id || '',
+      project_code: code,
+      project_name: p.project_name || '',
+      client_id: p.client_id || '',
+      client_name: p.client_name || '',
+      cost_date: costDate,
+      cost_type: costType,
+      vendor: '월배부',
+      amount,
+      vat: 0,
+      total_amount: amount,
+      note: `${mark} ${noteTail || ''}`.trim(),
+      created_by: session && session.id ? session.id : '',
+      created_by_name: session && session.name ? session.name : '',
+    });
+    created += 1;
+  }
+  return created;
+}
+
 function _pmSessionIds(session) {
   const ids = new Set();
   const id1 = String(session && session.id || '').trim();
@@ -854,6 +963,8 @@ async function init_project_management() {
     const el = document.getElementById(id);
     if (el && !el.value) el.value = _pmNowMonth();
   });
+  const costUploadMonthEl = document.getElementById('pm-cost-upload-month');
+  if (costUploadMonthEl && !costUploadMonthEl.value) costUploadMonthEl.value = _pmNowMonth();
 
   if (!PM_STATE.initialized) {
     document.getElementById('pm-progress-refresh-btn')?.addEventListener('click', loadProjectMgmtProgress);
@@ -2037,6 +2148,332 @@ async function pmSendInvoiceToNts(id) {
   }
 }
 
+async function pmDownloadMonthlyLaborTemplate() {
+  const ok = await _pmEnsureXlsx();
+  if (!ok) {
+    Toast.error('엑셀 라이브러리를 불러오지 못했습니다.');
+    return;
+  }
+  const ym = _pmCostUploadMonth() || _pmNowMonth();
+  const wb = XLSX.utils.book_new();
+  const rows = (PM_STATE.users || [])
+    .filter((u) => String(u.role || '').trim() === 'staff')
+    .slice(0, 20)
+    .map((u) => ({ 이름: u.name || '', '월 인건비(원)': '', 비고: '' }));
+  if (!rows.length) rows.push({ 이름: '홍길동', '월 인건비(원)': 5000000, 비고: '예시' });
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [{ wch: 16 }, { wch: 20 }, { wch: 24 }];
+  XLSX.utils.book_append_sheet(wb, ws, `직접인건비_${ym}`);
+  const guide = XLSX.utils.json_to_sheet([
+    { 항목: 'A열', 설명: '직원 이름 (시스템 등록명과 일치)' },
+    { 항목: 'B열', 설명: '월 인건비(원, 숫자)' },
+    { 항목: 'C열', 설명: '비고(선택)' },
+  ]);
+  guide['!cols'] = [{ wch: 10 }, { wch: 56 }];
+  XLSX.utils.book_append_sheet(wb, guide, '입력안내');
+  await xlsxDownload(wb, `월직접인건비_업로드양식_${ym}.xlsx`);
+}
+
+async function pmDownloadMonthlyIndirectTemplate() {
+  const ok = await _pmEnsureXlsx();
+  if (!ok) {
+    Toast.error('엑셀 라이브러리를 불러오지 못했습니다.');
+    return;
+  }
+  const ym = _pmCostUploadMonth() || _pmNowMonth();
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet([
+    { 항목: '전사공통비', '월 간접비(원)': 12000000, 비고: '예시' },
+  ]);
+  ws['!cols'] = [{ wch: 18 }, { wch: 20 }, { wch: 24 }];
+  XLSX.utils.book_append_sheet(wb, ws, `간접비_${ym}`);
+  const guide = XLSX.utils.json_to_sheet([
+    { 항목: 'A열', 설명: '항목명(자유기입)' },
+    { 항목: 'B열', 설명: '월 간접비(원, 숫자)' },
+    { 항목: 'C열', 설명: '비고(선택)' },
+  ]);
+  guide['!cols'] = [{ wch: 10 }, { wch: 56 }];
+  XLSX.utils.book_append_sheet(wb, guide, '입력안내');
+  await xlsxDownload(wb, `월간접비_업로드양식_${ym}.xlsx`);
+}
+
+async function pmDownloadProjectDirectCostTemplate() {
+  const ok = await _pmEnsureXlsx();
+  if (!ok) {
+    Toast.error('엑셀 라이브러리를 불러오지 못했습니다.');
+    return;
+  }
+  const ym = _pmCostUploadMonth() || _pmNowMonth();
+  const wb = XLSX.utils.book_new();
+  const sampleCode = String((PM_STATE.projects[0] && PM_STATE.projects[0].project_code) || 'PJT-001');
+  const ws = XLSX.utils.json_to_sheet([
+    { 프로젝트코드: sampleCode, 비용유형: '직접비용', 거래처: '외주업체', 공급가액: 3000000, 부가세: 300000, 비고: '청구 지급 반영' },
+  ]);
+  ws['!cols'] = [{ wch: 18 }, { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 28 }];
+  XLSX.utils.book_append_sheet(wb, ws, `직접비용_${ym}`);
+  const guide = XLSX.utils.json_to_sheet([
+    { 항목: '프로젝트코드', 설명: '필수. 등록된 프로젝트 코드' },
+    { 항목: '비용유형', 설명: '직접비용(기본값). 예: 외주, 출장, 구매' },
+    { 항목: '거래처', 설명: '선택' },
+    { 항목: '공급가액', 설명: '숫자 필수' },
+    { 항목: '부가세', 설명: '숫자 선택 (없으면 0)' },
+    { 항목: '비고', 설명: '선택' },
+  ]);
+  guide['!cols'] = [{ wch: 12 }, { wch: 56 }];
+  XLSX.utils.book_append_sheet(wb, guide, '입력안내');
+  await xlsxDownload(wb, `프로젝트직접비용_업로드양식_${ym}.xlsx`);
+}
+
+async function pmUploadMonthlyLaborCostExcel(input) {
+  const file = input && input.files ? input.files[0] : null;
+  if (input) input.value = '';
+  if (!file) return;
+  const session = getSession();
+  if (!(Auth.canApprove1st(session) || Auth.isDirector(session) || Auth.isTopMgr(session) || Auth.isAdmin(session))) {
+    Toast.warning('업로드 권한이 없습니다.');
+    return;
+  }
+  const ym = _pmCostUploadMonth();
+  if (!ym) {
+    Toast.warning('배부기준월을 먼저 선택하세요.');
+    return;
+  }
+  const ok = await _pmEnsureXlsx();
+  if (!ok) {
+    Toast.error('엑셀 라이브러리를 불러오지 못했습니다.');
+    return;
+  }
+  try {
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+    const rows = _pmParseXlsxRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }));
+    if (!rows.length) {
+      _pmCostUploadMessage('error', '엑셀 데이터가 없습니다.');
+      return;
+    }
+    const userByName = {};
+    (PM_STATE.users || []).forEach((u) => { userByName[String(u.name || '').trim()] = u; });
+    const monthlyCostByUser = {};
+    const unknownUsers = [];
+    rows.forEach((r) => {
+      const vals = Object.values(r);
+      const name = String(r['이름'] || r['담당자'] || r['직원'] || vals[0] || '').trim();
+      const amount = _pmParseMoney(r['월 인건비(원)'] ?? r['월인건비'] ?? r['금액'] ?? vals[1]);
+      if (!name || !(amount > 0)) return;
+      const u = userByName[name];
+      if (!u) {
+        unknownUsers.push(name);
+        return;
+      }
+      monthlyCostByUser[String(u.id)] = (monthlyCostByUser[String(u.id)] || 0) + amount;
+    });
+    const userIds = Object.keys(monthlyCostByUser);
+    if (!userIds.length) {
+      _pmCostUploadMessage('warning', '매칭된 직원 인건비가 없습니다. 이름 컬럼을 확인하세요.');
+      return;
+    }
+    let tcRows = await API.listAllPages('project_timecharge_lines', { limit: 4000, maxPages: 50, sort: 'work_date' }).catch(() => []);
+    const allowedCodes = new Set((PM_STATE.projects || []).map((p) => String(p.project_code || '').trim()).filter(Boolean));
+    tcRows = tcRows.filter((r) => {
+      const code = String(r.project_code || '').trim();
+      const workDate = String(r.work_date || '').slice(0, 10);
+      return allowedCodes.has(code) && _pmDateToYm(workDate) === ym;
+    });
+    const userTotalMin = {};
+    const userProjectMin = {};
+    tcRows.forEach((r) => {
+      const uid = String(r.user_id || '').trim();
+      if (!uid || !monthlyCostByUser[uid]) return;
+      const code = String(r.project_code || '').trim();
+      const mins = Number(r.final_minutes || r.base_minutes || 0);
+      if (!(mins > 0) || !code) return;
+      userTotalMin[uid] = (userTotalMin[uid] || 0) + mins;
+      if (!userProjectMin[uid]) userProjectMin[uid] = {};
+      userProjectMin[uid][code] = (userProjectMin[uid][code] || 0) + mins;
+    });
+    const allocByCode = {};
+    let unallocated = 0;
+    userIds.forEach((uid) => {
+      const cost = Number(monthlyCostByUser[uid] || 0);
+      const totalMin = Number(userTotalMin[uid] || 0);
+      if (!(cost > 0)) return;
+      if (!(totalMin > 0)) {
+        unallocated += cost;
+        return;
+      }
+      const byProject = userProjectMin[uid] || {};
+      Object.entries(byProject).forEach(([code, mins]) => {
+        allocByCode[code] = (allocByCode[code] || 0) + (cost * Number(mins || 0) / totalMin);
+      });
+    });
+    const deleted = await _pmDeleteAutoRowsByTag(ym, 'DLAB');
+    const created = await _pmCreateAllocatedProjectCostRows({
+      ym,
+      tag: 'DLAB',
+      costType: '직접인건비',
+      amountByCode: allocByCode,
+      noteTail: '월 직접인건비 배부',
+    });
+    await loadProjectMgmtCosts();
+    const msg = `월 직접인건비 배부 반영 완료 · 생성 ${created}건${deleted ? ` · 기존자동삭제 ${deleted}건` : ''}${unallocated > 0 ? ` · 미배부 ${_pmKrw(unallocated)}` : ''}${unknownUsers.length ? `<br>미일치 이름: ${_pmEsc([...new Set(unknownUsers)].join(', '))}` : ''}`;
+    _pmCostUploadMessage(unknownUsers.length || unallocated > 0 ? 'warning' : 'success', msg);
+    Toast.success(`월 직접인건비 배부 ${created}건 반영`);
+  } catch (e) {
+    console.error(e);
+    _pmCostUploadMessage('error', `업로드 실패: ${_pmEsc(e.message || '')}`);
+    Toast.error('월 직접인건비 업로드 실패');
+  }
+}
+
+async function pmUploadMonthlyIndirectCostExcel(input) {
+  const file = input && input.files ? input.files[0] : null;
+  if (input) input.value = '';
+  if (!file) return;
+  const session = getSession();
+  if (!(Auth.canApprove1st(session) || Auth.isDirector(session) || Auth.isTopMgr(session) || Auth.isAdmin(session))) {
+    Toast.warning('업로드 권한이 없습니다.');
+    return;
+  }
+  const ym = _pmCostUploadMonth();
+  if (!ym) {
+    Toast.warning('배부기준월을 먼저 선택하세요.');
+    return;
+  }
+  const ok = await _pmEnsureXlsx();
+  if (!ok) {
+    Toast.error('엑셀 라이브러리를 불러오지 못했습니다.');
+    return;
+  }
+  try {
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+    const rows = _pmParseXlsxRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }));
+    const totalIndirect = rows.reduce((sum, r) => {
+      const vals = Object.values(r);
+      const amount = _pmParseMoney(r['월 간접비(원)'] ?? r['월간접비'] ?? r['금액'] ?? vals[1]);
+      return sum + (amount > 0 ? amount : 0);
+    }, 0);
+    if (!(totalIndirect > 0)) {
+      _pmCostUploadMessage('warning', '배부할 월 간접비 금액이 없습니다.');
+      return;
+    }
+    let tcRows = await API.listAllPages('project_timecharge_lines', { limit: 4000, maxPages: 50, sort: 'work_date' }).catch(() => []);
+    const allowedCodes = new Set((PM_STATE.projects || []).map((p) => String(p.project_code || '').trim()).filter(Boolean));
+    tcRows = tcRows.filter((r) => {
+      const code = String(r.project_code || '').trim();
+      const workDate = String(r.work_date || '').slice(0, 10);
+      return allowedCodes.has(code) && _pmDateToYm(workDate) === ym;
+    });
+    const totalMin = tcRows.reduce((sum, r) => sum + Number(r.final_minutes || r.base_minutes || 0), 0);
+    if (!(totalMin > 0)) {
+      _pmCostUploadMessage('warning', '해당 월 타임차지 시간이 없어 간접비 배부를 수행할 수 없습니다.');
+      return;
+    }
+    const minsByCode = {};
+    tcRows.forEach((r) => {
+      const code = String(r.project_code || '').trim();
+      if (!code) return;
+      minsByCode[code] = (minsByCode[code] || 0) + Number(r.final_minutes || r.base_minutes || 0);
+    });
+    const allocByCode = {};
+    Object.entries(minsByCode).forEach(([code, mins]) => {
+      allocByCode[code] = totalIndirect * Number(mins || 0) / totalMin;
+    });
+    const deleted = await _pmDeleteAutoRowsByTag(ym, 'INDR');
+    const created = await _pmCreateAllocatedProjectCostRows({
+      ym,
+      tag: 'INDR',
+      costType: '간접비',
+      amountByCode: allocByCode,
+      noteTail: '월 간접비 배부',
+    });
+    await loadProjectMgmtCosts();
+    _pmCostUploadMessage('success', `월 간접비 배부 반영 완료 · 생성 ${created}건${deleted ? ` · 기존자동삭제 ${deleted}건` : ''}`);
+    Toast.success(`월 간접비 배부 ${created}건 반영`);
+  } catch (e) {
+    console.error(e);
+    _pmCostUploadMessage('error', `업로드 실패: ${_pmEsc(e.message || '')}`);
+    Toast.error('월 간접비 업로드 실패');
+  }
+}
+
+async function pmUploadProjectDirectCostExcel(input) {
+  const file = input && input.files ? input.files[0] : null;
+  if (input) input.value = '';
+  if (!file) return;
+  const session = getSession();
+  if (!(Auth.canApprove1st(session) || Auth.isDirector(session) || Auth.isTopMgr(session) || Auth.isAdmin(session))) {
+    Toast.warning('업로드 권한이 없습니다.');
+    return;
+  }
+  const ym = _pmCostUploadMonth();
+  if (!ym) {
+    Toast.warning('배부기준월을 먼저 선택하세요.');
+    return;
+  }
+  const ok = await _pmEnsureXlsx();
+  if (!ok) {
+    Toast.error('엑셀 라이브러리를 불러오지 못했습니다.');
+    return;
+  }
+  try {
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+    const rows = _pmParseXlsxRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }));
+    if (!rows.length) {
+      _pmCostUploadMessage('warning', '엑셀 데이터가 없습니다.');
+      return;
+    }
+    const deleted = await _pmDeleteAutoRowsByTag(ym, 'DEXP');
+    let created = 0;
+    let skipped = 0;
+    const unknownCodes = [];
+    for (const r of rows) {
+      const vals = Object.values(r);
+      const code = String(r['프로젝트코드'] || r['project_code'] || vals[0] || '').trim();
+      const typeInput = String(r['비용유형'] || r['cost_type'] || vals[1] || '직접비용').trim();
+      const vendor = String(r['거래처'] || r['vendor'] || vals[2] || '').trim();
+      const amount = _pmParseMoney(r['공급가액'] ?? r['amount'] ?? vals[3]);
+      const vat = _pmParseMoney(r['부가세'] ?? r['vat'] ?? vals[4]);
+      const note = String(r['비고'] || r['note'] || vals[5] || '').trim();
+      if (!code || (amount <= 0 && vat <= 0)) {
+        skipped += 1;
+        continue;
+      }
+      if (!_pmHasProjectAccess(code)) {
+        unknownCodes.push(code);
+        skipped += 1;
+        continue;
+      }
+      const p = PM_STATE.projectByCode[code] || {};
+      const total = amount + vat;
+      await API.create('project_cost_items', {
+        project_id: p.id || '',
+        project_code: code,
+        project_name: p.project_name || '',
+        client_id: p.client_id || '',
+        client_name: p.client_name || '',
+        cost_date: `${ym}-01`,
+        cost_type: _pmCostTypeNorm(typeInput),
+        vendor: vendor || '직접비용업로드',
+        amount,
+        vat,
+        total_amount: total,
+        note: `[AUTO_COST_ALLOC:DEXP:${ym}] ${note}`.trim(),
+        created_by: session && session.id ? session.id : '',
+        created_by_name: session && session.name ? session.name : '',
+      });
+      created += 1;
+    }
+    await loadProjectMgmtCosts();
+    const uniqUnknown = [...new Set(unknownCodes)];
+    const msg = `프로젝트 직접비용 반영 완료 · 생성 ${created}건${deleted ? ` · 기존자동삭제 ${deleted}건` : ''}${skipped ? ` · 스킵 ${skipped}행` : ''}${uniqUnknown.length ? `<br>미존재/권한없음 코드: ${_pmEsc(uniqUnknown.join(', '))}` : ''}`;
+    _pmCostUploadMessage(uniqUnknown.length ? 'warning' : 'success', msg);
+    Toast.success(`프로젝트 직접비용 ${created}건 반영`);
+  } catch (e) {
+    console.error(e);
+    _pmCostUploadMessage('error', `업로드 실패: ${_pmEsc(e.message || '')}`);
+    Toast.error('프로젝트 직접비용 업로드 실패');
+  }
+}
+
 async function saveProjectCostItem() {
   const session = getSession();
   if (!(Auth.canApprove1st(session) || Auth.isDirector(session) || Auth.isTopMgr(session) || Auth.isAdmin(session))) {
@@ -2261,5 +2698,11 @@ window.pmOpenPrevInvoiceProjectDetail = pmOpenPrevInvoiceProjectDetail;
 window.pmOpenNextInvoiceProjectDetail = pmOpenNextInvoiceProjectDetail;
 window.saveProjectCostItem = saveProjectCostItem;
 window.pmDeleteCostItem = pmDeleteCostItem;
+window.pmDownloadMonthlyLaborTemplate = pmDownloadMonthlyLaborTemplate;
+window.pmUploadMonthlyLaborCostExcel = pmUploadMonthlyLaborCostExcel;
+window.pmDownloadMonthlyIndirectTemplate = pmDownloadMonthlyIndirectTemplate;
+window.pmUploadMonthlyIndirectCostExcel = pmUploadMonthlyIndirectCostExcel;
+window.pmDownloadProjectDirectCostTemplate = pmDownloadProjectDirectCostTemplate;
+window.pmUploadProjectDirectCostExcel = pmUploadProjectDirectCostExcel;
 window.pmOpenLifecycleAction = pmOpenLifecycleAction;
 window.pmAdjustLifecycleStatus = pmAdjustLifecycleStatus;
