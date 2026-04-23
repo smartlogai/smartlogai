@@ -1098,9 +1098,9 @@ async function downloadClientTemplate() {
 // ─────────────────────────────────────────────
 async function init_master_categories() {
   const session = getSession();
-  if (!Auth.canManageRefData(session)) {
+  if (!Auth.canManageMaster(session)) {
     navigateTo('dashboard');
-    Toast.warning('업무분류 관리 권한이 없습니다.');
+    Toast.warning('업무분류 설정 권한이 없습니다.');
     return;
   }
   await loadCategories();
@@ -1185,7 +1185,7 @@ function openCategoryModal(id='', name='', type='client', order=0) {
 
 async function saveCategory() {
   const session = getSession();
-  if (!Auth.canManageRefData(session)) { Toast.warning('권한이 없습니다.'); return; }
+  if (!Auth.canManageMaster(session)) { Toast.warning('권한이 없습니다.'); return; }
   const id    = document.getElementById('category-edit-id').value;
   const name  = document.getElementById('category-name-input').value.trim();
   const type  = document.getElementById('category-type-input').value;
@@ -1202,7 +1202,7 @@ async function saveCategory() {
 
 async function deleteCategory(id, name, subCount) {
   const session = getSession();
-  if (!Auth.canManageRefData(session)) { Toast.warning('권한이 없습니다.'); return; }
+  if (!Auth.canManageMaster(session)) { Toast.warning('권한이 없습니다.'); return; }
   if (subCount > 0) { Toast.warning(`소분류 ${subCount}개가 있습니다. 먼저 삭제해주세요.`); return; }
   if (!await Confirm.delete(name)) return;
   try {
@@ -1229,7 +1229,7 @@ function openSubcategoryModal(id='', name='', parentId='', parentName='', order=
 
 async function saveSubcategory() {
   const session = getSession();
-  if (!Auth.canManageRefData(session)) { Toast.warning('권한이 없습니다.'); return; }
+  if (!Auth.canManageMaster(session)) { Toast.warning('권한이 없습니다.'); return; }
   const id       = document.getElementById('subcategory-edit-id').value;
   const name     = document.getElementById('subcategory-name-input').value.trim();
   const parentId = document.getElementById('subcategory-parent-id').value;
@@ -1247,7 +1247,7 @@ async function saveSubcategory() {
 
 async function deleteSubcategory(id, name) {
   const session = getSession();
-  if (!Auth.canManageRefData(session)) { Toast.warning('권한이 없습니다.'); return; }
+  if (!Auth.canManageMaster(session)) { Toast.warning('권한이 없습니다.'); return; }
   if (!await Confirm.delete(name)) return;
   try {
     await API.delete('work_subcategories', id);

@@ -197,6 +197,8 @@ const Auth = {
 
   // 기준정보 관리 (고객사·업무분류): admin + director + top_mgr + manager
   canManageRefData: (s) => s && (Auth.isAdmin(s) || Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isManager(s)),
+  // 업무분류 설정: admin only
+  canManageCategories: (s) => s && Auth.isAdmin(s),
 
   // 프로젝트 등록 (팀장 이상): 기준정보와 동일
   canManageProjectRegister: (s) => s && (s.role === 'admin' || s.role === 'director' || s.role === 'top_mgr' || s.role === 'manager'),
@@ -1618,10 +1620,17 @@ function setupMenuByRole(session) {
     m.style.display = '';
   });
 
-  // ── 기준정보 (고객사·업무분류): admin + director + manager ─────
+  // ── 기준정보: 고객사/프로젝트등록은 기존 권한 유지, 업무분류는 admin 전용 ─────
   const canRefData  = Auth.canManageRefData(session);
-  const refDataMenus = document.querySelectorAll('.menu-ref-data');
-  refDataMenus.forEach(m => m.style.display = canRefData ? '' : 'none');
+  const canCategoryManage = Auth.canManageCategories(session);
+  const refDataLabel   = document.querySelector('.nav-group-label.menu-ref-data');
+  const clientsMenu    = document.querySelector('.nav-item.menu-ref-data[data-page="master-clients"]');
+  const categoriesMenu = document.querySelector('.nav-item.menu-ref-data[data-page="master-categories"]');
+  const projectRegMenu = document.querySelector('.nav-item.menu-ref-data[data-page="project-register"]');
+  if (clientsMenu) clientsMenu.style.display = canRefData ? '' : 'none';
+  if (projectRegMenu) projectRegMenu.style.display = canRefData ? '' : 'none';
+  if (categoriesMenu) categoriesMenu.style.display = canCategoryManage ? '' : 'none';
+  if (refDataLabel) refDataLabel.style.display = (canRefData || canCategoryManage) ? '' : 'none';
 
   // ── Settings 섹션 타이틀: admin 또는 기준정보 권한 있을 때 ───
   const settingsSection = document.querySelector('.menu-settings-section');
