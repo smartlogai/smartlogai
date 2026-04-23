@@ -650,7 +650,7 @@ function entryFormSheetType() {
 }
 
 function myEntriesSheetFilter(session) {
-  if (session && Auth.canViewAll(session)) return null;
+  if (session && (Auth.canViewAll(session) || Auth.isTopMgr(session))) return null;
   try {
     const v = sessionStorage.getItem('my_entries_sheet_type');
     if (v === 'daily' || v === 'hourly') return v;
@@ -3572,13 +3572,14 @@ function _entryProjectSubcategoryLabel(entry) {
 async function init_my_entries() {
   const session = getSession();
   const isAdminAll = Auth.canViewAll(session);
+  const canViewStaffRecords = isAdminAll || Auth.isTopMgr(session);
   const pageSection = document.getElementById('page-my-entries');
-  if (pageSection) pageSection.classList.toggle('admin-all-entries', isAdminAll);
-  if (isAdminAll && document.getElementById('pageTitle')) {
+  if (pageSection) pageSection.classList.toggle('admin-all-entries', canViewStaffRecords);
+  if (canViewStaffRecords && document.getElementById('pageTitle')) {
     document.getElementById('pageTitle').textContent = 'Staff 업무 기록';
   }
 
-  if (!Auth.canWriteEntry(session) && !isAdminAll) {
+  if (!Auth.canWriteEntry(session) && !canViewStaffRecords) {
     if (!Auth.isStaff(session) && !Auth.isManager(session)) {
       navigateTo('dashboard');
       Toast.warning('My Time Sheet는 Staff/Manager만 접근 가능합니다.');
@@ -3651,7 +3652,7 @@ async function onEntryFilterCategoryChange() {
 
 /** Staff 업무 기록/엑셀: 최신 500건만 보면 상태·기간 필터가 어긋남 → 페이지 순회·필요 시 user_id/status 서버 필터 */
 async function _loadTimeEntriesForMyList(session, isAdminAll, statusVal) {
-  if (!isAdminAll && (session.role === 'staff' || session.role === 'manager')) {
+  if (!isAdminAll && (Auth.isStaff(session) || Auth.isManager(session))) {
     const uid = encodeURIComponent(String(session.id));
     return API.listAllPages('time_entries', { filter: `user_id=eq.${uid}`, sort: 'updated_at', limit: 400, maxPages: 100 });
   }
@@ -3672,10 +3673,36 @@ async function _loadTimeEntriesForMyList(session, isAdminAll, statusVal) {
   }
 }
 
+async function _scopeEntriesForStaffRecords(entries, session) {
+  if (!Array.isArray(entries) || !session) return [];
+  if (Auth.canViewAll(session)) return entries;
+  if (!Auth.isTopMgr(session)) return entries;
+  let users = [];
+  try {
+    users = await Master.users();
+  } catch (_) {
+    users = [];
+  }
+  const myId = String(session.id || '').trim();
+  const scopeUserIds = new Set(
+    (users || [])
+      .filter((u) => Auth.scopeMatch(session, u))
+      .map((u) => String(u.id || '').trim())
+      .filter(Boolean)
+  );
+  if (myId) scopeUserIds.add(myId);
+  return (entries || []).filter((e) => {
+    const uid = String((e && e.user_id) || '').trim();
+    if (uid) return scopeUserIds.has(uid);
+    return Auth.scopeMatch(session, e);
+  });
+}
+
 async function loadMyEntries() {
   _entrySyncRangeButtonState();
   const session      = getSession();
   const isAdminAll   = Auth.canViewAll(session);
+  const canViewStaffRecords = isAdminAll || Auth.isTopMgr(session);
   const dateFrom     = document.getElementById('filter-entry-date-from').value;  // 'YYYY-MM-DD'
   const dateTo       = document.getElementById('filter-entry-date-to').value;
   const clientId     = (typeof ClientSearchSelect !== 'undefined')
@@ -3691,6 +3718,7 @@ async function loadMyEntries() {
 
   try {
     let entries = await _loadTimeEntriesForMyList(session, isAdminAll, status);
+    entries = await _scopeEntriesForStaffRecords(entries, session);
 
     // 기간 From~To 필터 — ms숫자/숫자문자열/ISO문자열 모두 안전 처리
     if (tsFrom || tsTo) {
@@ -3783,7 +3811,7 @@ async function loadMyEntries() {
     const attMap = await loadAttachmentsMap(paged.map(e => e.id));
 
     const tbody = document.getElementById('my-entries-body');
-    const emptyCols = isAdminAll ? 12 : 11;
+    const emptyCols = canViewStaffRecords ? 12 : 11;
     if (paged.length === 0) {
       tbody.innerHTML = `<tr><td colspan="${emptyCols}" class="table-empty"><i class="fas fa-inbox"></i><p>조회된 데이터가 없습니다.</p></td></tr>`;
     } else {
@@ -3826,10 +3854,10 @@ async function loadMyEntries() {
 
         const canEdit = e.status === 'draft' || e.status === 'rejected';
         const isOwnEntry = String(e.user_id) === String(session.id);
-        const allowMutate = !isAdminAll || isOwnEntry;
+        const allowMutate = !canViewStaffRecords || isOwnEntry;
         const B = 'width:30px;height:30px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;background:transparent;border:none;cursor:pointer;transition:background 0.15s;';
         const btns = [];
-        if (isAdminAll) {
+        if (canViewStaffRecords) {
           btns.push(`<button style="${B}" onclick="openEntryDetailModal('${e.id}')" title="상세보기"><i class="fas fa-eye" style="font-size:13px;color:#94a3b8"></i></button>`);
         } else {
           btns.push(`<button style="${B}" onclick="openApprovalModal('${e.id}')" title="상세보기"><i class="fas fa-eye" style="font-size:13px;color:#94a3b8"></i></button>`);
@@ -3872,7 +3900,7 @@ async function loadMyEntries() {
           ${Utils.escHtml(e.work_category_name||'—')}
         </span>`;
 
-        const authorCell = isAdminAll
+        const authorCell = canViewStaffRecords
           ? `<td class="my-entries-col-author" style="font-size:11.5px;padding:0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary)" title="${Utils.escHtml(e.user_name || '')}">${Utils.escHtml(e.user_name || '—')}</td>`
           : `<td class="my-entries-col-author" style="display:none"></td>`;
 
@@ -5331,12 +5359,14 @@ async function exportEntriesToExcel() {
     // ① 타임시트 데이터 로드 (화면 필터와 동일: 상태·권한 반영)
     console.log('[Excel] step1: fetching time_entries...');
     const isAdminAll = Auth.canViewAll(session);
+    const canViewStaffRecords = isAdminAll || Auth.isTopMgr(session);
     const statusVal = (document.getElementById('filter-entry-status') || {}).value || '';
     let entries = await _loadTimeEntriesForMyList(session, isAdminAll, statusVal);
+    entries = await _scopeEntriesForStaffRecords(entries, session);
     console.log('[Excel] step1 result count:', entries.length);
 
     // staff·manager는 로더에서 이미 user_id 범위. 그 외 비-admin은 방어적 필터
-    if (!isAdminAll && session.role !== 'staff' && session.role !== 'manager') {
+    if (!canViewStaffRecords && !Auth.isStaff(session) && !Auth.isManager(session)) {
       entries = entries.filter(e => String(e.user_id) === String(session.id));
     }
     // 화면 필터(기간·고객사·분류)와 동일하게 맞춤

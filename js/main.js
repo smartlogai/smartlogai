@@ -61,7 +61,7 @@ window.addEventListener('DOMContentLoaded', async () => {
               : (String(freshUser.sheet_type || '').toLowerCase() === 'daily' ? 'daily' : 'hourly')
         ),
         // 역할도 최신 값 사용 — DB 값이 반드시 우선 (null·빈값이면 기존 세션 유지)
-        role:      (freshUser.role && freshUser.role.trim()) ? freshUser.role : _session.role,
+        role:      normalizeRoleName((freshUser.role && freshUser.role.trim()) ? freshUser.role : _session.role),
         is_active: freshUser.is_active !== undefined ? freshUser.is_active : _session.is_active,
       };
       // 갱신된 세션 저장
@@ -486,7 +486,7 @@ const _LAZY_SCRIPTS = {
   'master-teams'      : 'js/master.js?v=20260419clientApproverRouting1',
   'master-clients'    : 'js/master.js?v=20260419clientApproverRouting1',
   'master-categories' : 'js/master.js?v=20260419clientApproverRouting1',
-  'master-project-codes': 'js/project-code-master.js?v=20260419pcmExport',
+  'master-project-codes': 'js/project-code-master.js?v=20260423topmgrScope1',
   'master-org'        : 'js/master.js?v=20260419clientApproverRouting1',
   'master-departments': 'js/master.js?v=20260419clientApproverRouting1',
   'master-csteams'    : 'js/master.js?v=20260419clientApproverRouting1',

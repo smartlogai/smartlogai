@@ -3,6 +3,10 @@
 
 let _pcmRows = [];
 
+function _pcmCanManage(session) {
+  return !!(session && (Auth.isAdmin(session) || Auth.isTopMgr(session)));
+}
+
 function _pcmEsc(str) {
   return String(str || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
@@ -13,9 +17,9 @@ function _pcmNormCode(s) {
 
 async function init_master_project_codes() {
   const session = getSession();
-  if (!Auth.isAdmin(session)) {
+  if (!_pcmCanManage(session)) {
     navigateTo('dashboard');
-    Toast.warning('프로젝트 Code 관리는 관리자만 사용할 수 있습니다.');
+    Toast.warning('프로젝트 Code 관리는 관리자/Top Mgr만 사용할 수 있습니다.');
     return;
   }
   await loadProjectCodeTypes();
@@ -118,8 +122,8 @@ function openProjectCodeModal(id) {
 
 async function saveProjectCodeType() {
   const session = getSession();
-  if (!Auth.isAdmin(session)) {
-    Toast.warning('프로젝트 코드 유형 추가·수정은 관리자만 가능합니다.');
+  if (!_pcmCanManage(session)) {
+    Toast.warning('프로젝트 코드 유형 추가·수정은 관리자/Top Mgr만 가능합니다.');
     return;
   }
   const id = document.getElementById('project-code-edit-id').value;
@@ -169,8 +173,8 @@ async function saveProjectCodeType() {
 
 async function deleteProjectCodeType(id, label) {
   const session = getSession();
-  if (!Auth.isAdmin(session)) {
-    Toast.warning('프로젝트 코드 유형 삭제는 관리자만 가능합니다.');
+  if (!_pcmCanManage(session)) {
+    Toast.warning('프로젝트 코드 유형 삭제는 관리자/Top Mgr만 가능합니다.');
     return;
   }
   if (!await Confirm.delete(label || '이 행')) return;
@@ -195,8 +199,8 @@ function openProjectCodeUploadModal() {
 
 async function uploadProjectCodeTypes() {
   const session = getSession();
-  if (!Auth.isAdmin(session)) {
-    Toast.warning('프로젝트 코드 엑셀 업로드는 관리자만 가능합니다.');
+  if (!_pcmCanManage(session)) {
+    Toast.warning('프로젝트 코드 엑셀 업로드는 관리자/Top Mgr만 가능합니다.');
     return;
   }
   const file = document.getElementById('project-code-upload-file').files[0];
@@ -287,8 +291,8 @@ async function downloadProjectCodeTemplate() {
 /** 현재 목록(필터·검색 적용)을 업로드와 동일한 열 구조로 엑셀 저장 */
 async function downloadProjectCodeTypesExport() {
   const session = getSession();
-  if (!Auth.isAdmin(session)) {
-    Toast.warning('프로젝트 코드보내기는 관리자만 사용할 수 있습니다.');
+  if (!_pcmCanManage(session)) {
+    Toast.warning('프로젝트 코드보내기는 관리자/Top Mgr만 사용할 수 있습니다.');
     return;
   }
   const rows = _pcmGetFilteredRows();
