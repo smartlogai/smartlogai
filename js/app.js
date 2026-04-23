@@ -220,6 +220,8 @@ const Auth = {
 
   // 기준정보 관리 (고객사·업무분류): admin + director + top_mgr + manager
   canManageRefData: (s) => s && (Auth.isAdmin(s) || Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isManager(s)),
+  // 업무분류 설정: admin only
+  canManageCategories: (s) => s && Auth.isAdmin(s),
 
   // 고객사 등록 요청: staff 포함 전 역할 접근 허용 (수정/삭제/업로드는 별도 권한)
   canRequestClient: (s) => !!(s && (
@@ -1741,8 +1743,8 @@ function setupMenuByRole(session) {
   });
 
   // ── 등록정보 (Time Sheet 아래): 고객등록 / 업무분류등록 / 프로젝트 등록 ─────
-  // 업무분류등록: 1차 승인자(manager) 이상(상위 권한 포함)에게만 노출
-  const canCategoryReg = Auth.canApprove1st(session) || Auth.isDirector(session) || Auth.isTopMgr(session) || Auth.isAdmin(session);
+  // 업무분류등록: admin 전용
+  const canCategoryReg = Auth.isAdmin(session);
   const refLabel = document.getElementById('nav-ref-data-ts-label');
   const clientsMenu = document.querySelector('.nav-item[data-page="master-clients"]');
   const categoriesMenu = document.querySelector('.nav-item[data-page="master-categories"]');
