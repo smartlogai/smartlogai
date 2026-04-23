@@ -51,7 +51,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         timesheet_hourly: freshUser.timesheet_hourly !== false,
         timesheet_daily: freshUser.timesheet_daily === true,
         // 역할도 최신 값 사용 — DB 값이 반드시 우선 (null·빈값이면 기존 세션 유지)
-        role:      (freshUser.role && freshUser.role.trim()) ? freshUser.role : _session.role,
+        role:      normalizeRoleName((freshUser.role && freshUser.role.trim()) ? freshUser.role : _session.role),
         is_active: freshUser.is_active !== undefined ? freshUser.is_active : _session.is_active,
       };
       // 갱신된 세션 저장
@@ -472,7 +472,7 @@ const _LAZY_SCRIPTS = {
   'master-teams'      : 'js/master.js?v=20260405b',
   'master-clients'    : 'js/master.js?v=20260405b',
   'master-categories' : 'js/master.js?v=20260405b',
-  'master-project-codes': 'js/project-code-master.js?v=20260413a',
+  'master-project-codes': 'js/project-code-master.js?v=20260423topmgrScope1',
   'master-org'        : 'js/master.js?v=20260405b',
   'master-departments': 'js/master.js?v=20260405b',
   'master-csteams'    : 'js/master.js?v=20260405b',
