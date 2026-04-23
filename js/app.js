@@ -7,12 +7,24 @@
 // ─────────────────────────────────────────────
 const SESSION_TTL = 8 * 60 * 60 * 1000; // 8시간
 
+function normalizeRoleName(role) {
+  const raw = String(role || '').trim().toLowerCase();
+  if (!raw) return '';
+  if (raw === 'admin' || raw === 'administrator') return 'admin';
+  if (raw === 'director') return 'director';
+  if (raw === 'top_mgr' || raw === 'topmgr' || raw === 'top-manager' || raw === 'top manager' || raw === '경영') return 'top_mgr';
+  if (raw === 'manager') return 'manager';
+  if (raw === 'staff') return 'staff';
+  return raw;
+}
+
 const Session = {
   get() {
     try {
       const raw = localStorage.getItem('wt_session') || sessionStorage.getItem('wt_session');
       if (!raw) return null;
       const s = JSON.parse(raw);
+      if (s && s.role) s.role = normalizeRoleName(s.role);
       // 세션 만료 체크 (8시간)
       if (s && s.loggedInAt && Date.now() - s.loggedInAt > SESSION_TTL) {
         this.clear();
@@ -53,6 +65,7 @@ const Session = {
   createSecure(data) {
     const secureData = {
       ...data,
+      role: normalizeRoleName(data && data.role),
       loggedInAt: Date.now(),
       loggedInUA: navigator.userAgent.slice(0, 120),
       tabId: Math.random().toString(36).slice(2),
@@ -124,25 +137,26 @@ const ROLE_COLOR = {
 };
 
 const Auth = {
-  isAdmin:    (s) => s && s.role === 'admin',
-  isDirector: (s) => s && s.role === 'director',
-  isTopMgr:   (s) => s && s.role === 'top_mgr',
-  isManager:  (s) => s && s.role === 'manager',
-  isStaff:    (s) => s && s.role === 'staff',
+  roleOf:     (s) => normalizeRoleName(s && s.role),
+  isAdmin:    (s) => s && Auth.roleOf(s) === 'admin',
+  isDirector: (s) => s && Auth.roleOf(s) === 'director',
+  isTopMgr:   (s) => s && Auth.roleOf(s) === 'top_mgr',
+  isManager:  (s) => s && Auth.roleOf(s) === 'manager',
+  isStaff:    (s) => s && Auth.roleOf(s) === 'staff',
 
   /** 프로젝트 산출물 열람 (DB can_view_project_deliverables + 세션) */
   canViewProjectDeliverables: (s) => !!(s && s.can_view_project_deliverables),
 
   /** 비용·인건비·배부 성격 UI — admin 제외, director·top_mgr 허용 */
-  canViewCostFinancials: (s) => !!(s && (s.role === 'director' || s.role === 'top_mgr')),
+  canViewCostFinancials: (s) => !!(s && (Auth.isDirector(s) || Auth.isTopMgr(s))),
 
   /** 인건비 설정·매출 업로드 등 (기존 admin 전용 버튼 → 경영층으로 이전) */
-  canManageLaborCostSettings: (s) => !!(s && (s.role === 'director' || s.role === 'top_mgr')),
+  canManageLaborCostSettings: (s) => !!(s && (Auth.isDirector(s) || Auth.isTopMgr(s))),
 
   // ★ 승인자 지정 여부 (staff에만 의미 있음, manager 이상은 true 반환)
   hasApprover: (s) => {
     if (!s) return false;
-    if (s.role === 'staff') return !!(s.approver_id);
+    if (Auth.isStaff(s)) return !!(s.approver_id);
     return true; // manager/director/top_mgr/admin 등
   },
 
@@ -189,23 +203,23 @@ const Auth = {
 
   // ── 승인 권한 분리 ──────────────────────────────────────
   // 1차 승인: manager (수행방식 확인 + 형식 검증)
-  canApprove1st: (s) => s && s.role === 'manager',
+  canApprove1st: (s) => s && Auth.isManager(s),
   // 2차 최종 승인: director (품질평가 + 전문성 + DB저장)
-  canApprove2nd: (s) => s && s.role === 'director',
+  canApprove2nd: (s) => s && Auth.isDirector(s),
   // 하위 호환: 기존 canApprove = 1차 승인 권한과 동일
-  canApprove: (s) => s && s.role === 'manager',
+  canApprove: (s) => s && Auth.isManager(s),
 
   // 전체 열람 (필터 없음): admin만
-  canViewAll: (s) => s && s.role === 'admin',
+  canViewAll: (s) => s && Auth.isAdmin(s),
 
   // 소속 단위 열람: manager + director + top_mgr + admin
-  canViewDeptScope: (s) => s && (s.role === 'manager' || s.role === 'director' || s.role === 'top_mgr' || s.role === 'admin'),
+  canViewDeptScope: (s) => s && (Auth.isManager(s) || Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isAdmin(s)),
 
   // 마스터 관리 (조직구성·직원): admin만
-  canManageMaster: (s) => s && s.role === 'admin',
+  canManageMaster: (s) => s && Auth.isAdmin(s),
 
   // 기준정보 관리 (고객사·업무분류): admin + director + top_mgr + manager
-  canManageRefData: (s) => s && (s.role === 'admin' || s.role === 'director' || s.role === 'top_mgr' || s.role === 'manager'),
+  canManageRefData: (s) => s && (Auth.isAdmin(s) || Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isManager(s)),
 
   // 고객사 등록 요청: staff 포함 전 역할 접근 허용 (수정/삭제/업로드는 별도 권한)
   canRequestClient: (s) => !!(s && (
@@ -250,9 +264,9 @@ const Auth = {
   // 타임엔트리 조회 범위 (API 필터용)
   entryFilter(s) {
     if (Auth.canViewAll(s)) return {};    // admin: 전체
-    if (s.role === 'manager')  return {}; // manager: 전체 가져와서 JS 필터
-    if (s.role === 'director') return {}; // director: 전체 가져와서 JS 필터
-    if (s.role === 'top_mgr')  return {}; // top_mgr: director와 동일 패턴
+    if (Auth.isManager(s))  return {}; // manager: 전체 가져와서 JS 필터
+    if (Auth.isDirector(s)) return {}; // director: 전체 가져와서 JS 필터
+    if (Auth.isTopMgr(s))  return {}; // top_mgr: director와 동일 패턴
     return { user: s.id };               // staff: 본인만
   },
 };
@@ -1687,7 +1701,8 @@ const UserSearchSelect = (() => {
 function navigateTo(page) {
   const session = Session.get();
   if (page === 'entry-new' || page === 'my-entries') {
-    if (session && !Auth.canViewAll(session)) {
+    const allowStaffRecordsPage = page === 'my-entries' && session && Auth.isTopMgr(session);
+    if (session && !Auth.canViewAll(session) && !allowStaffRecordsPage) {
       const prefer = Auth.preferredSheetType(session);
       const hourlyOk = Auth.timesheetHourlyEnabled(session);
       const dailyOk = Auth.timesheetDailyEnabled(session);
@@ -1702,7 +1717,6 @@ function navigateTo(page) {
       }
     }
   }
-
   const SECTION_ALIAS = {
     'entry-new-hourly': 'entry-new',
     'entry-new-daily': 'entry-new',
@@ -1867,11 +1881,13 @@ function setupMenuByRole(session) {
   const canApprove           = Auth.canApprove(session);        // manager
   const canViewDeptScope     = Auth.canViewDeptScope(session);  // manager+director+admin
   const canViewAll           = Auth.canViewAll(session);        // admin only
+  const canViewStaffRecords  = canViewAll || Auth.isTopMgr(session);
   const canAnalysis          = Auth.canViewAnalysis(session);   // director+admin
   const isMaster             = Auth.canManageMaster(session);   // admin only
   const canProjectReg        = Auth.canManageProjectRegister(session);
   const canRefData           = Auth.canManageRefData(session);
   const canRequestClient     = Auth.canRequestClient(session);
+  const isTopMgr             = Auth.isTopMgr(session);
 
   // ── Time Sheet 섹션 ────────────────────────────────────────
   const isManagerTimesheetTarget = Auth.isManager(session) && (
@@ -1919,7 +1935,8 @@ function setupMenuByRole(session) {
     approvalMenu.style.display = (canApprove || canViewDeptScope) && !canViewAll ? '' : 'none';
   }
   const adminAllEntries = document.getElementById('menu-admin-all-entries');
-  if (adminAllEntries) adminAllEntries.style.display = canViewAll ? '' : 'none';
+  // top_mgr는 Settings를 제외한 운영 메뉴를 모두 보이도록 Staff 업무 기록 메뉴를 허용
+  if (adminAllEntries) adminAllEntries.style.display = canViewStaffRecords ? '' : 'none';
 
   // ── Analysis: director + admin ────────────────────────────
   const analysisMenu = document.getElementById('menu-analysis');
@@ -1932,9 +1949,26 @@ function setupMenuByRole(session) {
   const archiveMenu = document.getElementById('menu-archive');
   if (archiveMenu) archiveMenu.style.display = '';
 
-  // ── Settings: admin만 (조직구성·직원관리) ────────────────────
+  // ── Settings: admin 전체 / top_mgr는 조직구성(사업부·본부/업무팀/고객지원팀) + 프로젝트 Code만 노출 ──
   const masterMenus = document.querySelectorAll('.menu-master');
-  masterMenus.forEach(m => m.style.display = isMaster ? '' : 'none');
+  masterMenus.forEach((m) => {
+    if (isMaster) {
+      m.style.display = '';
+      return;
+    }
+    if (!isTopMgr) {
+      m.style.display = 'none';
+      return;
+    }
+    const page = String((m.dataset && m.dataset.page) || '');
+    // 요청사항: top_mgr는 "조직구성" 그룹 라벨·User 등록만 제외
+    const labelText = String(m.textContent || '').replace(/\s+/g, '');
+    if (page === 'users' || (!page && labelText.includes('조직구성'))) {
+      m.style.display = 'none';
+      return;
+    }
+    m.style.display = '';
+  });
 
   // ── 등록정보 (Time Sheet 아래): 고객등록 / 업무분류등록 / 프로젝트 등록 ─────
   // 업무분류등록: 1차 승인자(manager) 이상(상위 권한 포함)에게만 노출
@@ -1950,7 +1984,7 @@ function setupMenuByRole(session) {
 
   // ── Settings 섹션 타이틀: 조직·직원·프로젝트 코드 마스터(admin) ───
   const settingsSection = document.querySelector('.menu-settings-section');
-  if (settingsSection) settingsSection.style.display = isMaster ? '' : 'none';
+  if (settingsSection) settingsSection.style.display = (isMaster || isTopMgr) ? '' : 'none';
 
   // ── 승인자 없는 staff 안내 배너 표시 ──────────────────────
   _showNoApproverBanner(isStaffNoApprover);
