@@ -203,8 +203,8 @@ const Auth = {
   // 프로젝트 등록 (팀장 이상): 기준정보와 동일
   canManageProjectRegister: (s) => s && (s.role === 'admin' || s.role === 'director' || s.role === 'top_mgr' || s.role === 'manager'),
 
-  // 분석 열람: manager + director + top_mgr + admin
-  canViewAnalysis: (s) => s && (Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isAdmin(s) || Auth.isManager(s)),
+  // 분석 열람: director + top_mgr + admin
+  canViewAnalysis: (s) => s && (Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isAdmin(s)),
 
   // 자문 자료실: 모든 역할
   canViewArchive: (s) => !!s,
@@ -1553,7 +1553,7 @@ function setupMenuByRole(session) {
   const canViewDeptScope     = Auth.canViewDeptScope(session);  // manager+director+admin
   const canViewAll           = Auth.canViewAll(session);        // admin only
   const canViewStaffRecords  = canViewAll || Auth.isTopMgr(session);
-  const canAnalysis          = Auth.canViewAnalysis(session);   // director+admin
+  const canAnalysis          = Auth.canViewAnalysis(session);   // director+top_mgr+admin
   const isMaster             = Auth.canManageMaster(session);   // admin only
   const isTopMgr             = Auth.isTopMgr(session);
 
