@@ -242,8 +242,8 @@ const Auth = {
     Auth.preferredSheetType(s) === 'daily'
   ),
 
-  // 분석 열람: manager + director + top_mgr + admin
-  canViewAnalysis: (s) => s && (Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isAdmin(s) || Auth.isManager(s)),
+  // 분석 열람: director + top_mgr + admin
+  canViewAnalysis: (s) => s && (Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isAdmin(s)),
 
   // 자문 자료실: 모든 역할
   canViewArchive: (s) => !!s,
@@ -1654,7 +1654,7 @@ function setupMenuByRole(session) {
   const canViewDeptScope     = Auth.canViewDeptScope(session);  // manager+director+admin
   const canViewAll           = Auth.canViewAll(session);        // admin only
   const canViewStaffRecords  = canViewAll || Auth.isTopMgr(session);
-  const canAnalysis          = Auth.canViewAnalysis(session);   // director+admin
+  const canAnalysis          = Auth.canViewAnalysis(session);   // director+top_mgr+admin
   const isMaster             = Auth.canManageMaster(session);   // admin only
   const canProjectReg        = Auth.canManageProjectRegister(session);
   const canRefData           = Auth.canManageRefData(session);
