@@ -242,8 +242,8 @@ const Auth = {
     Auth.preferredSheetType(s) === 'daily'
   ),
 
-  // 분석 열람: manager + director + top_mgr + admin
-  canViewAnalysis: (s) => s && (s.role === 'director' || s.role === 'top_mgr' || s.role === 'admin' || s.role === 'manager'),
+  // 분석 열람: director + top_mgr + admin
+  canViewAnalysis: (s) => s && (Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isAdmin(s)),
   // 고과분석 열람: director + top_mgr + admin
   canViewStaffAnalysis: (s) => s && (s.role === 'director' || s.role === 'top_mgr' || s.role === 'admin'),
   // 프로젝트 매출·이익분석 열람: director + top_mgr + admin
@@ -1884,7 +1884,7 @@ function setupMenuByRole(session) {
   const canViewDeptScope     = Auth.canViewDeptScope(session);  // manager+director+admin
   const canViewAll           = Auth.canViewAll(session);        // admin only
   const canViewStaffRecords  = canViewAll || Auth.isTopMgr(session);
-  const canAnalysis          = Auth.canViewAnalysis(session);   // director+admin
+  const canAnalysis          = Auth.canViewAnalysis(session);   // director+top_mgr+admin
   const isMaster             = Auth.canManageMaster(session);   // admin only
   const canProjectReg        = Auth.canManageProjectRegister(session);
   const canRefData           = Auth.canManageRefData(session);
