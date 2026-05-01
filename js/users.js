@@ -148,6 +148,7 @@ function _userRoleValueToBaseRole(roleValue) {
 
 function _userJobTitleToBaseRole(jobTitle, fallbackRole = 'staff') {
   const t = String(jobTitle || '').trim().toLowerCase();
+  if (t === 'system_admin') return 'admin';
   if (t === 'team_lead') return 'manager';
   if (t === 'division_head') return 'director';
   if (t === 'bu_head' || t === 'ceo' || t === 'mgmt_support') return 'top_mgr';

@@ -5,6 +5,17 @@
 let _analysisCharts = {};
 let _currentAnalysisTab = 'work'; // 'work' | 'staff' | 'labor' | 'project-profit'
 
+function _canAccessAnalysisPage(session) {
+  if (!session) return false;
+  const fallback = Auth.canViewAnalysis(session);
+  const root = Auth.canReadMenu(session, 'analysis', fallback);
+  const work = Auth.canReadMenu(session, 'analysis-work', fallback);
+  const staff = Auth.canReadMenu(session, 'analysis-staff', Auth.canViewStaffAnalysis(session));
+  const labor = Auth.canReadMenu(session, 'analysis-labor', Auth.canViewCostFinancials(session));
+  const profit = Auth.canReadMenu(session, 'analysis-project-profit', Auth.canViewProjectProfitAnalysis(session));
+  return !!(root || work || staff || labor || profit);
+}
+
 // ─────────────────────────────────────────────
 // 업무분석 통계 공통 유틸
 // ─────────────────────────────────────────────
@@ -119,7 +130,7 @@ function _getVisibleUserIdSetForAnalysis(session, allUsers) {
 // ─────────────────────────────────────────────
 function switchAnalysisTab(tab) {
   const session = getSession();
-  const canWorkTab = session && Auth.canReadMenu(session, 'analysis-work', true);
+  const canWorkTab = session && Auth.canReadMenu(session, 'analysis-work', Auth.canViewAnalysis(session));
   const canStaffTab = session
     && Auth.canReadMenu(session, 'analysis-staff', Auth.canViewStaffAnalysis(session));
   const canProjectProfitTab = session
@@ -187,7 +198,7 @@ function switchAnalysisTab(tab) {
 // ─────────────────────────────────────────────
 async function init_analysis() {
   const session = getSession();
-  if (!Auth.canViewAnalysis(session)) {
+  if (!_canAccessAnalysisPage(session)) {
     navigateTo('dashboard');
     Toast.warning('분석 열람 권한이 없습니다.');
     return;
@@ -197,7 +208,7 @@ async function init_analysis() {
   }
 
   // ── 인건비 탭: director·top_mgr (admin 제외) ──────────────
-  const canWorkTab = session && Auth.canReadMenu(session, 'analysis-work', true);
+  const canWorkTab = session && Auth.canReadMenu(session, 'analysis-work', Auth.canViewAnalysis(session));
   const canLaborTab = session && Auth.canReadMenu(session, 'analysis-labor', Auth.canViewCostFinancials(session));
   const tabLaborBtn = document.getElementById('analysis-tab-labor');
   if (tabLaborBtn) tabLaborBtn.style.display = canLaborTab ? '' : 'none';

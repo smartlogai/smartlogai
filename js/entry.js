@@ -3597,17 +3597,17 @@ function _entryProjectSubcategoryLabel(entry) {
 async function init_my_entries() {
   const session = getSession();
   const isAdminAll = Auth.canViewAll(session);
-  const canViewStaffRecords = isAdminAll || Auth.isTopMgr(session);
+  const canViewStaffRecords = isAdminAll || Auth.canViewDeptScope(session) || Auth.canReadMenu(session, 'my-entries', false);
   const pageSection = document.getElementById('page-my-entries');
   if (pageSection) pageSection.classList.toggle('admin-all-entries', canViewStaffRecords);
   if (canViewStaffRecords && document.getElementById('pageTitle')) {
-    document.getElementById('pageTitle').textContent = 'Staff 업무 기록';
+    document.getElementById('pageTitle').textContent = '컨설턴트 업무 기록';
   }
 
   if (!Auth.canWriteEntry(session) && !canViewStaffRecords) {
     if (!Auth.isStaff(session) && !Auth.isManager(session)) {
       navigateTo('dashboard');
-      Toast.warning('My Time Sheet는 Staff/Manager만 접근 가능합니다.');
+      Toast.warning('My Time Sheet는 Staff/Manager 또는 권한이 부여된 관리자만 접근 가능합니다.');
       return;
     }
     // 승인자 미지정 staff 조기 차단
@@ -3701,7 +3701,7 @@ async function _loadTimeEntriesForMyList(session, isAdminAll, statusVal) {
 async function _scopeEntriesForStaffRecords(entries, session) {
   if (!Array.isArray(entries) || !session) return [];
   if (Auth.canViewAll(session)) return entries;
-  if (!Auth.isTopMgr(session)) return entries;
+  if (!Auth.canViewDeptScope(session) && !Auth.canReadMenu(session, 'my-entries', false)) return entries;
   let users = [];
   try {
     users = await Master.users();
@@ -3727,7 +3727,7 @@ async function loadMyEntries() {
   _entrySyncRangeButtonState();
   const session      = getSession();
   const isAdminAll   = Auth.canViewAll(session);
-  const canViewStaffRecords = isAdminAll || Auth.isTopMgr(session);
+  const canViewStaffRecords = isAdminAll || Auth.canViewDeptScope(session) || Auth.canReadMenu(session, 'my-entries', false);
   const dateFrom     = document.getElementById('filter-entry-date-from').value;  // 'YYYY-MM-DD'
   const dateTo       = document.getElementById('filter-entry-date-to').value;
   const clientId     = (typeof ClientSearchSelect !== 'undefined')
@@ -5389,7 +5389,7 @@ async function exportEntriesToExcel() {
     // ① 타임시트 데이터 로드 (화면 필터와 동일: 상태·권한 반영)
     console.log('[Excel] step1: fetching time_entries...');
     const isAdminAll = Auth.canViewAll(session);
-    const canViewStaffRecords = isAdminAll || Auth.isTopMgr(session);
+    const canViewStaffRecords = isAdminAll || Auth.canViewDeptScope(session) || Auth.canReadMenu(session, 'my-entries', false);
     const statusVal = (document.getElementById('filter-entry-status') || {}).value || '';
     let entries = await _loadTimeEntriesForMyList(session, isAdminAll, statusVal);
     entries = await _scopeEntriesForStaffRecords(entries, session);
