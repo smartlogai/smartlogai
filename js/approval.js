@@ -173,6 +173,48 @@ function _approvalProjRenderContribSummary(row, P) {
   return `<button type="button" class="btn btn-sm btn-outline" onclick="SmartlogProjReg.openContribModal(decodeURIComponent('${encodeURIComponent(raw)}'),'${label}')">참여자 ${count}명 보기</button>`;
 }
 
+function _approvalProjParseBillingSchedule(raw) {
+  if (!raw) return {};
+  if (typeof raw === 'object') return raw;
+  try { return JSON.parse(String(raw)); } catch (_) { return {}; }
+}
+
+function _approvalProjFmtWon(v) {
+  const n = Number(v || 0);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  return `${Math.round(n).toLocaleString('ko-KR')}원`;
+}
+
+function _approvalProjShortText(v, max = 28) {
+  const s = String(v || '').trim();
+  if (!s) return '';
+  return s.length > max ? `${s.slice(0, max)}...` : s;
+}
+
+function _approvalProjCompSummary(row) {
+  const bs = _approvalProjParseBillingSchedule(row && row.billing_schedule);
+  const down = Number(bs?.down?.amount || 0) || 0;
+  const interim = Number(bs?.interim?.amount || 0) || 0;
+  const finalAmt = Number(bs?.final?.amount || 0) || 0;
+  const fixed = down + interim + finalAmt;
+  const addAmt = Number(bs?.additional?.amount || 0) || 0;
+  const addNote = String(bs?.additional?.terms_note || '').trim();
+  const sucAmt = Number(bs?.success?.amount || 0) || 0;
+  const sucNote = String(bs?.success?.terms_note || '').trim();
+  const parts = [];
+  if (fixed > 0) parts.push(`고정 ${_approvalProjFmtWon(fixed)}`);
+  if (addAmt > 0 || addNote) {
+    const txt = addAmt > 0 ? _approvalProjFmtWon(addAmt) : _approvalProjShortText(addNote);
+    parts.push(`추가 ${txt}`);
+  }
+  if (sucAmt > 0 || sucNote) {
+    const txt = sucAmt > 0 ? _approvalProjFmtWon(sucAmt) : _approvalProjShortText(sucNote);
+    parts.push(`성공 ${txt}`);
+  }
+  if (!parts.length) return '<span style="color:var(--text-muted)">-</span>';
+  return parts.map((p) => `<span style="display:inline-block;margin-right:8px">${Utils.escHtml(p)}</span>`).join('');
+}
+
 async function openApprovalProjectModal(id) {
   if (!id) return;
   const session = getSession();
@@ -212,10 +254,10 @@ async function openApprovalProjectModal(id) {
       <div style="color:var(--text-muted)">프로젝트명</div><div>${Utils.escHtml(row.project_name || '-')}</div>
       <div style="color:var(--text-muted)">고객사</div><div>${Utils.escHtml(row.client_name || '-')}</div>
       <div style="color:var(--text-muted)">대표 수주자</div><div>${Utils.escHtml(row.order_owner_text || '-')}</div>
+      <div style="color:var(--text-muted)">보수조건 요약</div><div style="line-height:1.45">${_approvalProjCompSummary(row)}</div>
       <div style="color:var(--text-muted)">수주 참여자</div><div>${_approvalProjRenderContribSummary(row, P)}</div>
       <div style="color:var(--text-muted)">수주경로</div><div>${Utils.escHtml(row.acquisition_route || '-')}</div>
       <div style="color:var(--text-muted)">수주경로 세부내역</div><div style="white-space:pre-wrap">${Utils.escHtml(row.acquisition_route_detail || '-')}</div>
-      <div style="color:var(--text-muted)">총괄 PM</div><div>${Utils.escHtml(row.cpm_user_name || '-')}</div>
       <div style="color:var(--text-muted)">예상수행기간</div><div>${Utils.escHtml((row.period_start || '-'))} ~ ${Utils.escHtml((row.period_end || '-'))}</div>
       <div style="color:var(--text-muted)">계약서 파일</div><div>${_approvalProjFileCell(row.contract_file_name, row.contract_file_url)}</div>
       <div style="color:var(--text-muted)">합의 근거 파일</div><div>${_approvalProjFileCell(row.contract_evidence_file_name, row.contract_evidence_file_url)}</div>
@@ -281,7 +323,7 @@ async function loadApprovalProjectList() {
       limit: 500,
       maxPages: 10,
       sort: 'created_at',
-      filter: 'registration_status=eq.pending',
+      filter: 'registration_status=in.(pending,approved,rejected)',
     });
   } catch (err) {
     console.error(err);
@@ -289,21 +331,74 @@ async function loadApprovalProjectList() {
     tbody.innerHTML = '<tr><td colspan="9" class="table-empty"><i class="fas fa-exclamation-triangle"></i><p>목록을 불러오지 못했습니다.</p></td></tr>';
     return;
   }
-  rows = (rows || []).filter((r) => P.normStatus(r) === 'pending');
+  rows = (rows || []).filter((r) => P.normStatus(r) !== 'draft');
   rows = await _scopeProjectRowsForApproval(rows, session);
+  const _myIds = new Set([
+    String(session?.id || '').trim(),
+    String(session?.user_id || '').trim(),
+  ].filter(Boolean));
+  const _isMyProcessed = (r) => {
+    if (!_myIds.size || !r) return false;
+    const ids = [
+      String(r.first_approved_by || '').trim(),
+      String(r.second_approved_by || '').trim(),
+      String(r.final_approved_by || '').trim(),
+      String(r.rejected_by || '').trim(),
+    ].filter(Boolean);
+    return ids.some((id) => _myIds.has(id));
+  };
   if (!Auth.isAdmin(session)) {
-    rows = rows.filter((r) => P.canApproveRow(session, r));
+    rows = rows.filter((r) => P.canApproveRow(session, r) || _isMyProcessed(r));
   }
+  const _sortTsPending = (r) => {
+    const t = Number(r?.created_at || 0);
+    return Number.isFinite(t) ? t : 0;
+  };
+  const _sortTsDone = (r) => {
+    const t = Number(
+      r?.final_approved_at
+      || r?.second_approved_at
+      || r?.first_approved_at
+      || r?.rejected_at
+      || r?.updated_at
+      || r?.created_at
+      || 0
+    );
+    return Number.isFinite(t) ? t : 0;
+  };
+  const _statusRank = (r) => {
+    const st = P.normStatus(r);
+    if (st === 'rejected') return 0;
+    if (st === 'pending') return 1;
+    if (st === 'approved') return 2;
+    return 3;
+  };
+  rows.sort((a, b) => {
+    const ra = _statusRank(a);
+    const rb = _statusRank(b);
+    if (ra !== rb) return ra - rb;
+    const sa = P.normStatus(a);
+    const sb = P.normStatus(b);
+    if (sa === 'approved' && sb === 'approved') {
+      const ta = _sortTsDone(a);
+      const tb = _sortTsDone(b);
+      if (ta !== tb) return tb - ta; // 승인완료는 최신순
+    } else {
+      const ta = _sortTsPending(a);
+      const tb = _sortTsPending(b);
+      if (ta !== tb) return ta - tb; // 그 외(반려/대기)는 과거순
+    }
+    return String(a?.id || '').localeCompare(String(b?.id || ''));
+  });
   _approvalSetTabCountPartial('project', rows.length);
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="table-empty"><i class="fas fa-check-circle" style="color:var(--success)"></i><p>승인 대기 중인 프로젝트가 없습니다.</p></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="table-empty"><i class="fas fa-check-circle" style="color:var(--success)"></i><p>표시할 프로젝트 승인 내역이 없습니다.</p></td></tr>';
     return;
   }
   tbody.innerHTML = rows.map((r, i) => {
     const st = P.normStatus(r);
     const codeDisp = (r.project_code && String(r.project_code).trim()) ? String(r.project_code) : '';
     const cd = r.created_at && Utils.formatDate ? Utils.formatDate(r.created_at) : (r.created_at || '—');
-    const stepLab = _approvalProjStepLabel(r, P);
     const contribRaw = String(r.order_contributors_text || '');
     const contribCount = typeof P.contribCount === 'function' ? P.contribCount(contribRaw) : 0;
     const contribLabel = String(r.project_code || r.project_name || `프로젝트 ${i + 1}`).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -321,8 +416,8 @@ async function loadApprovalProjectList() {
       <td>${codeDisp ? `<strong>${Utils.escHtml(codeDisp)}</strong>` : '<span class="proj-reg-code-empty">코드생성전</span>'}</td>
       <td>${Utils.escHtml(r.project_name || '')}</td>
       <td>${Utils.escHtml(r.client_name || '')}</td>
+      <td>${Utils.escHtml(r.order_owner_text || '-')}</td>
       <td class="text-center">${contribBtn}</td>
-      <td class="text-center" style="font-size:12px;white-space:normal;overflow:visible;text-overflow:clip;line-height:1.3" title="${Utils.escHtml(stepLab)}">${Utils.escHtml(stepLab)}</td>
       <td class="text-center" style="font-size:12px">${Utils.escHtml(String(cd))}</td>
       <td class="text-center" style="padding-left:0;padding-right:0">${act}</td>
     </tr>`;

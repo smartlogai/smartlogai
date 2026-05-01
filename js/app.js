@@ -115,18 +115,27 @@ const Session = {
 */
 const ROLE_LABEL = {
   admin:    'Admin',       // 테이블 배지용 짧은 표기
-  director: 'Director',   // 본부장 — 2차 최종 승인
+  director: '본부장',      // 본부장 — 2차 최종 승인
   top_mgr:  'Top Mgr',    // 사업부장·대표·경영지원 등 상위 권한
-  manager:  'Manager',    // 고객지원팀장 — 1차 승인
-  staff:    'Staff',      // 담당자 — 타임시트 작성
+  manager:  '팀장',        // 고객지원팀장 — 1차 승인
+  staff:    '담당(직책)',   // 담당자 — 타임시트 작성
 };
 // 사이드바·상세화면 등 전체 이름이 필요한 경우 사용
 const ROLE_LABEL_FULL = {
   admin:    'Administrator',
-  director: '본부장 (Director)',
+  director: '본부장',
   top_mgr:  'Top Mgr',
-  manager:  '팀장 (Manager)',
-  staff:    'Staff',
+  manager:  '팀장',
+  staff:    '담당(선임/전임/책임)',
+};
+const JOB_TITLE_LABEL = {
+  senior: '선임',
+  associate: '전임',
+  principal: '책임',
+  team_lead: '팀장',
+  division_head: '본부장',
+  bu_head: '사업부장',
+  ceo: '대표',
 };
 const ROLE_COLOR = {
   admin:    'badge-purple',
@@ -136,6 +145,156 @@ const ROLE_COLOR = {
   staff:    'badge-green',
 };
 
+const PERM_POLICY_CACHE = {
+  sessionKey: '',
+  rowsRole: [],
+  rowsDeptJob: [],
+  loadedAt: 0,
+};
+
+function _permSessionKey(session) {
+  if (!session) return '';
+  const uid = String(session.id || session.user_id || '').trim();
+  const role = String(session.role || '').trim();
+  const dept = String(session.dept_id || '').trim();
+  const deptName = String(session.dept_name || '').trim();
+  const title = String(session.job_title || '').trim();
+  return [uid, role, dept, deptName, title].join('|');
+}
+
+function _permPolicyCellKey(menuKey, actionKey) {
+  return `${String(menuKey || '').trim()}::${String(actionKey || '').trim()}`;
+}
+
+function _permDeptJobKeys(jobTitle) {
+  const jt = String(jobTitle || '').trim();
+  if (!jt) return [];
+  if (jt === 'senior' || jt === 'associate' || jt === 'principal') {
+    return ['staff_consultant', jt];
+  }
+  return [jt];
+}
+
+function _permRowActionMatch(rowAction, actionKey) {
+  const a = String(rowAction || '').trim();
+  const t = String(actionKey || '').trim();
+  return a === t || a === '*';
+}
+
+function _permResolveAllowFromRows(rows, menuKey, actionKey) {
+  const menu = String(menuKey || '').trim();
+  const action = String(actionKey || '').trim();
+  if (!menu || !action) return null;
+  const direct = (rows || []).find((r) =>
+    String(r.menu_key || '').trim() === menu && _permRowActionMatch(r.action_key, action)
+  );
+  if (direct) return direct.allow === true;
+  const wildcard = (rows || []).find((r) =>
+    String(r.menu_key || '').trim() === '*' && _permRowActionMatch(r.action_key, action)
+  );
+  if (wildcard) return wildcard.allow === true;
+  return null;
+}
+
+function _permResolveAllow(session, menuKey, actionKey) {
+  if (!session) return null;
+  const deptHit = _permResolveAllowFromRows(PERM_POLICY_CACHE.rowsDeptJob, menuKey, actionKey);
+  if (deptHit != null) return deptHit;
+  const roleHit = _permResolveAllowFromRows(PERM_POLICY_CACHE.rowsRole, menuKey, actionKey);
+  if (roleHit != null) return roleHit;
+  return null;
+}
+
+function _menuPolicyKeyByPage(page) {
+  const p = String(page || '').trim();
+  const alias = {
+    'entry-new': 'entry-new-hourly',
+    'my-entries': 'my-entries-hourly',
+  };
+  return alias[p] || p;
+}
+
+function _authCanReadMenuSync(session, menuKey, fallbackAllow) {
+  const hit = _permResolveAllow(session, menuKey, 'read');
+  if (hit == null) return !!fallbackAllow;
+  return !!hit;
+}
+
+function _authCanActionSync(session, menuKey, actionKey, fallbackAllow) {
+  const hit = _permResolveAllow(session, menuKey, actionKey);
+  if (hit == null) return !!fallbackAllow;
+  return !!hit;
+}
+
+async function _loadPermissionPoliciesForSession(session, force = false) {
+  if (!session) {
+    PERM_POLICY_CACHE.sessionKey = '';
+    PERM_POLICY_CACHE.rowsRole = [];
+    PERM_POLICY_CACHE.rowsDeptJob = [];
+    PERM_POLICY_CACHE.loadedAt = Date.now();
+    return;
+  }
+  const now = Date.now();
+  const key = _permSessionKey(session);
+  if (!force && key === PERM_POLICY_CACHE.sessionKey && (now - Number(PERM_POLICY_CACHE.loadedAt || 0) < 60000)) {
+    return;
+  }
+  const role = String(session.role || '').trim();
+  const deptId = String(session.dept_id || '').trim();
+  const jobTitle = String(session.job_title || '').trim();
+  const deptName = String(session.dept_name || '').trim();
+  const hqName = String(session.hq_name || '').trim();
+  const csName = String(session.cs_team_name || '').trim();
+  const roleRows = role
+    ? await API.listAllPages('permission_policies', {
+      filter: `scope_type=eq.role&role_key=eq.${encodeURIComponent(role)}`,
+      limit: 1000,
+      maxPages: 10,
+      sort: 'updated_at',
+    }).catch(() => [])
+    : [];
+  const titleKeys = _permDeptJobKeys(jobTitle);
+  const deptJobRawList = await Promise.all(titleKeys.map((titleKey) => (
+    API.listAllPages('permission_policies', {
+      filter: `scope_type=eq.dept_job&job_title=eq.${encodeURIComponent(titleKey)}`,
+      limit: 1000,
+      maxPages: 10,
+      sort: 'updated_at',
+    }).catch(() => [])
+  )));
+  const deptJobRaw = deptJobRawList.flat();
+  const deptJobRows = (deptJobRaw || []).filter((r) => {
+    const rowDeptId = String(r?.dept_id || '').trim();
+    const rowDeptName = String(r?.dept_name || '').trim();
+    if (rowDeptId && deptId) return rowDeptId === deptId;
+    if (!rowDeptName) return !rowDeptId;
+    return [deptName, hqName, csName].some((v) => String(v || '').includes(rowDeptName));
+  });
+  PERM_POLICY_CACHE.sessionKey = key;
+  PERM_POLICY_CACHE.rowsRole = Array.isArray(roleRows) ? roleRows : [];
+  PERM_POLICY_CACHE.rowsDeptJob = Array.isArray(deptJobRows) ? deptJobRows : [];
+  PERM_POLICY_CACHE.loadedAt = now;
+}
+
+function _isFinanceSupportUser(session) {
+  if (!session) return false;
+  return [
+    session.hq_name,
+    session.cs_team_name,
+    session.team_name,
+    session.dept_name,
+  ].some((v) => String(v || '').includes('경영지원'));
+}
+
+function _isCcbDivisionUser(session) {
+  if (!session) return false;
+  return [
+    session.dept_name,
+    session.hq_name,
+    session.team_name,
+  ].some((v) => String(v || '').toUpperCase().includes('CCB'));
+}
+
 const Auth = {
   roleOf:     (s) => normalizeRoleName(s && s.role),
   isAdmin:    (s) => s && Auth.roleOf(s) === 'admin',
@@ -143,9 +302,22 @@ const Auth = {
   isTopMgr:   (s) => s && Auth.roleOf(s) === 'top_mgr',
   isManager:  (s) => s && Auth.roleOf(s) === 'manager',
   isStaff:    (s) => s && Auth.roleOf(s) === 'staff',
+  isFinanceSupport: (s) => _isFinanceSupportUser(s),
+  isCcbDivision: (s) => _isCcbDivisionUser(s),
 
-  /** 프로젝트 산출물 열람 (DB can_view_project_deliverables + 세션) */
-  canViewProjectDeliverables: (s) => !!(s && s.can_view_project_deliverables),
+  /** 프로젝트 산출물 열람: 권한정책 우선, 레거시 사용자 플래그 fallback */
+  canViewProjectDeliverables: (s) => {
+    if (!s) return false;
+    const byPolicy = _permResolveAllow(s, 'project-deliverables', 'read');
+    if (byPolicy != null) return byPolicy;
+    return !!s.can_view_project_deliverables;
+  },
+  canDownloadProjectDeliverables: (s) => {
+    if (!s) return false;
+    const byPolicy = _permResolveAllow(s, 'project-deliverables', 'download');
+    if (byPolicy != null) return byPolicy;
+    return !!s.can_view_project_deliverables;
+  },
 
   /** 비용·인건비·배부 성격 UI — admin 제외, director·top_mgr 허용 */
   canViewCostFinancials: (s) => !!(s && (Auth.isDirector(s) || Auth.isTopMgr(s))),
@@ -212,6 +384,18 @@ const Auth = {
   // 전체 열람 (필터 없음): admin만
   canViewAll: (s) => s && Auth.isAdmin(s),
 
+  // 대시보드 전체 열람: admin + 경영지원
+  canViewDashboardAll: (s) => !!(s && (s.role === 'admin' || _isFinanceSupportUser(s))),
+
+  // 대시보드 메뉴 접근: 팀장/본부장/사업부장 + admin + 경영지원
+  canViewDashboardMenu: (s) => !!(s && (
+    s.role === 'manager' ||
+    s.role === 'director' ||
+    s.role === 'top_mgr' ||
+    s.role === 'admin' ||
+    _isFinanceSupportUser(s)
+  )),
+
   // 소속 단위 열람: manager + director + top_mgr + admin
   canViewDeptScope: (s) => s && (Auth.isManager(s) || Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isAdmin(s)),
 
@@ -251,6 +435,13 @@ const Auth = {
 
   // 자문 자료실: 모든 역할
   canViewArchive: (s) => !!s,
+
+  // 정책 기반 메뉴/액션 체크 (권한관리 화면 연동)
+  canReadMenu: (s, menuKey, fallbackAllow = false) => _authCanReadMenuSync(s, menuKey, fallbackAllow),
+  canDoAction: (s, menuKey, actionKey, fallbackAllow = false) => _authCanActionSync(s, menuKey, actionKey, fallbackAllow),
+  refreshPolicyCache: async (s, force = false) => {
+    await _loadPermissionPoliciesForSession(s, !!force);
+  },
 
   // ★ 소속 범위 필터 — 레코드(entry 또는 user)가 세션 소속 범위에 포함되는지
   // admin: 항상 true / director·manager: 사업부 OR 본부 OR 고객지원팀 일치
@@ -567,6 +758,28 @@ const API = {
     });
   },
 
+  /** Supabase Edge Function 호출 */
+  async invokeFunction(fn, body = {}, opts = {}) {
+    const name = String(fn || '').trim();
+    if (!name) throw new Error('호출할 Edge Function 이름이 없습니다.');
+    const url = `${SUPABASE_URL}/functions/v1/${encodeURIComponent(name)}`;
+    const res = await fetch(url, {
+      method: String(opts.method || 'POST').toUpperCase(),
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+      },
+      body: JSON.stringify(body || {}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = String(data?.message || data?.error || `HTTP ${res.status}`);
+      throw new Error(msg);
+    }
+    return data;
+  },
+
   _encodeStoragePath(path) {
     return String(path || '')
       .split('/')
@@ -598,7 +811,11 @@ const API = {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
-      throw new Error(err.message || err.error || `HTTP ${res.status}`);
+      const msg = String(err.message || err.error || `HTTP ${res.status}`);
+      if (/bucket not found/i.test(msg)) {
+        throw new Error(`스토리지 버킷(${String(bucket || '').trim()})이 없습니다. docs/sql/dev_setup_project_outputs_storage.sql 을 먼저 실행해주세요.`);
+      }
+      throw new Error(msg);
     }
     return {
       bucket: String(bucket || '').trim(),
@@ -957,9 +1174,18 @@ const Utils = {
     return `${(bytes/1024/1024).toFixed(1)}MB`;
   },
 
-  // 역할 배지
-  roleBadge(role) {
-    return `<span class="badge ${ROLE_COLOR[role] || 'badge-gray'}">${ROLE_LABEL[role] || role}</span>`;
+  // 직책 라벨
+  jobTitleLabel(jobTitle) {
+    const key = String(jobTitle || '').trim().toLowerCase();
+    if (!key) return '';
+    return JOB_TITLE_LABEL[key] || String(jobTitle || '').trim();
+  },
+
+  // 역할/직책 배지
+  roleBadge(role, jobTitle = '') {
+    const titleLabel = this.jobTitleLabel(jobTitle);
+    const label = titleLabel || ROLE_LABEL[role] || role;
+    return `<span class="badge ${ROLE_COLOR[role] || 'badge-gray'}">${label}</span>`;
   },
 
   // 비밀번호 해시
@@ -1702,6 +1928,9 @@ const UserSearchSelect = (() => {
 // ─────────────────────────────────────────────
 function navigateTo(page) {
   const session = Session.get();
+  if (page === 'dashboard' && session && Auth.isCcbDivision(session) && Auth.canViewDashboardMenu(session)) {
+    page = 'project-dashboard';
+  }
   if (page === 'entry-new' || page === 'my-entries') {
     const allowStaffRecordsPage = page === 'my-entries' && session && Auth.isTopMgr(session);
     if (session && !Auth.canViewAll(session) && !allowStaffRecordsPage) {
@@ -1717,6 +1946,17 @@ function navigateTo(page) {
         else if (hourlyOk) page = 'my-entries-hourly';
         else if (dailyOk) page = 'my-entries-daily';
       }
+    }
+  }
+  if (session) {
+    if ((page === 'dashboard' || page === 'project-dashboard') && !Auth.canViewDashboardMenu(session)) {
+      Toast.warning('대시보드 접근 권한이 없습니다.');
+      return;
+    }
+    const menuKey = _menuPolicyKeyByPage(page);
+    if (!_authCanReadMenuSync(session, menuKey, true)) {
+      Toast.warning('접근 권한이 없습니다.');
+      return;
     }
   }
   const SECTION_ALIAS = {
@@ -1872,6 +2112,24 @@ function toggleSidebarSection(sectionId, forceExpand) {
   - Manager가 승인자(approver_id)로 지정된 Staff들이 해당 Manager의 팀원
   - Staff 등록 시 승인자로 지정된 Manager의 팀이 곧 해당 Staff의 소속팀
 */
+function _applyPolicyToMenuVisibility(session) {
+  if (!session) return;
+  const items = Array.from(document.querySelectorAll('.nav-item[data-page]'));
+  items.forEach((item) => {
+    if (!item || item.style.display === 'none') return;
+    const page = String(item.dataset.page || '').trim();
+    if (!page) return;
+    const menuKey = _menuPolicyKeyByPage(page);
+    const ok = _authCanReadMenuSync(session, menuKey, true);
+    if (!ok) item.style.display = 'none';
+  });
+  const settingsSection = document.querySelector('.menu-settings-section');
+  if (settingsSection) {
+    const anySettingsMenuVisible = Array.from(document.querySelectorAll('.nav-item.menu-master')).some((el) => el.style.display !== 'none');
+    settingsSection.style.display = anySettingsMenuVisible ? '' : 'none';
+  }
+}
+
 function setupMenuByRole(session) {
   const role        = session ? session.role : '';
   const hasApprover = Auth.hasApprover(session);      // staff에서 승인자 지정 여부
@@ -1884,6 +2142,8 @@ function setupMenuByRole(session) {
   const canViewDeptScope     = Auth.canViewDeptScope(session);  // manager+director+admin
   const canViewAll           = Auth.canViewAll(session);        // admin only
   const canViewStaffRecords  = canViewAll || Auth.isTopMgr(session);
+  const canViewDashboardMenu = Auth.canViewDashboardMenu(session);
+  const isCcbDivision        = Auth.isCcbDivision(session);
   const canAnalysis          = Auth.canViewAnalysis(session);   // director+top_mgr+admin
   const isMaster             = Auth.canManageMaster(session);   // admin only
   const canProjectReg        = Auth.canManageProjectRegister(session);
@@ -1922,9 +2182,11 @@ function setupMenuByRole(session) {
   if (mDailyMy) mDailyMy.style.display = showDailyMenu ? '' : 'none';
 
   const delivMenu = document.getElementById('menu-deliverables');
-  if (delivMenu) delivMenu.style.display = Auth.canViewProjectDeliverables(session) ? '' : 'none';
+  if (delivMenu) delivMenu.style.display = session ? '' : 'none';
+  const timelogDashMenu = document.querySelector('.nav-item[data-page="dashboard"]');
+  if (timelogDashMenu) timelogDashMenu.style.display = (canViewDashboardMenu && !isCcbDivision) ? '' : 'none';
   const projectDashMenu = document.getElementById('menu-project-dashboard');
-  if (projectDashMenu) projectDashMenu.style.display = canViewDeptScope ? '' : 'none';
+  if (projectDashMenu) projectDashMenu.style.display = canViewDashboardMenu ? '' : 'none';
 
   // ── Management 섹션 타이틀 ─────────────────────────────────
   const mgmtSection = document.getElementById('menu-management-section');
@@ -1988,6 +2250,13 @@ function setupMenuByRole(session) {
   const settingsSection = document.querySelector('.menu-settings-section');
   if (settingsSection) settingsSection.style.display = (isMaster || isTopMgr) ? '' : 'none';
 
+  // 정책 캐시 기반 즉시 반영 + 비동기 최신화
+  _applyPolicyToMenuVisibility(session);
+  _loadPermissionPoliciesForSession(session).then(() => {
+    _applyPolicyToMenuVisibility(session);
+    refreshSidebarSectionCollapse();
+  }).catch(() => {});
+
   // ── 승인자 없는 staff 안내 배너 표시 ──────────────────────
   _showNoApproverBanner(isStaffNoApprover);
   refreshSidebarSectionCollapse();
@@ -2006,11 +2275,7 @@ async function _refreshProjectMgmtMenuVisibility(session, canProjectReg) {
   }
   // 경영지원 본부/팀 소속자는 프로젝트 생성/승인 이력과 무관하게
   // 세금계산서/정산 운영 기능 접근을 위해 프로젝트관리 메뉴 노출
-  const isFinanceHqOrTeam = [
-    session.hq_name,
-    session.cs_team_name,
-    session.team_name,
-  ].some((v) => String(v || '').includes('경영지원'));
+  const isFinanceHqOrTeam = Auth.isFinanceSupport(session);
   if (isFinanceHqOrTeam) {
     projectMgmtMenu.style.display = '';
     return;

@@ -14,6 +14,12 @@ const _PROJ_REG_AMT_IDS = [
   'proj-reg-bill-final-amt',
   'proj-reg-bill-add-amt',
   'proj-reg-bill-success-amt',
+  'proj-proposal-revenue',
+  'proj-proposal-direct-expense',
+  'proj-proposal-rate-staff',
+  'proj-proposal-rate-manager',
+  'proj-proposal-rate-director',
+  'proj-proposal-rate-top_mgr',
 ];
 
 let _projRegClientSearchBound = false;
@@ -33,12 +39,33 @@ let _projRegContributors = [];
 let _projRegContractDocs = [];
 let _projRegContractDocFiltersBound = false;
 let _projRegOpenedFromApprovalDetail = false;
+let _projRegWorkflowTab = 'proposal';
+let _projRegContractView = 'list';
+let _projRegProposalSnapshot = null;
+let _projRegDetailTab = 'ops';
+let _projRegOutputBound = false;
+let _projRegRatePanelBound = false;
+let _projRegContractRateInputBound = false;
+let _projRegContractRateRowsByRole = {};
+
+const _PROJ_REG_ROLE_KEYS = ['staff', 'manager', 'director', 'top_mgr'];
+const _PROJ_REG_TC_TITLE_KEYS = ['senior', 'associate', 'principal', 'team_lead', 'division_head', 'bu_head', 'ceo'];
+const _PROJ_REG_TC_DEFAULT_RATE = {
+  senior: 200000,
+  associate: 300000,
+  principal: 500000,
+  team_lead: 700000,
+  division_head: 800000,
+  bu_head: 900000,
+  ceo: 1000000,
+};
 
 const _PROJ_REG_STORAGE_BUCKETS = {
   contract: 'registered-project-contracts',
   agreement: 'registered-project-agreements',
   route: 'registered-project-route-evidence',
 };
+const _PROJ_REG_OUTPUT_BUCKET = 'project-outputs';
 
 function _projRegMonthToYymm(monthVal) {
   if (!monthVal || !/^\d{4}-\d{2}$/.test(monthVal)) return '';
@@ -64,11 +91,39 @@ function _projRegParseDigits(v) {
   return String(v || '').replace(/[^\d]/g, '');
 }
 
+function _projRegFloorThousand(n) {
+  const v = Number(n || 0);
+  if (!Number.isFinite(v) || v <= 0) return 0;
+  return Math.floor(v / 1000) * 1000;
+}
+
 function _projRegAmtValue(id) {
   const raw = _projRegParseDigits(document.getElementById(id)?.value || '');
   if (raw === '') return null;
   const n = parseInt(raw, 10);
   return Number.isFinite(n) ? n : null;
+}
+
+function _projRegBindContractRateInputs() {
+  if (_projRegContractRateInputBound) return;
+  _PROJ_REG_TC_TITLE_KEYS.forEach((roleKey) => {
+    const el = document.getElementById(`proj-reg-contract-rate-${roleKey}`);
+    if (!el) return;
+    el.addEventListener('focus', () => {
+      const raw = _projRegParseDigits(el.value);
+      el.value = raw === '' ? '' : raw;
+    });
+    el.addEventListener('blur', () => {
+      const raw = _projRegParseDigits(el.value);
+      if (raw === '') {
+        el.value = '';
+        return;
+      }
+      const n = _projRegFloorThousand(parseInt(raw, 10));
+      el.value = n > 0 ? n.toLocaleString('ko-KR') : '';
+    });
+  });
+  _projRegContractRateInputBound = true;
 }
 
 function _projRegNoteVal(id) {
@@ -313,7 +368,16 @@ function _projRegCanApproveRow(session, row) {
   if (!myIds.size) return false;
   const eff = _projRegEffectiveApprovers(row);
   const targetId = String((eff.chain && eff.chain[step - 1]) || '');
-  if (targetId) return myIds.has(targetId);
+  if (targetId && myIds.has(targetId)) return true;
+  // 운영 중 사용자 재생성 등으로 승인자 ID가 바뀐 경우(과거 pending 데이터),
+  // 단계별 승인자 "이름"이 현재 세션명과 일치하면 승인 가능하도록 폴백한다.
+  const targetNameRaw =
+    step === 1 ? String((row && row.reg_pa1_name) || '').trim()
+    : (step === 2
+      ? String((eff.count >= 3 ? row?.reg_pa2_name : row?.reg_pa2_name) || '').trim()
+      : String((row && row.reg_pa3_name) || '').trim());
+  const myName = String((session && session.name) || '').trim();
+  if (targetNameRaw && myName && targetNameRaw === myName) return true;
   return false;
 }
 
@@ -448,6 +512,66 @@ function _projRegNotifyProjectNextPending({ row, fromSession, step }) {
       : `${fromSession?.name || '승인자'}님이 프로젝트를 2차 승인했습니다. 3차 최종 승인 검토를 진행해주세요.`,
     targetMenu: 'approval:project',
   });
+}
+
+function _projRegHasFinanceKeyword(v) {
+  const t = String(v || '').trim().toLowerCase();
+  if (!t) return false;
+  return (
+    t.includes('경영지원') ||
+    t.includes('재경') ||
+    t.includes('재무') ||
+    t.includes('finance')
+  );
+}
+
+function _projRegIsFinanceTeamUser(u) {
+  if (!u || u.deleted === true || u.is_active === false) return false;
+  const role = String(u.role || '').trim().toLowerCase();
+  if (role === 'finance') return true;
+  return (
+    _projRegHasFinanceKeyword(u.dept_name) ||
+    _projRegHasFinanceKeyword(u.hq_name) ||
+    _projRegHasFinanceKeyword(u.cs_team_name) ||
+    _projRegHasFinanceKeyword(u.team_name)
+  );
+}
+
+async function _projRegNotifyFinanceTeamOnFinalApproved({ row, fromSession }) {
+  if (typeof createNotification !== 'function' || !row) return;
+  if (!Array.isArray(_projRegUsers) || !_projRegUsers.length) {
+    try {
+      _projRegUsers = await Master.users();
+    } catch (_) {
+      _projRegUsers = [];
+    }
+  }
+  const financeUsers = (_projRegUsers || []).filter(_projRegIsFinanceTeamUser);
+  if (!financeUsers.length) return;
+  const senderId = String(fromSession?.id || fromSession?.user_id || '').trim();
+  const senderName = String(fromSession?.name || fromSession?.user_name || '').trim();
+  const projectCode = String(row.project_code || '').trim();
+  const clientName = String(row.client_name || '').trim();
+  const projectName = String(row.project_name || '').trim();
+  const summary = `${projectCode || '-'} | ${clientName || '-'}`;
+  const message = `${senderName || '승인자'}님이 프로젝트를 최종 승인했습니다. 프로젝트코드: ${projectCode || '-'}, 고객사명: ${clientName || '-'}${projectName ? `, 프로젝트명: ${projectName}` : ''}`;
+  const sent = new Set();
+  await Promise.allSettled(financeUsers.map((u) => {
+    const uid = String(u.id || '').trim();
+    if (!uid || uid === senderId || sent.has(uid)) return Promise.resolve();
+    sent.add(uid);
+    return createNotification({
+      toUserId: uid,
+      toUserName: String(u.name || ''),
+      fromUserId: senderId,
+      fromUserName: senderName,
+      type: 'project_registered_final_approved',
+      entryId: String(row.id || ''),
+      entrySummary: summary,
+      message,
+      targetMenu: 'project-register',
+    });
+  }));
 }
 
 function projRegSetFormFieldsDisabled(disabled) {
@@ -672,20 +796,61 @@ function projRegApplyRouteFromStored(routeVal, detailVal) {
 }
 
 function _projRegContribNormalize(rows) {
-  return (rows || []).map((r) => ({
-    name: String((r && r.name) || '').trim(),
-    role: String((r && r.role) || '').trim(),
-    contribution: String((r && r.contribution) || '').replace(/[^\d.]/g, ''),
-  }));
+  return (rows || []).map((r) => {
+    const userObj = (r && typeof r.user === 'object' && r.user) ? r.user : null;
+    const rawName = (r && (r.name || r.user_name || r.member_name))
+      || (userObj && (userObj.name || userObj.user_name))
+      || '';
+    const rawRole = (r && (r.role || r.project_role || r.title || r.job_title))
+      || (userObj && (userObj.role || userObj.title))
+      || '';
+    const rawContribution = (r && (r.contribution || r.allocation_pct || r.allocation_percent || r.allocation_p || r.share))
+      || '';
+    return {
+      name: String(rawName || '').trim(),
+      role: String(rawRole || '').trim(),
+      contribution: String(rawContribution || '').replace(/[^\d.]/g, ''),
+    };
+  });
+}
+
+function _projRegTryParseContribJson(text) {
+  const src = String(text || '').trim();
+  if (!src) return null;
+  const candidates = [];
+  candidates.push(src);
+  if (/^json\s*:+/i.test(src)) candidates.push(src.replace(/^json\s*:+/i, '').trim());
+  if (/^json\s*[-=]*\s*:+/i.test(src)) candidates.push(src.replace(/^json\s*[-=]*\s*:+/i, '').trim());
+  if (
+    (src.startsWith('"') && src.endsWith('"'))
+    || (src.startsWith("'") && src.endsWith("'"))
+  ) {
+    candidates.push(src.slice(1, -1));
+  }
+  for (const cand of candidates) {
+    try {
+      const parsed = JSON.parse(cand);
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed && Array.isArray(parsed.contributors)) return parsed.contributors;
+    } catch (_) {}
+    try {
+      const unescaped = cand
+        .replace(/\\"/g, '"')
+        .replace(/\\n/g, ' ')
+        .replace(/\\r/g, ' ');
+      const parsed2 = JSON.parse(unescaped);
+      if (Array.isArray(parsed2)) return parsed2;
+      if (parsed2 && Array.isArray(parsed2.contributors)) return parsed2.contributors;
+    } catch (_) {}
+  }
+  return null;
 }
 
 function _projRegContribParse(raw) {
   const txt = String(raw || '').trim();
   if (!txt) return [];
-  try {
-    const j = JSON.parse(txt);
-    if (Array.isArray(j)) return _projRegContribNormalize(j);
-  } catch (_) {}
+  const parsedRows = _projRegTryParseContribJson(txt);
+  if (Array.isArray(parsedRows)) return _projRegContribNormalize(parsedRows);
   // 하위호환: "이름(역할,40%)" 콤마 나열 텍스트
   return txt.split(',').map((part) => {
     const s = String(part || '').trim();
@@ -833,6 +998,13 @@ function projRegOpenContribModal(raw, label) {
 }
 
 async function init_project_register() {
+  const activePage = document.querySelector('.nav-item.active')?.dataset.page || '';
+  if (activePage === 'project-management') {
+    if (typeof init_project_management === 'function') {
+      await init_project_management();
+    }
+    return;
+  }
   const session = getSession();
   if (!Auth.canManageProjectRegister(session)) {
     navigateTo('dashboard');
@@ -848,14 +1020,512 @@ async function init_project_register() {
   await projRegFillDropdowns();
   _projRegBindListFiltersOnce();
   projRegBindContractDocFiltersOnce();
+  if (!_projRegOutputBound) {
+    document.getElementById('proj-reg-out-refresh-btn')?.addEventListener('click', projRegOutLoadList);
+    document.getElementById('proj-reg-out-upload-btn')?.addEventListener('click', projRegOutUpload);
+    _projRegOutputBound = true;
+  }
+  if (!_projRegRatePanelBound) {
+    document.getElementById('proj-reg-contract-rate-save-btn')?.addEventListener('click', projRegSaveContractRates);
+    document.getElementById('proj-reg-contract-rate-reload-btn')?.addEventListener('click', () => _projRegLoadContractRatePanel(_projRegOutCurrentRow()));
+    document.getElementById('proj-reg-timecharge-enabled-input')?.addEventListener('change', () => {
+      projRegToggleTimeChargeRatePanel();
+      _projRegLoadContractRatePanel(_projRegOutCurrentRow()).catch(() => {});
+    });
+    _projRegBindContractRateInputs();
+    _projRegRatePanelBound = true;
+  }
   await projRegLoadList();
+  projRegInitProposalForm();
+  projRegSwitchWorkflowTab('contract');
   if (typeof init_project_management === 'function') {
     await init_project_management();
+  } else {
+    const activePage = document.querySelector('.nav-item.active')?.dataset.page || '';
+    if (typeof applyProjectPageMode === 'function') {
+      applyProjectPageMode(activePage === 'project-management' ? 'manage' : 'register');
+    }
   }
-  const activePage = document.querySelector('.nav-item.active')?.dataset.page || '';
-  if (typeof applyProjectPageMode === 'function') {
-    applyProjectPageMode(activePage === 'project-management' ? 'manage' : 'register');
+}
+
+function _projRegProposalRoleLabel(roleKey) {
+  const map = {
+    staff: '담당(선임/전임/책임)',
+    manager: '팀장',
+    director: '본부장',
+    top_mgr: '사업부장',
+  };
+  return map[String(roleKey || '').toLowerCase()] || String(roleKey || '-');
+}
+
+function _projRegProposalNum(id) {
+  return _projRegParseDigits(document.getElementById(id)?.value || '') || '0';
+}
+
+function _projRegProposalNumValue(id) {
+  const n = parseInt(_projRegProposalNum(id), 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function _projRegProposalHourValue(id) {
+  const n = Number(document.getElementById(id)?.value || 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function _projRegProposalPctValue(id) {
+  const n = Number(document.getElementById(id)?.value || 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function _projRegProposalKrw(v) {
+  return `${Math.round(Number(v || 0)).toLocaleString('ko-KR')}원`;
+}
+
+function _projRegIsTimeChargeEnabled() {
+  return !!document.getElementById('proj-reg-timecharge-enabled-input')?.checked;
+}
+
+function projRegToggleTimeChargeRatePanel() {
+  const wrap = document.getElementById('proj-reg-contract-rate-wrap');
+  if (!wrap) return;
+  const on = _projRegIsTimeChargeEnabled();
+  wrap.style.display = on ? '' : 'none';
+}
+
+async function projRegOpenContractRateInput() {
+  const tcEl = document.getElementById('proj-reg-timecharge-enabled-input');
+  if (tcEl && !tcEl.checked) tcEl.checked = true;
+  projRegToggleTimeChargeRatePanel();
+  try {
+    await _projRegLoadContractRatePanel(_projRegOutCurrentRow());
+  } catch (_) {}
+  const wrap = document.getElementById('proj-reg-contract-rate-wrap');
+  if (wrap) {
+    try { wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (_) {}
   }
+  const firstInput = document.getElementById('proj-reg-contract-rate-senior');
+  if (firstInput) firstInput.focus();
+}
+
+function _projRegRateProjectCode(row) {
+  const rowCode = String((row && row.project_code) || '').trim();
+  if (rowCode) return rowCode;
+  return String(document.getElementById('proj-reg-existing-code')?.value || '').trim();
+}
+
+function _projRegSetContractBaseRate(roleKey, rate) {
+  const el = document.getElementById(`proj-reg-contract-base-${roleKey}`);
+  if (el) el.textContent = `${Math.round(Number(rate || 0)).toLocaleString('ko-KR')}원`;
+}
+
+function _projRegSetContractRateInputs(roleKey, row) {
+  const rateEl = document.getElementById(`proj-reg-contract-rate-${roleKey}`);
+  const noteEl = document.getElementById(`proj-reg-contract-note-${roleKey}`);
+  if (rateEl) {
+    const n = row ? _projRegFloorThousand(Number(row.unit_rate || 0)) : 0;
+    rateEl.value = n > 0 ? n.toLocaleString('ko-KR') : '';
+  }
+  if (noteEl) noteEl.value = String((row && row.note) || '');
+}
+
+async function _projRegLoadContractRatePanel(row) {
+  projRegToggleTimeChargeRatePanel();
+  const projectCode = _projRegRateProjectCode(row);
+  const defaultBaseMap = { ..._PROJ_REG_TC_DEFAULT_RATE };
+  _PROJ_REG_TC_TITLE_KEYS.forEach((role) => {
+    _projRegSetContractBaseRate(role, Number(defaultBaseMap[role] || 0));
+    _projRegSetContractRateInputs(role, null);
+  });
+  _projRegContractRateRowsByRole = {};
+  try {
+    const stdRows = await API.listAllPages('standard_rate_master', {
+      filter: 'is_active=eq.true',
+      limit: 100,
+      maxPages: 3,
+      sort: 'updated_at',
+    }).catch(() => []);
+    const stdMap = {};
+    (stdRows || []).forEach((r) => {
+      const key = String(r.role_key || '').toLowerCase();
+      if (!_PROJ_REG_TC_TITLE_KEYS.includes(key) || stdMap[key]) return;
+      stdMap[key] = Number(r.unit_rate || 0);
+    });
+    _PROJ_REG_TC_TITLE_KEYS.forEach((role) => {
+      const n = Number(stdMap[role] || defaultBaseMap[role] || 0);
+      _projRegSetContractBaseRate(role, n);
+    });
+    if (!projectCode) return;
+    const contractRows = await API.listAllPages('project_rate_cards', {
+      filter: `project_code=eq.${encodeURIComponent(projectCode)}&is_active=eq.true`,
+      limit: 200,
+      maxPages: 5,
+      sort: 'updated_at',
+    }).catch(() => []);
+    const sorted = (contractRows || [])
+      .slice()
+      .sort((a, b) => Number(b.updated_at || b.created_at || 0) - Number(a.updated_at || a.created_at || 0));
+    const byRole = {};
+    sorted.forEach((r) => {
+      const role = String(r.role_key || '').toLowerCase();
+      const userId = String(r.user_id || '').trim();
+      if (!_PROJ_REG_TC_TITLE_KEYS.includes(role)) return;
+      if (userId) return;
+      if (!byRole[role]) byRole[role] = r;
+    });
+    _projRegContractRateRowsByRole = byRole;
+    _PROJ_REG_TC_TITLE_KEYS.forEach((role) => _projRegSetContractRateInputs(role, byRole[role] || null));
+  } catch (e) {
+    console.warn('[proj-reg] contract rate load failed', e?.message || e);
+  }
+}
+
+async function _projRegPersistProjectContractRates(projectCode, projectId, session) {
+  const code = String(projectCode || '').trim();
+  if (!code) return;
+  const enabled = _projRegIsTimeChargeEnabled();
+  if (!enabled) {
+    const exists = await API.listAllPages('project_rate_cards', {
+      filter: `project_code=eq.${encodeURIComponent(code)}&is_active=eq.true`,
+      limit: 300,
+      maxPages: 5,
+      sort: 'updated_at',
+    }).catch(() => []);
+    for (const row of (exists || [])) {
+      if (!row || !row.id) continue;
+      await API.patch('project_rate_cards', row.id, {
+        is_active: false,
+        updated_at: Date.now(),
+      });
+    }
+    return;
+  }
+  for (const role of _PROJ_REG_TC_TITLE_KEYS) {
+    const rateRaw = _projRegParseDigits(document.getElementById(`proj-reg-contract-rate-${role}`)?.value || '');
+    const unitRate = _projRegFloorThousand(Number(rateRaw || 0));
+    const note = String(document.getElementById(`proj-reg-contract-note-${role}`)?.value || '').trim();
+    const hit = _projRegContractRateRowsByRole[role] || null;
+    if (unitRate > 0) {
+      const payload = {
+        project_id: String(projectId || ''),
+        project_code: code,
+        user_id: '',
+        role_key: role,
+        unit_rate: unitRate,
+        effective_from: null,
+        effective_to: null,
+        is_active: true,
+        note,
+        updated_at: Date.now(),
+      };
+      if (hit && hit.id) await API.patch('project_rate_cards', hit.id, payload);
+      else {
+        await API.create('project_rate_cards', {
+          ...payload,
+          created_by: String(session.id || ''),
+          created_by_name: session.name || '',
+          created_at: Date.now(),
+        });
+      }
+    } else if (hit && hit.id) {
+      await API.patch('project_rate_cards', hit.id, {
+        is_active: false,
+        updated_at: Date.now(),
+      });
+    }
+  }
+}
+
+async function projRegSaveContractRates() {
+  const session = getSession();
+  if (!Auth.canManageProjectRegister(session)) {
+    Toast.warning('권한이 없습니다.');
+    return;
+  }
+  const row = _projRegOutCurrentRow();
+  const projectCode = _projRegRateProjectCode(row);
+  if (!projectCode) {
+    Toast.warning('프로젝트 코드 생성 후 저장하세요. (승인요청 시 코드 자동채번)');
+    return;
+  }
+  try {
+    await _projRegPersistProjectContractRates(projectCode, String((row && row.id) || ''), session);
+    await _projRegLoadContractRatePanel(row);
+    Toast.success('프로젝트 계약단가를 저장했습니다.');
+  } catch (e) {
+    Toast.error('계약단가 저장 실패: ' + (e.message || e));
+  }
+}
+
+function _projRegPopulateProposalCodeTypeSelect() {
+  const sel = document.getElementById('proj-proposal-code-type');
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">코드유형 선택</option>';
+  (_projRegTypes || []).forEach((t) => {
+    const opt = document.createElement('option');
+    opt.value = String(t.id || '');
+    opt.textContent = `${t.main_category} · ${t.main_code} — ${t.sub_category} (${t.sub_code})`;
+    sel.appendChild(opt);
+  });
+  if (cur && [...sel.options].some((o) => o.value === cur)) sel.value = cur;
+}
+
+function projRegInitProposalForm() {
+  _projRegPopulateProposalCodeTypeSelect();
+  if (!document.getElementById('proj-proposal-temp-code')?.value) {
+    projRegGenerateProposalTempCode();
+  }
+}
+
+function _projRegRenderWorkflowTab() {
+  const proposalPanel = document.getElementById('proj-proposal-panel');
+  const list = document.getElementById('proj-reg-list');
+  const form = document.getElementById('proj-reg-form');
+  if (!proposalPanel && _projRegWorkflowTab === 'proposal') {
+    _projRegWorkflowTab = 'contract';
+  }
+  document.querySelectorAll('[data-proj-wf-tab]').forEach((btn) => {
+    const on = btn.getAttribute('data-proj-wf-tab') === _projRegWorkflowTab;
+    btn.classList.toggle('is-active', on);
+  });
+  if (proposalPanel) proposalPanel.style.display = _projRegWorkflowTab === 'proposal' ? '' : 'none';
+  if (_projRegWorkflowTab === 'proposal') {
+    if (list) list.style.display = 'none';
+    if (form) form.style.display = 'none';
+    return;
+  }
+  if (_projRegContractView === 'form') {
+    if (list) list.style.display = 'none';
+    if (form) form.style.display = '';
+  } else {
+    if (list) list.style.display = '';
+    if (form) form.style.display = 'none';
+  }
+}
+
+function projRegSwitchWorkflowTab(tab) {
+  const next = tab === 'contract' ? 'contract' : 'proposal';
+  _projRegWorkflowTab = next;
+  _projRegRenderWorkflowTab();
+}
+
+function projRegGenerateProposalTempCode() {
+  const el = document.getElementById('proj-proposal-temp-code');
+  if (!el) return;
+  const d = new Date();
+  const yy = String(d.getFullYear()).slice(-2);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const seq = String(Math.floor(Math.random() * 9999) + 1).padStart(4, '0');
+  el.value = `TMP-${yy}${mm}-${seq}`;
+}
+
+function projRegResetProposalForm() {
+  const ids = [
+    'proj-proposal-name',
+    'proj-proposal-client',
+    'proj-proposal-code-type',
+    'proj-proposal-revenue',
+    'proj-proposal-direct-expense',
+    'proj-proposal-rate-staff',
+    'proj-proposal-rate-manager',
+    'proj-proposal-rate-director',
+    'proj-proposal-rate-top_mgr',
+  ];
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  ['proj-proposal-target-margin', 'proj-proposal-indirect-rate'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = id === 'proj-proposal-target-margin' ? '20' : '0';
+  });
+  ['staff', 'manager', 'director', 'top_mgr'].forEach((k) => {
+    const h = document.getElementById(`proj-proposal-hours-${k}`);
+    if (h) h.value = '0';
+    const c = document.getElementById(`proj-proposal-cost-${k}`);
+    if (c) c.textContent = '0원';
+  });
+  projRegGenerateProposalTempCode();
+  _projRegProposalSnapshot = null;
+  projRegRunProposalSimulation();
+}
+
+function _projRegCollectProposalSnapshot() {
+  const rateMap = {
+    staff: _projRegProposalNumValue('proj-proposal-rate-staff'),
+    manager: _projRegProposalNumValue('proj-proposal-rate-manager'),
+    director: _projRegProposalNumValue('proj-proposal-rate-director'),
+    top_mgr: _projRegProposalNumValue('proj-proposal-rate-top_mgr'),
+  };
+  const hourMap = {
+    staff: _projRegProposalHourValue('proj-proposal-hours-staff'),
+    manager: _projRegProposalHourValue('proj-proposal-hours-manager'),
+    director: _projRegProposalHourValue('proj-proposal-hours-director'),
+    top_mgr: _projRegProposalHourValue('proj-proposal-hours-top_mgr'),
+  };
+  let laborCost = 0;
+  _PROJ_REG_ROLE_KEYS.forEach((k) => {
+    laborCost += Number(rateMap[k] || 0) * Number(hourMap[k] || 0);
+  });
+  const revenue = _projRegProposalNumValue('proj-proposal-revenue');
+  const directExpense = _projRegProposalNumValue('proj-proposal-direct-expense');
+  const indirectRate = _projRegProposalPctValue('proj-proposal-indirect-rate');
+  const targetMarginPct = _projRegProposalPctValue('proj-proposal-target-margin');
+  const indirectCost = (laborCost + directExpense) * (indirectRate / 100);
+  const totalCost = laborCost + directExpense + indirectCost;
+  const recommended = targetMarginPct >= 100 ? 0 : (totalCost / Math.max(0.0001, 1 - (targetMarginPct / 100)));
+  const expectedMarginPct = revenue > 0 ? ((revenue - totalCost) / revenue) * 100 : 0;
+  return {
+    tempCode: String(document.getElementById('proj-proposal-temp-code')?.value || '').trim(),
+    proposalName: String(document.getElementById('proj-proposal-name')?.value || '').trim(),
+    clientName: String(document.getElementById('proj-proposal-client')?.value || '').trim(),
+    projectCodeTypeId: String(document.getElementById('proj-proposal-code-type')?.value || '').trim(),
+    revenue,
+    directExpense,
+    indirectRate,
+    targetMarginPct,
+    laborCost,
+    indirectCost,
+    totalCost,
+    recommended,
+    expectedMarginPct,
+    roleRates: rateMap,
+    roleHours: hourMap,
+  };
+}
+
+function projRegRunProposalSimulation() {
+  const s = _projRegCollectProposalSnapshot();
+  _PROJ_REG_ROLE_KEYS.forEach((k) => {
+    const cost = Number(s.roleRates[k] || 0) * Number(s.roleHours[k] || 0);
+    const cell = document.getElementById(`proj-proposal-cost-${k}`);
+    if (cell) cell.textContent = _projRegProposalKrw(cost);
+  });
+  const setTxt = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = v;
+  };
+  setTxt('proj-proposal-kpi-labor', _projRegProposalKrw(s.laborCost));
+  setTxt('proj-proposal-kpi-total-cost', _projRegProposalKrw(s.totalCost));
+  setTxt('proj-proposal-kpi-recommended', _projRegProposalKrw(s.recommended));
+  setTxt('proj-proposal-kpi-margin', `${(Number(s.expectedMarginPct) || 0).toFixed(1)}%`);
+  _projRegProposalSnapshot = s;
+  return s;
+}
+
+async function _projRegPersistProposalFinalRates(projectCode) {
+  if (!projectCode || !_projRegProposalSnapshot) return;
+  const rates = _projRegProposalSnapshot.roleRates || {};
+  const rows = _PROJ_REG_ROLE_KEYS
+    .filter((k) => Number(rates[k] || 0) > 0)
+    .map((k) => ({ role_key: k, unit_rate: Number(rates[k] || 0) }));
+  if (!rows.length) return;
+  try {
+    const existing = await API.listAllPages('project_proposal_rates', {
+      limit: 200,
+      maxPages: 3,
+      filter: { project_code: projectCode },
+      sort: 'updated_at',
+    }).catch(() => []);
+    const byRole = new Map((existing || []).map((r) => [String(r.role_key || ''), r]));
+    const session = getSession();
+    for (const row of rows) {
+      const hit = byRole.get(row.role_key);
+      const payload = {
+        project_code: projectCode,
+        role_key: row.role_key,
+        unit_rate: row.unit_rate,
+        is_final: true,
+        is_active: true,
+        source_type: 'proposal_final',
+        updated_at: Date.now(),
+        updated_by: String(session.id || ''),
+        updated_by_name: session.name || '',
+      };
+      if (hit && hit.id) await API.patch('project_proposal_rates', hit.id, payload);
+      else await API.create('project_proposal_rates', payload);
+    }
+  } catch (e) {
+    console.warn('[proj-reg] project_proposal_rates 저장 실패', e.message || e);
+  }
+}
+
+async function projRegLoadCodeSettingRates() {
+  const typeId = String(document.getElementById('proj-proposal-code-type')?.value || '').trim();
+  if (!typeId) {
+    Toast.warning('코드유형을 먼저 선택하세요.');
+    return;
+  }
+  try {
+    const rows = await API.listAllPages('project_code_rate_settings', {
+      limit: 50,
+      maxPages: 3,
+      filter: { project_code_type_id: typeId, is_active: 'eq.true' },
+      sort: 'updated_at',
+    });
+    const byRole = new Map((rows || []).map((r) => [String(r.role_key || '').toLowerCase(), r]));
+    _PROJ_REG_ROLE_KEYS.forEach((k) => {
+      const hit = byRole.get(k);
+      if (!hit) return;
+      const input = document.getElementById(`proj-proposal-rate-${k}`);
+      if (!input) return;
+      const n = Number(hit.unit_rate || 0);
+      input.value = Number.isFinite(n) ? Math.round(n).toLocaleString('ko-KR') : '';
+    });
+    projRegRunProposalSimulation();
+    Toast.success('코드설정 단가를 불러왔습니다.');
+  } catch (_) {
+    Toast.warning('코드설정 단가를 불러오지 못했습니다. 설정 테이블을 확인하세요.');
+  }
+}
+
+async function projRegApplyProposalToContract() {
+  const s = projRegRunProposalSimulation();
+  await projRegShowForm();
+  const nameEl = document.getElementById('proj-reg-name');
+  const clientSearchEl = document.getElementById('proj-reg-client-search');
+  const downAmtEl = document.getElementById('proj-reg-bill-down-amt');
+  const typeSel = document.getElementById('proj-reg-code-type');
+  if (nameEl && !nameEl.value.trim() && s.proposalName) nameEl.value = s.proposalName;
+  if (clientSearchEl && !clientSearchEl.value.trim() && s.clientName) clientSearchEl.value = s.clientName;
+  if (downAmtEl && !downAmtEl.value && Number(s.revenue || 0) > 0) {
+    downAmtEl.value = Math.round(Number(s.revenue || 0)).toLocaleString('ko-KR');
+  }
+  if (typeSel && s.projectCodeTypeId && [...typeSel.options].some((o) => String(o.value) === String(s.projectCodeTypeId))) {
+    typeSel.value = s.projectCodeTypeId;
+    _projRegApplyTypeLockedName(s.projectCodeTypeId);
+  }
+  projRegRefreshProgress();
+  Toast.success('제안 시뮬레이션 값을 계약등록 폼에 반영했습니다.');
+}
+
+function projRegExportProposalData() {
+  const s = projRegRunProposalSimulation();
+  const lines = [
+    '항목,값',
+    `임시코드,${s.tempCode || ''}`,
+    `프로젝트명,${s.proposalName || ''}`,
+    `고객사,${s.clientName || ''}`,
+    `프로젝트매출액,${Math.round(Number(s.revenue || 0))}`,
+    `직접비용,${Math.round(Number(s.directExpense || 0))}`,
+    `간접비율(%),${Number(s.indirectRate || 0).toFixed(2)}`,
+    `목표이익율(%),${Number(s.targetMarginPct || 0).toFixed(2)}`,
+    `투입원가,${Math.round(Number(s.laborCost || 0))}`,
+    `총원가,${Math.round(Number(s.totalCost || 0))}`,
+    `권장제안금액,${Math.round(Number(s.recommended || 0))}`,
+    `예상이익율(%),${Number(s.expectedMarginPct || 0).toFixed(2)}`,
+  ];
+  _PROJ_REG_ROLE_KEYS.forEach((k) => {
+    lines.push(`${_projRegProposalRoleLabel(k)} 단가,${Math.round(Number(s.roleRates[k] || 0))}`);
+    lines.push(`${_projRegProposalRoleLabel(k)} 투입시간(h),${Number(s.roleHours[k] || 0).toFixed(1)}`);
+  });
+  const blob = new Blob([`\uFEFF${lines.join('\n')}`], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `proposal_${s.tempCode || 'data'}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 function projRegBindContractDocFiltersOnce() {
@@ -869,11 +1539,276 @@ function projRegBindContractDocFiltersOnce() {
 
 function projRegShowList(reload) {
   _projRegOpenedFromApprovalDetail = false;
-  const list = document.getElementById('proj-reg-list');
-  const form = document.getElementById('proj-reg-form');
-  if (list) list.style.display = '';
-  if (form) form.style.display = 'none';
+  _projRegContractView = 'list';
+  _projRegWorkflowTab = 'contract';
+  _projRegDetailTab = 'ops';
+  _projRegRenderWorkflowTab();
   if (reload !== false) projRegLoadList();
+}
+
+function _projRegOutCurrentRow() {
+  const editId = String(document.getElementById('proj-reg-edit-id')?.value || '').trim();
+  if (!editId) return null;
+  return _projRegRows.find((x) => String(x.id || '') === editId) || null;
+}
+
+function _projRegOutFmtDate(ms) {
+  const n = Number(ms || 0);
+  if (!n) return '-';
+  const d = new Date(n);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.toISOString().slice(0, 10);
+}
+
+function _projRegOutCanUpload(session, row) {
+  if (!session || !row) return false;
+  if (Auth.isAdmin(session) || Auth.isDirector(session) || Auth.isTopMgr(session)) return true;
+  const me = String(session.user_id || session.id || '');
+  const pm = String(row.cpm_user_id || '');
+  return !!me && !!pm && me === pm;
+}
+
+function _projRegOutRequiresClearance(row) {
+  if (!row) return false;
+  const hit = (_projRegTypes || []).find((t) => String(t.id || '') === String(row.project_code_type_id || ''));
+  return !!(hit && hit.requires_clearance_note);
+}
+
+async function _projRegOutNotifyClearance(row, created, session) {
+  if (!row || typeof createNotification !== 'function') return;
+  const pm = (_projRegUsers || []).find((u) => String(u.id || '') === String(row.cpm_user_id || '')) || {};
+  const toUsers = (_projRegUsers || []).filter((u) => {
+    const role = String(u.role || '').trim();
+    if (role === 'director') return String(u.hq_id || '') && String(u.hq_id || '') === String(pm.hq_id || '');
+    if (role === 'top_mgr') return String(u.dept_id || '') && String(u.dept_id || '') === String(pm.dept_id || '');
+    return false;
+  });
+  const senderId = String(session.user_id || session.id || '');
+  const uniq = new Set();
+  toUsers.forEach((u) => {
+    const uid = String(u.id || '').trim();
+    if (!uid || uid === senderId || uniq.has(uid)) return;
+    uniq.add(uid);
+    createNotification({
+      toUserId: uid,
+      toUserName: String(u.name || ''),
+      fromUserId: senderId,
+      fromUserName: String(session.name || session.user_name || ''),
+      type: 'project_clearance_notice',
+      entryId: String(created?.id || ''),
+      entrySummary: `${String(row.project_code || '')} | ${String(row.project_name || '')}`,
+      message: `${String(session.name || '작성자')}님이 통관팀유의사항을 등록했습니다. 조치사항을 입력해주세요.`,
+      targetMenu: 'project-register',
+    });
+  });
+}
+
+async function _projRegOutCheckClosureGate(row) {
+  if (!row) return { ok: false, reason: '프로젝트 정보가 없습니다.' };
+  if (!_projRegOutRequiresClearance(row)) return { ok: true, reason: '' };
+  const projectCode = String(row.project_code || '').trim();
+  const outputs = await API.list('project_outputs', {
+    select: 'id,project_code,output_type',
+    project_code: `eq.${projectCode}`,
+    limit: 1000,
+    order: 'uploaded_at.desc,created_at.desc',
+  }).catch(() => []);
+  const clearanceRows = (outputs || []).filter((o) => String(o.output_type || '').trim() === '통관팀유의사항');
+  if (!clearanceRows.length) {
+    return { ok: false, reason: '통관유의사항 업로드가 필요합니다.' };
+  }
+  const outputIds = clearanceRows.map((o) => String(o.id || '')).filter(Boolean);
+  const actions = await API.listAllPages('project_output_actions', {
+    limit: 1000,
+    maxPages: 10,
+    sort: 'updated_at',
+  }).catch((e) => {
+    const msg = String(e && e.message || '');
+    if (/project_output_actions|schema cache|relation/i.test(msg)) {
+      throw new Error('project_output_actions 테이블이 필요합니다. SQL 스크립트를 먼저 적용하세요.');
+    }
+    throw e;
+  });
+  const completedCnt = (actions || []).filter((a) =>
+    outputIds.includes(String(a.output_id || '')) &&
+    String(a.action_status || '') === 'completed'
+  ).length;
+  if (completedCnt < 1) {
+    return { ok: false, reason: '통관유의사항 조치완료(본부장/사업부장 중 1명 이상)가 필요합니다.' };
+  }
+  return { ok: true, reason: '' };
+}
+
+function _projRegOutRefreshContext(row) {
+  const infoEl = document.getElementById('proj-reg-out-project-info');
+  const codeEl = document.getElementById('proj-reg-out-project-code');
+  const uploadBtn = document.getElementById('proj-reg-out-upload-btn');
+  const canUse = !!(row && row.project_code);
+  if (codeEl) codeEl.value = canUse ? String(row.project_code || '') : '';
+  if (infoEl) {
+    if (!canUse) {
+      infoEl.className = 'alert alert-info';
+      infoEl.innerHTML = '<i class="fas fa-info-circle"></i> 먼저 프로젝트 상세를 저장(승인완료)한 후 산출물을 업로드하세요.';
+    } else {
+      const requiredText = _projRegOutRequiresClearance(row) ? '필수' : '선택';
+      infoEl.className = 'alert alert-info';
+      infoEl.innerHTML = `<i class="fas fa-info-circle"></i> <strong>${Utils.escHtml(row.project_code || '')}</strong> · ${Utils.escHtml(row.project_name || '')} / 통관유의사항 ${requiredText}`;
+    }
+  }
+  if (uploadBtn) uploadBtn.disabled = !canUse;
+}
+
+async function projRegOutLoadList() {
+  const body = document.getElementById('proj-reg-out-body');
+  const summary = document.getElementById('proj-reg-out-summary');
+  if (!body) return;
+  const row = _projRegOutCurrentRow();
+  if (!row || !row.project_code) {
+    body.innerHTML = '<tr><td colspan="7" class="table-empty"><i class="fas fa-folder-open"></i><p>저장된 프로젝트를 먼저 선택하세요.</p></td></tr>';
+    if (summary) summary.textContent = '총 0건';
+    return;
+  }
+  body.innerHTML = '<tr><td colspan="7" class="table-empty"><i class="fas fa-spinner fa-spin"></i><p>산출물 목록을 불러오는 중입니다...</p></td></tr>';
+  try {
+    const rows = await API.list('project_outputs', {
+      select: 'id,output_type,output_title,output_file_url,uploaded_by_name,uploaded_at,note,created_at',
+      project_code: `eq.${row.project_code}`,
+      order: 'uploaded_at.desc,created_at.desc',
+      limit: 1000,
+    });
+    const list = Array.isArray(rows) ? rows : [];
+    if (!list.length) {
+      body.innerHTML = '<tr><td colspan="7" class="table-empty"><i class="fas fa-folder-open"></i><p>등록된 산출물이 없습니다.</p></td></tr>';
+      if (summary) summary.textContent = '총 0건';
+      return;
+    }
+    body.innerHTML = list.map((r, i) => {
+      const fileBtn = String(r.output_file_url || '').trim()
+        ? `<a class="btn btn-xs btn-outline" href="${Utils.escHtml(r.output_file_url)}" target="_blank" rel="noopener">열기</a>`
+        : '-';
+      return `<tr>
+        <td style="text-align:center">${i + 1}</td>
+        <td>${Utils.escHtml(r.output_type || '')}</td>
+        <td>${Utils.escHtml(r.output_title || '')}</td>
+        <td>${Utils.escHtml(r.uploaded_by_name || '')}</td>
+        <td>${_projRegOutFmtDate(r.uploaded_at || r.created_at)}</td>
+        <td style="text-align:center">${fileBtn}</td>
+        <td>${Utils.escHtml(r.note || '')}</td>
+      </tr>`;
+    }).join('');
+    if (summary) summary.textContent = `총 ${list.length.toLocaleString()}건`;
+  } catch (e) {
+    console.error(e);
+    body.innerHTML = '<tr><td colspan="7" class="table-empty"><i class="fas fa-triangle-exclamation"></i><p>산출물 목록 조회 실패</p></td></tr>';
+    if (summary) summary.textContent = '조회 실패';
+  }
+}
+
+async function projRegOutUpload() {
+  const session = getSession();
+  const row = _projRegOutCurrentRow();
+  const typeEl = document.getElementById('proj-reg-out-type');
+  const titleEl = document.getElementById('proj-reg-out-title');
+  const noteEl = document.getElementById('proj-reg-out-note');
+  const fileEl = document.getElementById('proj-reg-out-file');
+  const btn = document.getElementById('proj-reg-out-upload-btn');
+  if (!row || !row.project_code) return Toast.warning('저장된 프로젝트를 먼저 선택하세요.');
+  if (!_projRegOutCanUpload(session, row)) return Toast.warning('산출물 업로드 권한이 없습니다.');
+  const outputType = String(typeEl?.value || '').trim() || '결과보고서';
+  const outputTitle = String(titleEl?.value || '').trim();
+  const note = String(noteEl?.value || '').trim();
+  const file = fileEl?.files?.[0];
+  if (!outputTitle) return Toast.warning('결과물 제목을 입력해주세요.');
+  if (!file) return Toast.warning('업로드할 파일을 선택해주세요.');
+  const prevText = btn?.innerHTML || '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 업로드 중...';
+  }
+  try {
+    const now = Date.now();
+    const d = new Date(now);
+    const yyyy = String(d.getFullYear());
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const ext = String(file.name || '').split('.').pop() || 'bin';
+    const stem = _projRegSafePathSegment(String(file.name || '').replace(/\.[^.]*$/, ''));
+    const uniq = Math.random().toString(36).slice(2, 8);
+    const path = `project-outputs/${yyyy}/${mm}/${_projRegSafePathSegment(row.project_code)}/${now}_${uniq}_${stem}.${ext}`;
+    const up = await API.storageUpload(_PROJ_REG_OUTPUT_BUCKET, path, file, { upsert: false });
+    const payload = {
+      project_id: String(row.id || ''),
+      project_code: String(row.project_code || ''),
+      project_name: String(row.project_name || ''),
+      output_type: outputType,
+      output_title: outputTitle,
+      output_file_name: String(file.name || ''),
+      output_file_url: String((up && up.publicUrl) || ''),
+      uploaded_by: String(session.user_id || session.id || ''),
+      uploaded_by_name: String(session.name || session.user_name || ''),
+      uploaded_at: now,
+      note,
+    };
+    const created = await API.create('project_outputs', payload);
+    if (outputType === '통관팀유의사항') {
+      await _projRegOutNotifyClearance(row, created, session);
+    }
+    if (outputType === '결과보고서') {
+      try {
+        const gate = await _projRegOutCheckClosureGate(row);
+        if (gate.ok) {
+          await API.patch('registered_projects', row.id, {
+            work_closed_at: Number(row.work_closed_at || 0) || now,
+            lifecycle_updated_at: now,
+            lifecycle_updated_by: String(session.user_id || session.id || ''),
+            lifecycle_updated_by_name: String(session.name || session.user_name || ''),
+          });
+        } else {
+          Toast.warning(`결과보고서는 저장되었지만 업무종료 전환은 보류되었습니다. (${gate.reason})`);
+        }
+      } catch (gateErr) {
+        Toast.warning(`결과보고서는 저장되었지만 업무종료 전환은 보류되었습니다. (${gateErr.message || '게이트 조건 확인 실패'})`);
+      }
+    }
+    if (titleEl) titleEl.value = '';
+    if (noteEl) noteEl.value = '';
+    if (fileEl) fileEl.value = '';
+    Toast.success('산출물이 저장되었습니다.');
+    await projRegLoadList();
+    _projRegOutRefreshContext(_projRegOutCurrentRow());
+    await projRegOutLoadList();
+  } catch (e) {
+    console.error(e);
+    Toast.error('산출물 업로드 실패: ' + (e.message || e));
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = prevText || '<i class="fas fa-upload"></i> 업로드';
+    }
+  }
+}
+
+function _projRegRenderDetailTab() {
+  const row = _projRegOutCurrentRow();
+  const canOutputTab = !!(row && row.project_code);
+  if (_projRegDetailTab === 'output' && !canOutputTab) _projRegDetailTab = 'ops';
+  const ops = document.getElementById('proj-reg-detail-panel-ops');
+  const out = document.getElementById('proj-reg-detail-panel-output');
+  if (ops) ops.style.display = _projRegDetailTab === 'ops' ? '' : 'none';
+  if (out) out.style.display = _projRegDetailTab === 'output' ? '' : 'none';
+  document.querySelectorAll('[data-proj-detail-tab]').forEach((btn) => {
+    const tab = btn.getAttribute('data-proj-detail-tab');
+    const on = tab === _projRegDetailTab;
+    btn.classList.toggle('is-active', on);
+    if (tab === 'output') btn.disabled = !canOutputTab;
+  });
+  _projRegOutRefreshContext(row);
+  if (_projRegDetailTab === 'output' && canOutputTab) projRegOutLoadList();
+}
+
+function projRegSwitchDetailTab(tab) {
+  const next = tab === 'output' ? 'output' : 'ops';
+  _projRegDetailTab = next;
+  _projRegRenderDetailTab();
 }
 
 async function projRegLoadTypes() {
@@ -895,6 +1830,7 @@ async function projRegLoadTypes() {
     opt.dataset.nameEn = t.project_name_en || '';
     sel.appendChild(opt);
   });
+  _projRegPopulateProposalCodeTypeSelect();
 }
 
 async function projRegFillDropdowns() {
@@ -973,7 +1909,7 @@ function projRegRefreshProgress() {
     'proj-reg-bill-down-amt', 'proj-reg-bill-down-due',
     'proj-reg-bill-interim-amt', 'proj-reg-bill-interim-due',
     'proj-reg-bill-final-amt', 'proj-reg-bill-final-due',
-    'proj-reg-bill-add-amt', 'proj-reg-bill-add-due', 'proj-reg-bill-add-note',
+    'proj-reg-bill-add-amt', 'proj-reg-bill-add-due',
     'proj-reg-bill-success-amt', 'proj-reg-bill-success-due', 'proj-reg-bill-success-note',
   ];
   const step3opt = billIds.some((id) => _projRegFieldVal(id) !== '');
@@ -1302,15 +2238,42 @@ function projRegMarkRouteEvidenceRemove() {
 function projRegOnCodeTypeChange() {
   const sel = document.getElementById('proj-reg-code-type');
   const nameEl = document.getElementById('proj-reg-name');
-  if (!sel || !nameEl || !sel.value) {
+  if (!sel || !nameEl) {
+    projRegRefreshProgress();
+    return;
+  }
+  if (!sel.value) {
+    nameEl.readOnly = false;
+    Promise.resolve(_projRegLoadContractRatePanel(_projRegOutCurrentRow())).catch(() => {});
     projRegRefreshProgress();
     return;
   }
   const opt = sel.selectedOptions[0];
-  if (opt && opt.dataset.nameEn && !nameEl.value.trim()) {
-    nameEl.value = opt.dataset.nameEn;
+  if (opt && opt.dataset.nameEn) {
+    nameEl.value = String(opt.dataset.nameEn || '').trim();
   }
+  nameEl.readOnly = true;
+  Promise.resolve(_projRegLoadContractRatePanel(_projRegOutCurrentRow())).catch(() => {});
   projRegRefreshProgress();
+}
+
+function _projRegApplyTypeLockedName(typeId) {
+  const sel = document.getElementById('proj-reg-code-type');
+  const nameEl = document.getElementById('proj-reg-name');
+  if (!sel || !nameEl) return '';
+  const id = String(typeId || sel.value || '').trim();
+  if (!id) {
+    nameEl.readOnly = false;
+    return '';
+  }
+  let opt = [...sel.options].find((o) => String(o.value || '') === id) || null;
+  if (!opt && sel.value && String(sel.value) === id) opt = sel.selectedOptions?.[0] || null;
+  const resolved = String(opt?.dataset?.nameEn || '').trim();
+  if (resolved) {
+    nameEl.value = resolved;
+  }
+  nameEl.readOnly = true;
+  return resolved;
 }
 
 function _projRegTypeById(typeId) {
@@ -1513,12 +2476,34 @@ async function _projRegScopeRowsForSession(rows, session) {
   if (!session || !session.id) return [];
   if (Auth.isAdmin(session)) return src;
 
-  const myId = String(session.id || '');
-  // 승인자(팀장/본부장/경영층): 본인 + 소속 범위(팀/본부/사업부) 사용자 건 열람
-  const canScopeView = Auth.canApprove(session) || Auth.isDirector(session) || Auth.isTopMgr(session);
-  if (!canScopeView) {
-    return src.filter((r) => String(r && r.created_by || '') === myId);
-  }
+  // 프로젝트 등록건 출력조건
+  // 1) 내가 등록한 건
+  // 2) 내가 승인자로 지정된 건(reg_pa1/2/3)
+  // 3) 내가 총괄 PM으로 지정된 건(cpm_user_id)
+  const myIds = new Set([
+    String(session.id || '').trim(),
+    String(session.user_id || '').trim(),
+  ].filter(Boolean));
+  const myName = String(session.name || '').trim();
+  const norm = (v) => String(v || '').toLowerCase().replace(/\s+/g, '').trim();
+  const normLoose = (v) => {
+    let s = String(v || '').toLowerCase();
+    s = s.replace(/\([^)]*\)/g, ''); // 괄호 직급/비고 제거
+    s = s.replace(/[^0-9a-z가-힣]/g, ''); // 특수문자 제거
+    s = s.replace(/(staff|manager|director|topmgr|top_mgr|cpm)$/g, ''); // 영문 직책 꼬리 제거
+    s = s.replace(/(사원|대리|과장|차장|부장|팀장|실장|본부장|사업부장|이사|상무|전무|부사장|사장)$/g, ''); // 한글 직책 꼬리 제거
+    return s.trim();
+  };
+  const isLooseNameMatch = (a, b) => {
+    const x = normLoose(a);
+    const y = normLoose(b);
+    if (!x || !y) return false;
+    if (x === y) return true;
+    // 부분 일치 허용(3글자 이상) — 과매칭 방지
+    if (x.length >= 3 && y.includes(x)) return true;
+    if (y.length >= 3 && x.includes(y)) return true;
+    return false;
+  };
 
   let users = _projRegUsers;
   if (!Array.isArray(users) || !users.length) {
@@ -1529,14 +2514,41 @@ async function _projRegScopeRowsForSession(rows, session) {
       users = [];
     }
   }
-  const byId = new Map((users || []).map((u) => [String(u.id || ''), u]));
+  const scopedUserNames = new Set(
+    (users || [])
+      .filter((u) => u && Auth.scopeMatch(session, u))
+      .map((u) => normLoose(u.name || ''))
+      .filter(Boolean)
+  );
+  const scopedUserNameList = [...scopedUserNames];
+
   return src.filter((r) => {
-    const creatorId = String((r && r.created_by) || '');
-    if (!creatorId) return false;
-    if (creatorId === myId) return true;
-    const creator = byId.get(creatorId);
-    if (!creator) return false;
-    return Auth.scopeMatch(session, creator);
+    if (!r) return false;
+    const creatorId = String(r.created_by || '').trim();
+    const cpmId = String(r.cpm_user_id || '').trim();
+    const pa1 = String(r.reg_pa1_id || '').trim();
+    const pa2 = String(r.reg_pa2_id || '').trim();
+    const pa3 = String(r.reg_pa3_id || '').trim();
+    if (creatorId && myIds.has(creatorId)) return true;
+    if (cpmId && myIds.has(cpmId)) return true;
+    if ((pa1 && myIds.has(pa1)) || (pa2 && myIds.has(pa2)) || (pa3 && myIds.has(pa3))) return true;
+    // 과거 데이터에서 승인자 ID가 바뀐 경우를 위한 이름 폴백
+    if (myName) {
+      if (isLooseNameMatch(r.reg_pa1_name || '', myName)) return true;
+      if (isLooseNameMatch(r.reg_pa2_name || '', myName)) return true;
+      if (isLooseNameMatch(r.reg_pa3_name || '', myName)) return true;
+    }
+    // 4) 자기 소속직원이 투입된 프로젝트(프로젝트 상세 투입인력 기준)
+    if (scopedUserNames.size > 0) {
+      const contribRows = _projRegContribParse(String(r.order_contributors_text || ''));
+      for (const c of contribRows) {
+        const nm = normLoose(c && c.name);
+        if (!nm) continue;
+        if (scopedUserNames.has(nm)) return true;
+        if (scopedUserNameList.some((s) => isLooseNameMatch(nm, s))) return true;
+      }
+    }
+    return false;
   });
 }
 
@@ -1740,7 +2752,7 @@ function _projRegClearBilling() {
     ['proj-reg-bill-down-amt', 'proj-reg-bill-down-due'],
     ['proj-reg-bill-interim-amt', 'proj-reg-bill-interim-due'],
     ['proj-reg-bill-final-amt', 'proj-reg-bill-final-due'],
-    ['proj-reg-bill-add-amt', 'proj-reg-bill-add-due', 'proj-reg-bill-add-note'],
+    ['proj-reg-bill-add-amt', 'proj-reg-bill-add-due'],
     ['proj-reg-bill-success-amt', 'proj-reg-bill-success-due', 'proj-reg-bill-success-note'],
   ];
   ids.forEach((row) => {
@@ -1749,11 +2761,17 @@ function _projRegClearBilling() {
       if (el) el.value = '';
     });
   });
+  const tcEl = document.getElementById('proj-reg-timecharge-enabled-input');
+  if (tcEl) tcEl.checked = false;
+  projRegToggleTimeChargeRatePanel();
 }
 
 function _projRegFillBilling(bs) {
   _projRegClearBilling();
   if (!bs || typeof bs !== 'object') return;
+  const tcEl = document.getElementById('proj-reg-timecharge-enabled-input');
+  if (tcEl) tcEl.checked = bs.timecharge_enabled === true;
+  projRegToggleTimeChargeRatePanel();
   const setAmt = (id, amt) => {
     const ael = document.getElementById(id);
     if (!ael || amt == null || amt === '') return;
@@ -1764,7 +2782,7 @@ function _projRegFillBilling(bs) {
     ['down', 'proj-reg-bill-down-amt', 'proj-reg-bill-down-due'],
     ['interim', 'proj-reg-bill-interim-amt', 'proj-reg-bill-interim-due'],
     ['final', 'proj-reg-bill-final-amt', 'proj-reg-bill-final-due'],
-    ['additional', 'proj-reg-bill-add-amt', 'proj-reg-bill-add-due', 'proj-reg-bill-add-note'],
+    ['additional', 'proj-reg-bill-add-amt', 'proj-reg-bill-add-due'],
     ['success', 'proj-reg-bill-success-amt', 'proj-reg-bill-success-due', 'proj-reg-bill-success-note'],
   ];
   map.forEach((row) => {
@@ -1790,13 +2808,13 @@ function _projRegCollectBilling() {
     return v ? v : null;
   };
   return {
+    timecharge_enabled: _projRegIsTimeChargeEnabled(),
     down: { amount: _projRegAmtValue('proj-reg-bill-down-amt'), due_date: dte('proj-reg-bill-down-due') },
     interim: { amount: _projRegAmtValue('proj-reg-bill-interim-amt'), due_date: dte('proj-reg-bill-interim-due') },
     final: { amount: _projRegAmtValue('proj-reg-bill-final-amt'), due_date: dte('proj-reg-bill-final-due') },
     additional: {
       amount: _projRegAmtValue('proj-reg-bill-add-amt'),
       due_date: dte('proj-reg-bill-add-due'),
-      terms_note: _projRegNoteVal('proj-reg-bill-add-note'),
     },
     success: {
       amount: _projRegAmtValue('proj-reg-bill-success-amt'),
@@ -1809,10 +2827,9 @@ function _projRegCollectBilling() {
 async function projRegShowForm(editId, opts) {
   _projRegOpenedFromApprovalDetail = !!(opts && opts.fromApproval);
   const session = getSession();
-  const list = document.getElementById('proj-reg-list');
-  const form = document.getElementById('proj-reg-form');
-  if (list) list.style.display = 'none';
-  if (form) form.style.display = '';
+  _projRegContractView = 'form';
+  _projRegWorkflowTab = 'contract';
+  _projRegRenderWorkflowTab();
 
   document.getElementById('proj-reg-edit-id').value = editId || '';
   const rowStatusEl = document.getElementById('proj-reg-row-status');
@@ -1820,6 +2837,7 @@ async function projRegShowForm(editId, opts) {
 
   const titleEl = document.getElementById('proj-reg-form-title');
   if (titleEl) titleEl.textContent = editId ? '프로젝트 수정' : 'Create Project';
+  _projRegDetailTab = 'ops';
 
   try {
     const wrap = document.querySelector('.proj-reg-create-wrap');
@@ -1834,7 +2852,11 @@ async function projRegShowForm(editId, opts) {
   const codeWrap = document.getElementById('proj-reg-existing-code-wrap');
   const codeRo = document.getElementById('proj-reg-existing-code');
 
-  document.getElementById('proj-reg-name').value = '';
+  const nameInput = document.getElementById('proj-reg-name');
+  if (nameInput) {
+    nameInput.value = '';
+    nameInput.readOnly = false;
+  }
   document.getElementById('proj-reg-client').value = '';
   const cSearch = document.getElementById('proj-reg-client-search');
   if (cSearch) cSearch.value = '';
@@ -1845,7 +2867,6 @@ async function projRegShowForm(editId, opts) {
   if (routeDetailEl) routeDetailEl.value = '';
   projRegSetContributorsFromStored('');
   projRegOnRouteChange();
-  document.getElementById('proj-reg-cpm').value = '';
   document.getElementById('proj-reg-period-start').value = '';
   document.getElementById('proj-reg-period-end').value = '';
   document.getElementById('proj-reg-contract').value = '';
@@ -1898,13 +2919,12 @@ async function projRegShowForm(editId, opts) {
     if (codeWrap) codeWrap.style.display = showCode ? '' : 'none';
     if (codeRo) codeRo.value = showCode ? row.project_code : '';
 
-    document.getElementById('proj-reg-name').value = row.project_name || '';
+    if (nameInput) nameInput.value = row.project_name || '';
     document.getElementById('proj-reg-client').value = row.client_id || '';
     if (cSearch) cSearch.value = row.client_name || '';
     document.getElementById('proj-reg-order-owner').value = row.order_owner_text || '';
     projRegSetContributorsFromStored(row.order_contributors_text || '');
     projRegApplyRouteFromStored(row.acquisition_route || '', row.acquisition_route_detail || '');
-    document.getElementById('proj-reg-cpm').value = row.cpm_user_id || '';
     if (row.period_start) document.getElementById('proj-reg-period-start').value = String(row.period_start).slice(0, 10);
     if (row.period_end) document.getElementById('proj-reg-period-end').value = String(row.period_end).slice(0, 10);
     _projRegFillBilling(row.billing_schedule);
@@ -1914,6 +2934,7 @@ async function projRegShowForm(editId, opts) {
     if (exReasonEl) exReasonEl.value = row.contract_exception_reason || '';
 
     if (st === 'draft' && yymmEl && !yymmEl.value) _projRegSetDefaultMonth();
+    _projRegApplyTypeLockedName(typeSel?.value || row.project_code_type_id || '');
   } else {
     if (typeSel) typeSel.disabled = false;
     if (yymmEl) {
@@ -1923,27 +2944,38 @@ async function projRegShowForm(editId, opts) {
     if (codeWrap) codeWrap.style.display = 'none';
     if (codeRo) codeRo.value = '';
     projRegSetContributorsFromStored('');
+    _projRegApplyTypeLockedName(typeSel?.value || '');
   }
+
+  projRegToggleTimeChargeRatePanel();
+  await _projRegLoadContractRatePanel(row);
 
   projRegBindProgress();
   _projRegResetAsidePanel();
   projRegRefreshProgress();
   projRegUpdateFormFooter(session, editId || '', row);
+  _projRegRenderDetailTab();
 }
 
 function _projRegReadFormCore(session) {
-  const name = document.getElementById('proj-reg-name').value.trim();
+  const rawName = document.getElementById('proj-reg-name').value.trim();
   const clientId = document.getElementById('proj-reg-client').value.trim();
   const typeId = document.getElementById('proj-reg-code-type').value;
+  const typeSel = document.getElementById('proj-reg-code-type');
+  const lockedName = (() => {
+    const opt = typeSel?.selectedOptions?.[0];
+    return String(opt?.dataset?.nameEn || '').trim();
+  })();
+  const name = lockedName || rawName;
+  if (lockedName && rawName !== lockedName) {
+    const nameEl = document.getElementById('proj-reg-name');
+    if (nameEl) nameEl.value = lockedName;
+  }
   const monthVal = document.getElementById('proj-reg-yymm').value;
   const yymm = _projRegMonthToYymm(monthVal);
   const hit = _projRegClients.find((c) => String(c.id) === String(clientId));
   let clientName = hit ? String(hit.company_name || '') : '';
   if (!clientName) clientName = document.getElementById('proj-reg-client-search').value.trim();
-  const cpmSel = document.getElementById('proj-reg-cpm');
-  const cpmOpt = cpmSel?.selectedOptions?.[0];
-  const cpmId = cpmSel?.value || '';
-  const cpmName = cpmOpt?.dataset?.name || '';
   const orderOwner = document.getElementById('proj-reg-order-owner').value.trim();
   const route = document.getElementById('proj-reg-route').value;
   const routeDetail = document.getElementById('proj-reg-route-detail').value.trim();
@@ -1963,13 +2995,13 @@ function _projRegReadFormCore(session) {
   const contractExceptionReason = document.getElementById('proj-reg-contract-exception-reason')?.value?.trim() || '';
   return {
     name,
+    rawName,
+    lockedTypeName: lockedName,
     clientId,
     clientName,
     typeId,
     monthVal,
     yymm,
-    cpmId,
-    cpmName,
     orderOwner,
     route,
     routeDetail,
@@ -2181,8 +3213,6 @@ async function projRegSaveDraft() {
     acquisition_route: f.route,
     acquisition_route_detail: f.routeDetail,
     order_contributors_text: f.contributors,
-    cpm_user_id: f.cpmId,
-    cpm_user_name: f.cpmName,
     period_start: f.ps,
     period_end: f.pe,
     billing_schedule: f.billing,
@@ -2212,6 +3242,7 @@ async function projRegSaveDraft() {
       await _projRegApplyRouteEvidenceToPayload(basePayload, f.routeEvidenceFile, f.removeRouteEvidenceMeta, prev);
       basePayload.contract_exception_reason = f.contractExceptionReason || '';
       await API.patch('registered_projects', editId, basePayload);
+      await _projRegPersistProjectContractRates(String((prev && prev.project_code) || ''), editId, session);
       Toast.success('임시저장되었습니다.');
     } else {
       await _projRegApplyContractToPayload(basePayload, f.file, f.removeContractMeta, null);
@@ -2237,6 +3268,7 @@ async function projRegSaveDraft() {
         document.getElementById('proj-reg-edit-id').value = row.id;
         const rs = document.getElementById('proj-reg-row-status');
         if (rs) rs.value = 'draft';
+        await _projRegPersistProjectContractRates(String((row && row.project_code) || ''), row.id, session);
       }
       Toast.success('임시저장되었습니다.');
     }
@@ -2257,6 +3289,10 @@ async function projRegSubmitForApproval() {
   }
   const editId = document.getElementById('proj-reg-edit-id').value;
   const f = _projRegReadFormCore(session);
+  if (f.typeId && !f.lockedTypeName) {
+    Toast.warning('선택한 코드유형에 프로젝트명이 설정되어 있지 않습니다. 프로젝트 코드 마스터에서 프로젝트명(EN)을 설정하세요.');
+    return;
+  }
   if (!f.name) {
     Toast.warning('프로젝트명을 입력하세요.');
     return;
@@ -2308,11 +3344,11 @@ async function projRegSubmitForApproval() {
 
   // 역할별 승인자 구성 검증
   if (isStaffRegistrant && (!has1 || !has2 || !has3)) {
-    Toast.warning('승인 요청할 수 없습니다. Staff는 1차/2차 승인자와 사업부장 최종 승인자가 모두 지정되어야 합니다.');
+    Toast.warning('승인 요청할 수 없습니다. 담당(선임/전임/책임)은 1차/2차 승인자와 사업부장 최종 승인자가 모두 지정되어야 합니다.');
     return;
   }
   if (isManagerRegistrant && (!has1 || !has2)) {
-    Toast.warning('승인 요청할 수 없습니다. Manager는 1차 승인자와 사업부장(2차) 승인자가 모두 지정되어야 합니다.');
+    Toast.warning('승인 요청할 수 없습니다. 팀장은 1차 승인자와 사업부장(2차) 승인자가 모두 지정되어야 합니다.');
     return;
   }
   if (isDirectorRegistrant && !has1) {
@@ -2374,8 +3410,6 @@ async function projRegSubmitForApproval() {
     acquisition_route: f.route,
     acquisition_route_detail: f.routeDetail,
     order_contributors_text: f.contributors,
-    cpm_user_id: f.cpmId,
-    cpm_user_name: f.cpmName,
     period_start: f.ps,
     period_end: f.pe,
     billing_schedule: f.billing,
@@ -2470,6 +3504,8 @@ async function projRegSubmitForApproval() {
     }
     if (autoApprove) Toast.success((isConditional ? '조건부 승인되었습니다. 코드: ' : '승인되었습니다. 코드: ') + projectCode);
     else Toast.success((isConditional ? '조건부 승인 요청되었습니다. 코드: ' : '승인 요청되었습니다. 코드: ') + projectCode);
+    await _projRegPersistProposalFinalRates(projectCode);
+    await _projRegPersistProjectContractRates(projectCode, savedId || editId || '', session);
     projRegShowList();
   } catch (e) {
     Toast.error('승인 요청 실패: ' + (e.message || e));
@@ -2505,6 +3541,10 @@ async function projRegSaveApproved() {
     return;
   }
   const f = _projRegReadFormCore(session);
+  if (f.typeId && !f.lockedTypeName) {
+    Toast.warning('선택한 코드유형에 프로젝트명이 설정되어 있지 않습니다. 프로젝트 코드 마스터에서 프로젝트명(EN)을 설정하세요.');
+    return;
+  }
   if (!f.name) {
     Toast.warning('프로젝트명을 입력하세요.');
     return;
@@ -2532,8 +3572,6 @@ async function projRegSaveApproved() {
     acquisition_route: f.route,
     acquisition_route_detail: f.routeDetail,
     order_contributors_text: f.contributors,
-    cpm_user_id: f.cpmId,
-    cpm_user_name: f.cpmName,
     period_start: f.ps,
     period_end: f.pe,
     billing_schedule: f.billing,
@@ -2555,6 +3593,7 @@ async function projRegSaveApproved() {
   }
   try {
     await API.patch('registered_projects', editId, basePayload);
+    await _projRegPersistProjectContractRates(String(prev.project_code || ''), editId, session);
     Toast.success('수정되었습니다.');
     projRegShowList();
   } catch (e) {
@@ -2604,6 +3643,29 @@ async function projRegApprove(id) {
     return;
   }
   try {
+    // 승인자 ID가 과거 데이터와 불일치하는 경우(이름 일치 승인), 현재 세션 ID로 보정
+    const myId = String(session?.id || session?.user_id || '').trim();
+    const myName = String(session?.name || '').trim();
+    if (myId && myName) {
+      const heal = {};
+      if (step === 1 && String(row.reg_pa1_name || '').trim() === myName && String(row.reg_pa1_id || '').trim() !== myId) {
+        heal.reg_pa1_id = myId;
+      }
+      if (step === 2 && eff.count >= 3 && String(row.reg_pa2_name || '').trim() === myName && String(row.reg_pa2_id || '').trim() !== myId) {
+        heal.reg_pa2_id = myId;
+      }
+      if ((step === 3 || (step === 2 && eff.count < 3)) && String(row.reg_pa3_name || '').trim() === myName && String(row.reg_pa3_id || '').trim() !== myId) {
+        heal.reg_pa3_id = myId;
+      }
+      if (Object.keys(heal).length) {
+        await API.patch('registered_projects', id, {
+          ...heal,
+          updated_by: String(session.id || ''),
+          updated_by_name: session.name || '',
+        });
+        Object.assign(row, heal);
+      }
+    }
     if (step === 1 && eff.count >= 2) {
       await API.patch('registered_projects', id, {
         first_approved_at: now,
@@ -2637,6 +3699,7 @@ async function projRegApprove(id) {
         updated_by_name: session.name || '',
       });
       _projRegNotifyProjectFinalResult({ row, decision: 'approved', fromSession: session });
+      await _projRegNotifyFinanceTeamOnFinalApproved({ row, fromSession: session });
       Toast.success(isConditional ? '조건부 승인 완료되었습니다.' : '승인 완료되었습니다.');
     } else {
       await API.patch('registered_projects', id, {
@@ -2654,6 +3717,7 @@ async function projRegApprove(id) {
         updated_by_name: session.name || '',
       });
       _projRegNotifyProjectFinalResult({ row, decision: 'approved', fromSession: session });
+      await _projRegNotifyFinanceTeamOnFinalApproved({ row, fromSession: session });
       Toast.success(isConditional ? '조건부 승인 완료되었습니다.' : '승인 완료되었습니다.');
     }
     await projRegLoadList();
@@ -2792,6 +3856,17 @@ window.projRegMarkEvidenceRemove = projRegMarkEvidenceRemove;
 window.projRegOnRouteEvidenceFileChange = projRegOnRouteEvidenceFileChange;
 window.projRegMarkRouteEvidenceRemove = projRegMarkRouteEvidenceRemove;
 window.projRegResetListFilters = projRegResetListFilters;
+window.projRegSwitchWorkflowTab = projRegSwitchWorkflowTab;
+window.projRegSwitchDetailTab = projRegSwitchDetailTab;
+window.projRegGenerateProposalTempCode = projRegGenerateProposalTempCode;
+window.projRegResetProposalForm = projRegResetProposalForm;
+window.projRegRunProposalSimulation = projRegRunProposalSimulation;
+window.projRegApplyProposalToContract = projRegApplyProposalToContract;
+window.projRegExportProposalData = projRegExportProposalData;
+window.projRegLoadCodeSettingRates = projRegLoadCodeSettingRates;
+window.projRegSaveContractRates = projRegSaveContractRates;
+window.projRegOutUpload = projRegOutUpload;
+window.projRegOutLoadList = projRegOutLoadList;
 
 window.SmartlogProjReg = {
   normStatus: _projRegNormStatus,

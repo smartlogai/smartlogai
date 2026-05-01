@@ -9,13 +9,10 @@
 let _dashCharts = {};
 
 // ─────────────────────────────────────────────
-// ★ 대시보드 범위(권한) — Analysis와 동일 규칙
-// - Admin: 전체
-// - Manager(1차 승인자): approver_id == session.id 인 직원만
-// - Director:
-//    - 본부장: (hq_id가 있으면) reviewer2_id == session.id 인 직원만
-//    - 사업부장: (hq_id 없고 dept_id 있으면) dept_id == session.dept_id 직원 전체
-// - Staff: 본인만
+// ★ 대시보드 범위(권한)
+// - Admin/경영지원: 전체
+// - 팀장/본부장/사업부장: 본인 소속 범위
+// - 그 외: 본인만
 // ─────────────────────────────────────────────
 function _getVisibleUserIdSetForDashboard(session, allUsers) {
   const s = session || {};
@@ -24,41 +21,10 @@ function _getVisibleUserIdSetForDashboard(session, allUsers) {
   const sid = String(s.id || '');
   if (!sid) return new Set();
 
-  if (role === 'admin') return null; // null = 제한 없음
+  if (Auth.canViewDashboardAll(s)) return null; // null = 제한 없음
   if (role === 'staff') return new Set([sid]);
 
-  if (role === 'manager') {
-    return new Set(
-      users
-        .filter(u => String(u.approver_id || '') === sid)
-        .map(u => String(u.id))
-        .filter(Boolean)
-    );
-  }
-
-  if (role === 'director' || role === 'top_mgr') {
-    const deptId = String(s.dept_id || '');
-    const hqId = String(s.hq_id || '');
-
-    // 본부장: 최종승인자 지정(reviewer2_id) 직원만
-    if (hqId) {
-      return new Set(
-        users
-          .filter(u => String(u.reviewer2_id || '') === sid)
-          .map(u => String(u.id))
-          .filter(Boolean)
-      );
-    }
-    // 사업부장: 동일 사업부(dept_id) 전체 직원
-    if (deptId) {
-      return new Set(
-        users
-          .filter(u => String(u.dept_id || '') === deptId)
-          .map(u => String(u.id))
-          .filter(Boolean)
-      );
-    }
-    // 예외 fallback: 기존 scopeMatch
+  if (Auth.canViewDashboardMenu(s)) {
     return new Set(
       users
         .filter(u => Auth.scopeMatch(s, u))
@@ -860,7 +826,7 @@ async function renderManagerDashboard(session) {
       kpiCard('fa-clock', '', '', '당월 총 투입', (totalMinCur/60).toFixed(1), 'h', `전월 ${dTotal.label}`, '', '#1a2b45') +
       kpiCard('fa-briefcase','', '', '당월 자문(고객)', (consultMinCur/60).toFixed(1), 'h', `건수 ${consultCntCur}건 · 전월 ${dCnt.label}`, '', '#2d6bb5') +
       kpiCard('fa-hourglass-half','', '', '승인 대기', pendingCur.length, '건', pendingCur.length>0?'Approval로 처리':'대기 없음', pendingCur.length>0?'approval':'', pendingCur.length>0?'#d97706':'#4a7fc4') +
-      kpiCard('fa-users','', '', '대상 직원', visibleUserIds ? visibleUserIds.size : 0, '명', '승인자 기준', '', '#6b95ce');
+      kpiCard('fa-users','', '', '대상 직원', visibleUserIds ? visibleUserIds.size : 0, '명', '소속 기준', '', '#6b95ce');
 
     const sortedByMin = stats.slice().sort((a,b)=> (b.curMin||0)-(a.curMin||0));
     const top5 = sortedByMin.slice(0,5);

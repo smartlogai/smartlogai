@@ -428,8 +428,8 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
 // 페이지 타이틀 업데이트
 // ─────────────────────────────────────────────
 const PAGE_TITLES = {
-  dashboard: 'Dashboard',
-  'project-dashboard': '프로젝트 대시보드',
+  dashboard: 'Timelog dashboard',
+  'project-dashboard': 'Project dashboard',
   'entry-new': 'New Entry',
   'entry-new-hourly': '업무 등록 (시간제)',
   'entry-new-daily': 'Time Entry',
@@ -449,6 +449,7 @@ const PAGE_TITLES = {
   'master-departments': '사업부 관리',
   'master-csteams': '고객지원팀 관리',
   users: 'Staff 관리',
+  'permission-management': '권한정책 관리',
   'project-register': '프로젝트 등록',
   'project-management': 'Project Management',
 };
@@ -476,6 +477,7 @@ const PAGE_INIT_MAP = {
   'master-departments': 'init_master_departments',
   'master-csteams': 'init_master_csteams',
   'users': 'init_users',
+  'permission-management': 'init_permission_management',
   'project-register': 'init_project_register',
   'project-management': 'init_project_register',
 };
@@ -493,6 +495,7 @@ const _LAZY_SCRIPTS = {
   'master-departments': 'js/master.js?v=20260419clientApproverRouting1',
   'master-csteams'    : 'js/master.js?v=20260419clientApproverRouting1',
   'users'             : 'js/users.js?v=20260416tsopt1',
+  'permission-management': 'js/permission-management.js?v=20260427permPolicy1',
   'project-register'  : 'js/project-register.js?v=20260420projRegFlowRole1',
   'project-management': 'js/project-register.js?v=20260420projRegFlowRole1',
   'helpdesk'          : 'js/helpdesk.js?v=20260420helpdesk7',

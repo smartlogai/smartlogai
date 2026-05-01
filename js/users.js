@@ -6,7 +6,7 @@
             cs_team_id, cs_team_name, team_name,
             approver_id, approver_name,       ← 1차 승인자 (Manager/팀장) — staff 전용
             reviewer2_id, reviewer2_name,     ← 2차 승인자 (Director/본부장) — staff·manager 공통
-            role, job_title, can_view_project_deliverables,
+            role, job_title,
             is_active, is_timesheet_target,
             timesheet_hourly, timesheet_daily
    - departments: id, department_name
@@ -15,10 +15,164 @@
    - teams: id, team_name
    ============================================ */
 
+function _stdRateInputId(key) {
+  return `user-std-rate-${key}`;
+}
+
+function _stdRateReadValue(key) {
+  const raw = String(document.getElementById(_stdRateInputId(key))?.value || '').replace(/[^\d]/g, '');
+  const n = Number(raw || 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function _stdRateSetValue(key, n) {
+  const el = document.getElementById(_stdRateInputId(key));
+  if (!el) return;
+  const v = Number(n || 0);
+  el.value = v > 0 ? Math.round(v).toLocaleString('ko-KR') : '';
+}
+
+let _userStdRateBound = false;
+
+async function loadStandardRateMasterPanel() {
+  const defaults = {
+    senior: 200000,
+    associate: 300000,
+    principal: 500000,
+    team_lead: 700000,
+    division_head: 800000,
+    bu_head: 900000,
+    ceo: 1000000,
+  };
+  try {
+    const rows = await API.listAllPages('standard_rate_master', {
+      filter: 'is_active=eq.true',
+      limit: 200,
+      maxPages: 5,
+      sort: 'updated_at',
+    }).catch(() => []);
+    const byKey = {};
+    (rows || []).forEach((r) => {
+      const k = String(r.rate_key || '').trim();
+      if (!k || byKey[k]) return;
+      byKey[k] = r;
+    });
+    _stdRateSetValue('senior', Number(byKey.title_senior?.unit_rate || byKey.role_staff?.unit_rate || defaults.senior));
+    _stdRateSetValue('associate', Number(byKey.title_associate?.unit_rate || byKey.role_manager?.unit_rate || defaults.associate));
+    _stdRateSetValue('principal', Number(byKey.title_principal?.unit_rate || byKey.role_director?.unit_rate || defaults.principal));
+    _stdRateSetValue('team_lead', Number(byKey.title_team_lead?.unit_rate || defaults.team_lead));
+    _stdRateSetValue('division_head', Number(byKey.title_division_head?.unit_rate || defaults.division_head));
+    _stdRateSetValue('bu_head', Number(byKey.title_bu_head?.unit_rate || byKey.role_top_mgr?.unit_rate || defaults.bu_head));
+    _stdRateSetValue('ceo', Number(byKey.title_ceo?.unit_rate || byKey.user_hwiseon?.unit_rate || defaults.ceo));
+  } catch (e) {
+    _stdRateSetValue('senior', defaults.senior);
+    _stdRateSetValue('associate', defaults.associate);
+    _stdRateSetValue('principal', defaults.principal);
+    _stdRateSetValue('team_lead', defaults.team_lead);
+    _stdRateSetValue('division_head', defaults.division_head);
+    _stdRateSetValue('bu_head', defaults.bu_head);
+    _stdRateSetValue('ceo', defaults.ceo);
+  }
+}
+
+async function saveStandardRateMasterPanel() {
+  const session = getSession();
+  if (!Auth.canManageMaster(session)) {
+    Toast.warning('표준단가 저장 권한이 없습니다.');
+    return;
+  }
+  const payloads = [
+    { rate_key: 'title_senior', role_key: 'senior', user_name: '', unit_rate: _stdRateReadValue('senior') },
+    { rate_key: 'title_associate', role_key: 'associate', user_name: '', unit_rate: _stdRateReadValue('associate') },
+    { rate_key: 'title_principal', role_key: 'principal', user_name: '', unit_rate: _stdRateReadValue('principal') },
+    { rate_key: 'title_team_lead', role_key: 'team_lead', user_name: '', unit_rate: _stdRateReadValue('team_lead') },
+    { rate_key: 'title_division_head', role_key: 'division_head', user_name: '', unit_rate: _stdRateReadValue('division_head') },
+    { rate_key: 'title_bu_head', role_key: 'bu_head', user_name: '', unit_rate: _stdRateReadValue('bu_head') },
+    { rate_key: 'title_ceo', role_key: 'ceo', user_name: '한휘선', unit_rate: _stdRateReadValue('ceo') },
+  ];
+  const invalid = payloads.find((p) => !(Number(p.unit_rate || 0) > 0));
+  if (invalid) {
+    Toast.warning('표준단가는 0보다 커야 합니다.');
+    return;
+  }
+  try {
+    const existing = await API.listAllPages('standard_rate_master', {
+      filter: 'is_active=eq.true',
+      limit: 200,
+      maxPages: 5,
+      sort: 'updated_at',
+    }).catch(() => []);
+    const byKey = {};
+    (existing || []).forEach((r) => {
+      const k = String(r.rate_key || '').trim();
+      if (!k || byKey[k]) return;
+      byKey[k] = r;
+    });
+    for (const p of payloads) {
+      const hit = byKey[p.rate_key] || null;
+      const data = {
+        rate_key: p.rate_key,
+        role_key: p.role_key,
+        user_name: p.user_name,
+        unit_rate: Number(p.unit_rate || 0),
+        is_active: true,
+        note: '표준단가 마스터',
+        updated_at: Date.now(),
+      };
+      if (hit && hit.id) {
+        await API.patch('standard_rate_master', hit.id, data);
+      } else {
+        await API.create('standard_rate_master', {
+          ...data,
+          created_by: String(session.id || ''),
+          created_by_name: session.name || '',
+          created_at: Date.now(),
+        });
+      }
+    }
+    Toast.success('표준단가 마스터를 저장했습니다.');
+    await loadStandardRateMasterPanel();
+  } catch (e) {
+    Toast.error('표준단가 저장 실패: ' + (e.message || ''));
+  }
+}
+
 // ─────────────────────────────────────────────
 // 역할 변경 시 관련 필드 표시/숨김
 // ─────────────────────────────────────────────
-function _onUserRoleChange(role) {
+function _userRoleValueToBaseRole(roleValue) {
+  const v = String(roleValue || '').trim().toLowerCase();
+  if (v === 'manager' || v === 'director' || v === 'top_mgr' || v === 'admin' || v === 'staff') return v;
+  return 'staff';
+}
+
+function _userJobTitleToBaseRole(jobTitle, fallbackRole = 'staff') {
+  const t = String(jobTitle || '').trim().toLowerCase();
+  if (t === 'team_lead') return 'manager';
+  if (t === 'division_head') return 'director';
+  if (t === 'bu_head' || t === 'ceo' || t === 'mgmt_support') return 'top_mgr';
+  if (t === 'senior' || t === 'associate' || t === 'principal') return 'staff';
+  const fb = _userRoleValueToBaseRole(fallbackRole);
+  if (fb === 'admin') return 'admin';
+  return fb || 'staff';
+}
+
+function _onUserJobTitleChange() {
+  const roleEl = document.getElementById('user-role-input');
+  const titleEl = document.getElementById('user-job-title-input');
+  if (!roleEl || !titleEl) return;
+  const current = _userRoleValueToBaseRole(roleEl.value);
+  if (current === 'admin') {
+    _onUserRoleChange(current);
+    return;
+  }
+  const next = _userJobTitleToBaseRole(titleEl.value, current);
+  roleEl.value = next;
+  _onUserRoleChange(next);
+}
+
+function _onUserRoleChange(roleValue) {
+  const role = _userRoleValueToBaseRole(roleValue);
   const isStaff       = role === 'staff';
   const isManager     = role === 'manager';
   const isDirector    = role === 'director';
@@ -202,6 +356,12 @@ async function init_users() {
     Toast.warning('직원 관리 권한이 없습니다.');
     return;
   }
+  if (!_userStdRateBound) {
+    document.getElementById('user-std-rate-save-btn')?.addEventListener('click', saveStandardRateMasterPanel);
+    document.getElementById('user-std-rate-reload-btn')?.addEventListener('click', loadStandardRateMasterPanel);
+    _userStdRateBound = true;
+  }
+  await loadStandardRateMasterPanel();
   await loadUsers();
 }
 
@@ -221,7 +381,7 @@ async function loadUsers() {
 
   tbody.innerHTML = users.map((u, i) => {
     // ── 역할 배지 ──────────────────────────────────────────
-    const roleBadge = Utils.roleBadge(u.role);
+    const roleBadge = Utils.roleBadge(u.role, u.job_title);
 
     // ── 각 필드 이스케이프 ─────────────────────────────────
     const nameEsc   = Utils.escHtml(u.name  || '');
@@ -437,8 +597,6 @@ async function openUserModal(userId = '') {
   document.getElementById('user-active-input').value     = 'true';
   const jobTitleEl = document.getElementById('user-job-title-input');
   if (jobTitleEl) jobTitleEl.value = '';
-  const delivEl = document.getElementById('user-deliverables-view-input');
-  if (delivEl) delivEl.checked = false;
   const tsTarget0 = document.getElementById('user-timesheet-target-input');
   const sheetType0 = document.getElementById('user-sheet-type-input');
   if (tsTarget0) tsTarget0.checked = true;
@@ -494,8 +652,10 @@ async function openUserModal(userId = '') {
           sheetTypeEl.value = _userSheetTypeByDeptName(deptName);
         }
         _updateUserSheetTypeByDeptSelection();
-        if (jobTitleEl) jobTitleEl.value = user.job_title || '';
-        if (delivEl) delivEl.checked = user.can_view_project_deliverables === true;
+        if (jobTitleEl) {
+          jobTitleEl.value = user.job_title || '';
+          _onUserJobTitleChange();
+        }
       }
     } catch(e) { console.error(e); }
   } else {
@@ -518,7 +678,12 @@ async function saveUser() {
   const email   = document.getElementById('user-email-input').value.trim().toLowerCase();
   const pw      = document.getElementById('user-pw-input').value;
   const pwConfirm = document.getElementById('user-pw-confirm-input').value;
-  const role    = document.getElementById('user-role-input').value;
+  const roleValue = document.getElementById('user-role-input').value;
+  const jobTitleInput = document.getElementById('user-job-title-input');
+  let jobTitle = jobTitleInput ? String(jobTitleInput.value || '').trim() : '';
+  const role = _userRoleValueToBaseRole(roleValue) === 'admin'
+    ? 'admin'
+    : _userJobTitleToBaseRole(jobTitle, roleValue);
   const isActive = document.getElementById('user-active-input').value === 'true';
   const isStaffLike = role === 'staff' || role === 'manager' || role === 'director';
   const isDeptClassifiedRole = role === 'staff' || role === 'manager' || role === 'director';
@@ -540,10 +705,6 @@ async function saveUser() {
   let isTimesheetTarget = !!(tsTargetEl && tsTargetEl.checked);
   let sheetType = String(sheetTypeEl && sheetTypeEl.value ? sheetTypeEl.value : 'hourly').toLowerCase() === 'daily' ? 'daily' : 'hourly';
 
-  const jobTitleInput = document.getElementById('user-job-title-input');
-  const jobTitle = jobTitleInput ? String(jobTitleInput.value || '').trim() : '';
-  const delivInput = document.getElementById('user-deliverables-view-input');
-  const canViewDeliverables = !!(delivInput && delivInput.checked);
 
   const showErr = (msg) => {
     document.getElementById('userModalErrorText').textContent = msg;
@@ -553,6 +714,10 @@ async function saveUser() {
 
   if (!name)  { showErr('이름을 입력하세요.'); return; }
   if (!email) { showErr('이메일을 입력하세요.'); return; }
+  if (isStaffLike && isTimesheetTarget && !jobTitle) {
+    showErr('타임시트 대상자는 직책(선임/전임/책임/팀장/본부장/사업부장/대표)을 지정해야 합니다.');
+    return;
+  }
   if (!id && !pw) { showErr('비밀번호를 입력하세요.'); return; }
   if (pw && pw.length < 8) { showErr('비밀번호는 8자 이상이어야 합니다.'); return; }
   if (pw && !pwConfirm) { showErr('비밀번호 확인란을 입력하세요.'); return; }
@@ -606,7 +771,6 @@ async function saveUser() {
       email,
       role,
       job_title: jobTitle,
-      can_view_project_deliverables: canViewDeliverables,
       is_active:            isActive,
       is_timesheet_target:  isTimesheetTarget,
       timesheet_hourly:     tsHourly,
@@ -633,18 +797,23 @@ async function saveUser() {
       try {
         if (id) {
           await API.patch('users', id, data);
+          return id;
         } else {
           data.pw_changed_at = Date.now();
-          await API.create('users', data);
+          const created = await API.create('users', data);
+          return String(created && created.id || '');
         }
       } catch (err) {
         const msg = String(err && err.message || '');
         if (data.sheet_type && msg.toLowerCase().includes('sheet_type')) {
           // DB 마이그레이션 이전 환경 호환: sheet_type 컬럼이 아직 없으면 제외 후 1회 재시도
           delete data.sheet_type;
-          if (id) await API.patch('users', id, data);
-          else await API.create('users', data);
-          return;
+          if (id) {
+            await API.patch('users', id, data);
+            return id;
+          }
+          const created = await API.create('users', data);
+          return String(created && created.id || '');
         }
         throw err;
       }
@@ -681,7 +850,7 @@ async function openBulkPwModal() {
           <i class="fas fa-exclamation-circle" style="color:#f59e0b;flex-shrink:0"></i>
           <span style="font-weight:600;color:var(--text-primary)">${Utils.escHtml(u.name)}</span>
           <span style="color:var(--text-muted);font-size:12px">${Utils.escHtml(u.email)}</span>
-          <span style="margin-left:auto">${Utils.roleBadge(u.role)}</span>
+          <span style="margin-left:auto">${Utils.roleBadge(u.role, u.job_title)}</span>
         </div>`).join('');
     }
     // 계정 수 표시
@@ -805,7 +974,10 @@ async function uploadUsers() {
     });
 
     const roleMap = {
-      '담당자': 'staff', '팀장': 'manager', '책임자': 'director', '관리자': 'admin',
+      '담당자': 'staff', '담당': 'staff',
+      '팀장': 'manager',
+      '본부장': 'director', '책임자': 'director',
+      '관리자': 'admin',
       '경영': 'top_mgr', 'top_mgr': 'top_mgr', 'topmgr': 'top_mgr',
       'staff': 'staff', 'manager': 'manager', 'director': 'director',
       'admin': 'admin', 'administrator': 'admin',

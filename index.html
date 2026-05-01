@@ -692,10 +692,22 @@
     const SUPABASE_URL = window.__SMARTLOG_SB_URL__ || '';
     const SUPABASE_KEY = window.__SMARTLOG_SB_KEY__ || '';
 
+    function ensureSupabaseConfig() {
+      const hasUrl = typeof SUPABASE_URL === 'string' && SUPABASE_URL.trim().length > 0;
+      const hasKey = typeof SUPABASE_KEY === 'string' && SUPABASE_KEY.trim().length > 0;
+      if (!hasUrl || !hasKey) {
+        throw new Error(
+          'Supabase 설정이 누락되었습니다. ' +
+          '로컬 개발이면 js/supabase.dev.js를 설정하고, 배포 환경이면 SUPABASE_URL/SUPABASE_ANON_KEY를 확인하세요.'
+        );
+      }
+    }
+
     // ─────────────────────────────────────────
     // Supabase API 헬퍼 (로그인 페이지 전용)
     // ─────────────────────────────────────────
     async function apiFetch(path, opts = {}) {
+      ensureSupabaseConfig();
       // tables/users?limit=... 형식을 Supabase REST API로 변환
       let url = path;
       let resultWrapper = null;
@@ -973,6 +985,7 @@
     // 로그인 처리
     // ─────────────────────────────────────────
     async function findUserByEmail(emailLower) {
+      ensureSupabaseConfig();
       // 1) 가장 정확한 단건 조회 (우선)
       try {
         const directUrl =
@@ -1089,7 +1102,7 @@
 
       } catch (err) {
         console.error(err);
-        showError('서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+        showError(err?.message || '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
       } finally {
         btn.classList.remove('loading');
         btn.disabled = false;

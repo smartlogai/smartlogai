@@ -5596,8 +5596,34 @@ async function exportEntriesToExcel() {
 const _PROJECT_OUTPUTS_STATE = {
   initialized: false,
   projects: [],
+  projectsByCode: {},
+  users: [],
+  usersById: {},
+  codeTypeById: {},
+  accessRequests: [],
+  outputRows: [],
 };
 const _PROJECT_OUTPUTS_BUCKET = 'project-outputs';
+const _PROJECT_OUTPUT_TYPE_RESULT = '결과보고서';
+const _PROJECT_OUTPUT_TYPE_CLEARANCE = '통관팀유의사항';
+const _PROJECT_OUTPUT_TYPE_REFERENCE = '참고자료';
+const _PROJECT_OUTPUT_LIBRARY_MODE = true;
+const _PROJECT_OUTPUT_ACCESS_VALID_MS = 24 * 60 * 60 * 1000; // 1일
+const _PROJECT_OUTPUT_BULK_DAILY_THRESHOLD = 5; // 1일 5건 이상
+const _PROJECT_OUTPUT_URL_ISSUE_FN = 'issue_project_output_url';
+let _PROJECT_OUTPUT_RAG_TABLE_WARNED = false;
+
+function escapeHtml(v) {
+  if (typeof Utils !== 'undefined' && Utils && typeof Utils.escHtml === 'function') {
+    return Utils.escHtml(v);
+  }
+  return String(v || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 function _projectOutputsSafeSegment(v) {
   return String(v || '')
@@ -5615,6 +5641,162 @@ function _projectOutputsFmtDate(ms) {
   return d.toISOString().slice(0, 10);
 }
 
+function _projectOutputsRows(res) {
+  if (Array.isArray(res)) return res;
+  if (res && Array.isArray(res.data)) return res.data;
+  return [];
+}
+
+function _projectOutputsIsMissingTableError(err) {
+  const msg = String(err && err.message || '').toLowerCase();
+  return (
+    msg.includes('relation') ||
+    msg.includes('does not exist') ||
+    msg.includes('not found') ||
+    msg.includes('404')
+  );
+}
+
+function _projectOutputsRagSourceKind(outputType) {
+  const t = String(outputType || '').trim();
+  if (t === _PROJECT_OUTPUT_TYPE_REFERENCE) return 'reference';
+  if (t === _PROJECT_OUTPUT_TYPE_RESULT) return 'result_report';
+  return 'other';
+}
+
+async function _projectOutputsPersistRagSeed(outputRow, session) {
+  const row = outputRow || {};
+  const outputId = String(row.id || '').trim();
+  if (!outputId) return;
+  const now = Date.now();
+  const payload = {
+    output_id: outputId,
+    source_kind: _projectOutputsRagSourceKind(row.output_type),
+    output_type: String(row.output_type || ''),
+    title: String(row.output_title || ''),
+    summary: String(row.note || ''),
+    project_code: String(row.project_code || ''),
+    project_name: String(row.project_name || ''),
+    main_category: String(row.output_main_category || ''),
+    sub_category: String(row.output_sub_category || ''),
+    file_name: String(row.output_file_name || ''),
+    file_url: String(row.output_file_url || ''),
+    file_path: String(row.output_file_path || ''),
+    uploaded_by: String(row.uploaded_by || _projectOutputsCurrentUserId(session)),
+    uploaded_by_name: String(row.uploaded_by_name || session?.name || session?.user_name || ''),
+    uploaded_at: Number(row.uploaded_at || now),
+    rag_status: 'queued',
+    updated_at: now,
+  };
+  try {
+    const exists = await API.list('project_output_rag_seeds', {
+      select: 'id',
+      output_id: `eq.${outputId}`,
+      limit: 1,
+    }).catch(() => []);
+    const hit = Array.isArray(exists) ? exists[0] : null;
+    let seedId = '';
+    if (hit && hit.id) {
+      seedId = String(hit.id || '');
+      await API.patch('project_output_rag_seeds', seedId, payload);
+    } else {
+      const created = await API.create('project_output_rag_seeds', {
+        ...payload,
+        created_at: now,
+      });
+      seedId = String(created && created.id || '');
+    }
+    if (!seedId) return;
+    const queued = await API.list('project_output_rag_index_queue', {
+      select: 'id,status',
+      output_id: `eq.${outputId}`,
+      limit: 20,
+    }).catch(() => []);
+    const hasActiveJob = (queued || []).some((r) => {
+      const st = String(r.status || '').trim();
+      return st === 'pending' || st === 'processing';
+    });
+    if (!hasActiveJob) {
+      await API.create('project_output_rag_index_queue', {
+        seed_id: seedId,
+        output_id: outputId,
+        job_type: 'index',
+        status: 'pending',
+        requested_by: _projectOutputsCurrentUserId(session),
+        requested_by_name: String(session?.name || session?.user_name || ''),
+        created_at: now,
+        updated_at: now,
+      });
+    }
+  } catch (e) {
+    if (_projectOutputsIsMissingTableError(e)) {
+      if (!_PROJECT_OUTPUT_RAG_TABLE_WARNED) {
+        _PROJECT_OUTPUT_RAG_TABLE_WARNED = true;
+        console.warn('[project-outputs] rag seed tables are missing. Apply SQL migration for RAG indexing.');
+      }
+      return;
+    }
+    console.warn('[project-outputs] rag seed sync failed', e);
+  }
+}
+
+function _projectOutputsCurrentUserId(session) {
+  return String(session?.user_id || session?.id || '').trim();
+}
+
+function _projectOutputsProjectByCode(code) {
+  return _PROJECT_OUTPUTS_STATE.projectsByCode[String(code || '').trim()] || null;
+}
+
+function _projectOutputsCategoryForProject(project) {
+  if (!project) return { main: '', sub: '' };
+  const typeId = String(project.project_code_type_id || '').trim();
+  const type = _PROJECT_OUTPUTS_STATE.codeTypeById[typeId] || {};
+  return {
+    main: String(type.main_category || '').trim(),
+    sub: String(type.sub_category || '').trim(),
+  };
+}
+
+function _projectOutputsCategoryForOutput(row) {
+  const directMain = String((row && row.output_main_category) || '').trim();
+  const directSub = String((row && row.output_sub_category) || '').trim();
+  if (directMain || directSub) {
+    return { main: directMain, sub: directSub };
+  }
+  const note = String((row && row.note) || '').trim();
+  const m = note.match(/\[분류\]\s*대분류:(.*?)\s*\/\s*소분류:(.*?)(?:\n|$)/);
+  if (m) {
+    return {
+      main: String(m[1] || '').trim(),
+      sub: String(m[2] || '').trim(),
+    };
+  }
+  const project = _projectOutputsProjectByCode(row?.project_code || '');
+  return _projectOutputsCategoryForProject(project);
+}
+
+function _projectOutputsResolveStoragePath(row) {
+  const direct = String(row && row.output_file_path || '').trim();
+  if (direct) return direct;
+  const url = String(row && row.output_file_url || '').trim();
+  if (!url) return '';
+  const m = url.match(/\/storage\/v1\/object\/public\/project-outputs\/(.+)$/i);
+  if (!m || !m[1]) return '';
+  try {
+    return decodeURIComponent(String(m[1] || '').replace(/\?.*$/, ''));
+  } catch (_) {
+    return String(m[1] || '').replace(/\?.*$/, '');
+  }
+}
+
+function _projectOutputsDayRangeMs(ts = Date.now()) {
+  const d = new Date(ts);
+  const from = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const to = from + 24 * 60 * 60 * 1000;
+  return { from, to };
+}
+
 function _projectOutputsCanUpload(session, project) {
   if (!session) return false;
   if (Auth.isAdmin(session) || Auth.isDirector(session) || Auth.isTopMgr(session)) return true;
@@ -5623,14 +5805,128 @@ function _projectOutputsCanUpload(session, project) {
   return !!me && !!pm && me === pm;
 }
 
+function _projectOutputsCanAction(session, project) {
+  if (!session || !project) return false;
+  if (Auth.isAdmin(session)) return true;
+  const pm = _PROJECT_OUTPUTS_STATE.usersById[String(project.cpm_user_id || '').trim()] || null;
+  if (!pm) return false;
+  if (Auth.isDirector(session)) {
+    return String(session.hq_id || '').trim() && String(session.hq_id || '').trim() === String(pm.hq_id || '').trim();
+  }
+  if (Auth.isTopMgr(session)) {
+    return String(session.dept_id || '').trim() && String(session.dept_id || '').trim() === String(pm.dept_id || '').trim();
+  }
+  return false;
+}
+
+async function _projectOutputsLoadUsersAndCodeTypes() {
+  const [users, codeTypes] = await Promise.all([
+    Master.users().catch(() => []),
+    API.listAllPages('project_code_types', { limit: 1000, maxPages: 10, sort: 'main_code' }).catch(() => []),
+  ]);
+  _PROJECT_OUTPUTS_STATE.users = Array.isArray(users) ? users : [];
+  _PROJECT_OUTPUTS_STATE.usersById = {};
+  (_PROJECT_OUTPUTS_STATE.users || []).forEach((u) => {
+    _PROJECT_OUTPUTS_STATE.usersById[String(u.id || '').trim()] = u;
+  });
+  _PROJECT_OUTPUTS_STATE.codeTypeById = {};
+  (codeTypes || []).forEach((c) => {
+    _PROJECT_OUTPUTS_STATE.codeTypeById[String(c.id || '').trim()] = c;
+  });
+}
+
+function _projectOutputsActionStatusLabel(status) {
+  const s = String(status || '').trim();
+  if (s === 'completed') return '완료';
+  if (s === 'in_progress') return '진행중';
+  return '확인';
+}
+
+function _projectOutputsRequiresClearance(project) {
+  if (!project) return false;
+  const typeId = String(project.project_code_type_id || '').trim();
+  const type = _PROJECT_OUTPUTS_STATE.codeTypeById[typeId] || {};
+  return !!type.requires_clearance_note;
+}
+
+async function _projectOutputsCheckClosureGate(project) {
+  if (!project) return { ok: false, reason: '프로젝트 정보가 없습니다.' };
+  if (!_projectOutputsRequiresClearance(project)) return { ok: true, reason: '' };
+  const projectCode = String(project.project_code || '').trim();
+  const outputs = await API.list('project_outputs', {
+    select: 'id,project_code,output_type,output_title,uploaded_at',
+    project_code: `eq.${projectCode}`,
+    limit: 1000,
+    order: 'uploaded_at.desc,created_at.desc',
+  }).catch(() => []);
+  const clearOutputs = (Array.isArray(outputs) ? outputs : []).filter((o) => String(o.output_type || '').trim() === _PROJECT_OUTPUT_TYPE_CLEARANCE);
+  if (!clearOutputs.length) {
+    return { ok: false, reason: '통관유의사항 업로드가 필요합니다.' };
+  }
+  const outputIds = clearOutputs.map((o) => String(o.id || '').trim()).filter(Boolean);
+  const actions = await API.listAllPages('project_output_actions', {
+    limit: 1000,
+    maxPages: 10,
+    sort: 'updated_at',
+  }).catch((e) => {
+    const msg = String(e && e.message || '');
+    if (/project_output_actions|schema cache|relation/i.test(msg)) {
+      throw new Error('project_output_actions 테이블이 필요합니다. SQL 스크립트를 먼저 적용하세요.');
+    }
+    throw e;
+  });
+  const doneCnt = (actions || []).filter((a) =>
+    outputIds.includes(String(a.output_id || '').trim()) &&
+    String(a.action_status || '').trim() === 'completed'
+  ).length;
+  if (doneCnt < 1) {
+    return { ok: false, reason: '통관유의사항 조치완료(본부장/사업부장 중 1명 이상)가 필요합니다.' };
+  }
+  return { ok: true, reason: '' };
+}
+
+async function _projectOutputsNotifyClearance(project, payload, session) {
+  if (typeof createNotification !== 'function' || !project || !payload) return;
+  const pm = _PROJECT_OUTPUTS_STATE.usersById[String(project.cpm_user_id || '').trim()] || {};
+  const toUsers = (_PROJECT_OUTPUTS_STATE.users || []).filter((u) => {
+    const role = String(u.role || '').trim();
+    if (role === 'director') return String(u.hq_id || '').trim() && String(u.hq_id || '').trim() === String(pm.hq_id || '').trim();
+    if (role === 'top_mgr') return String(u.dept_id || '').trim() && String(u.dept_id || '').trim() === String(pm.dept_id || '').trim();
+    return false;
+  });
+  const senderId = String(session.user_id || session.id || '').trim();
+  const uniq = new Set();
+  toUsers.forEach((u) => {
+    const uid = String(u.id || '').trim();
+    if (!uid || uid === senderId || uniq.has(uid)) return;
+    uniq.add(uid);
+    createNotification({
+      toUserId: uid,
+      toUserName: String(u.name || ''),
+      fromUserId: senderId,
+      fromUserName: String(session.name || session.user_name || ''),
+      type: 'project_clearance_notice',
+      entryId: String(payload.id || ''),
+      entrySummary: `${String(project.project_code || '')} | ${String(project.project_name || '')}`,
+      message: `${String(session.name || '작성자')}님이 통관팀유의사항을 등록했습니다. 조치사항을 입력해주세요.`,
+      targetMenu: 'project-deliverables',
+    });
+  });
+}
+
 async function _projectOutputsLoadProjects() {
   const rows = await API.list('registered_projects', {
-    select: 'id,project_code,project_name,client_name,cpm_user_id,cpm_name,registration_status',
+    select: 'id,project_code,project_name,client_name,cpm_user_id,cpm_name,registration_status,project_code_type_id,work_closed_at',
     registration_status: 'eq.approved',
     order: 'project_code.asc',
     limit: 5000,
   });
-  _PROJECT_OUTPUTS_STATE.projects = Array.isArray(rows) ? rows : [];
+  _PROJECT_OUTPUTS_STATE.projects = _projectOutputsRows(rows);
+  _PROJECT_OUTPUTS_STATE.projectsByCode = {};
+  (_PROJECT_OUTPUTS_STATE.projects || []).forEach((p) => {
+    const code = String(p.project_code || '').trim();
+    if (code) _PROJECT_OUTPUTS_STATE.projectsByCode[code] = p;
+  });
   const sel = document.getElementById('proj-out-project');
   if (!sel) return;
   const opts = ['<option value="">전체 프로젝트</option>'].concat(
@@ -5641,91 +5937,739 @@ async function _projectOutputsLoadProjects() {
       return `<option value="${code}">${code} · ${name}${client ? ` (${client})` : ''}</option>`;
     })
   );
-  sel.innerHTML = opts.join('');
+  if (sel) sel.innerHTML = opts.join('');
+  _projectOutputsSyncCategoryFilters();
+}
+
+function _projectOutputsSyncCategoryFilters() {
+  const mainEl = document.getElementById('proj-out-main-category');
+  const subEl = document.getElementById('proj-out-sub-category');
+  if (!mainEl || !subEl) return;
+  const mains = [...new Set((_PROJECT_OUTPUTS_STATE.projects || [])
+    .map((p) => _projectOutputsCategoryForProject(p).main)
+    .filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+  const curMain = String(mainEl.value || '').trim();
+  const curSub = String(subEl.value || '').trim();
+  mainEl.innerHTML = ['<option value="">전체</option>']
+    .concat(mains.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`))
+    .join('');
+  if (curMain && mains.includes(curMain)) mainEl.value = curMain;
+  const scopedProjects = (_PROJECT_OUTPUTS_STATE.projects || []).filter((p) => {
+    if (!curMain) return true;
+    return _projectOutputsCategoryForProject(p).main === curMain;
+  });
+  const subs = [...new Set(scopedProjects.map((p) => _projectOutputsCategoryForProject(p).sub).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+  subEl.innerHTML = ['<option value="">전체</option>']
+    .concat(subs.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`))
+    .join('');
+  if (curSub && subs.includes(curSub)) subEl.value = curSub;
+}
+
+function _projectOutputsSyncNewCategoryOptions() {
+  const mainEl = document.getElementById('proj-out-new-main-category');
+  const subEl = document.getElementById('proj-out-new-sub-category');
+  if (!mainEl || !subEl) return;
+  const rows = Object.values(_PROJECT_OUTPUTS_STATE.codeTypeById || {});
+  const map = {};
+  rows.forEach((r) => {
+    const main = String(r.main_category || '').trim();
+    const sub = String(r.sub_category || '').trim();
+    if (!main || !sub) return;
+    if (!map[main]) map[main] = new Set();
+    map[main].add(sub);
+  });
+  const mains = Object.keys(map).sort((a, b) => a.localeCompare(b));
+  const curMain = String(mainEl.value || '').trim();
+  const curSub = String(subEl.value || '').trim();
+  mainEl.innerHTML = ['<option value="">대분류 선택</option>']
+    .concat(mains.map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`))
+    .join('');
+  if (curMain && mains.includes(curMain)) mainEl.value = curMain;
+  const selectedMain = String(mainEl.value || '').trim();
+  const subs = selectedMain ? Array.from(map[selectedMain] || []).sort((a, b) => a.localeCompare(b)) : [];
+  subEl.innerHTML = ['<option value="">소분류 선택</option>']
+    .concat(subs.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`))
+    .join('');
+  if (curSub && subs.includes(curSub)) subEl.value = curSub;
+}
+
+function _projectOutputsMatchGrant(session, row, requestType) {
+  const type = String(requestType || 'view').trim();
+  if (type === 'download' && Auth.canDownloadProjectDeliverables(session)) return true;
+  if (type !== 'download' && Auth.canViewProjectDeliverables(session)) return true;
+  const uid = _projectOutputsCurrentUserId(session);
+  const now = Date.now();
+  const cat = _projectOutputsCategoryForOutput(row);
+  const rows = Array.isArray(_PROJECT_OUTPUTS_STATE.accessRequests) ? _PROJECT_OUTPUTS_STATE.accessRequests : [];
+  return rows.some((r) => {
+    if (String(r.requester_user_id || '').trim() !== uid) return false;
+    if (String(r.request_type || '').trim() !== String(requestType || '').trim()) return false;
+    if (String(r.status || '').trim() !== 'approved') return false;
+    const exp = Number(r.expires_at || 0);
+    if (!exp || exp < now) return false;
+    const m = String(r.scope_main_category || '').trim();
+    const s = String(r.scope_sub_category || '').trim();
+    return m === String(cat.main || '') && s === String(cat.sub || '');
+  });
+}
+
+function _projectOutputsCanPortalAction(session, actionKey) {
+  const k = String(actionKey || '').trim();
+  if (!session || !k) return false;
+  const legacyRead = Auth.canViewProjectDeliverables(session);
+  return Auth.canDoAction(session, 'project-deliverables', k, legacyRead);
+}
+
+async function _projectOutputsLoadMyAccessRequests() {
+  const session = getSession();
+  const uid = _projectOutputsCurrentUserId(session);
+  if (!uid) {
+    _PROJECT_OUTPUTS_STATE.accessRequests = [];
+    return;
+  }
+  const rows = await API.listAllPages('project_output_access_requests', {
+    filter: `requester_user_id=eq.${uid}`,
+    limit: 500,
+    maxPages: 10,
+    sort: 'updated_at',
+  }).catch((e) => {
+    const msg = String(e && e.message || '');
+    if (/project_output_access_requests|relation|schema cache/i.test(msg)) {
+      Toast.warning('접근신청 테이블이 없어 권한신청 기능이 제한됩니다. SQL 반영 후 사용하세요.');
+      return [];
+    }
+    throw e;
+  });
+  _PROJECT_OUTPUTS_STATE.accessRequests = Array.isArray(rows) ? rows : [];
+}
+
+function _projectOutputsSelectedRows() {
+  const checks = Array.from(document.querySelectorAll('#proj-out-body .proj-out-select-row:checked'));
+  const byId = {};
+  (_PROJECT_OUTPUTS_STATE.outputRows || []).forEach((r) => {
+    const id = String(r.id || '').trim();
+    if (id) byId[id] = r;
+  });
+  return checks.map((el) => byId[String(el.value || '').trim()]).filter(Boolean);
+}
+
+function _projectOutputsSyncSelectionUi() {
+  const checks = Array.from(document.querySelectorAll('#proj-out-body .proj-out-select-row'));
+  const checked = checks.filter((el) => el.checked);
+  const allEl = document.getElementById('proj-out-select-all');
+  if (allEl) {
+    allEl.checked = checks.length > 0 && checked.length === checks.length;
+    allEl.indeterminate = checked.length > 0 && checked.length < checks.length;
+  }
+  const session = getSession();
+  const canExportAction = _projectOutputsCanPortalAction(session, 'export');
+  const canDownloadAction = _projectOutputsCanPortalAction(session, 'download');
+  const viewBtn = document.getElementById('proj-out-bulk-view-btn');
+  const downloadBtn = document.getElementById('proj-out-bulk-download-btn');
+  if (viewBtn) viewBtn.disabled = checked.length < 1 || !canExportAction;
+  if (downloadBtn) downloadBtn.disabled = checked.length < 1 || !canDownloadAction;
+}
+
+function _projectOutputsValidateBulkRequest(requestType, rows) {
+  const type = String(requestType || '').trim();
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) return '선택된 결과물이 없습니다.';
+  if (type === 'download' && list.length > 2) return '다운로드 신청은 최대 2건까지 가능합니다.';
+  if (type === 'view' && list.length > 20) return '열람 신청은 최대 20건까지 가능합니다.';
+  if (type === 'view') {
+    const subSet = new Set(list.map((r) => String(_projectOutputsCategoryForOutput(r).sub || '').trim() || '-'));
+    if (subSet.size > 1) return '열람 복수 신청은 동일 소분류 내에서만 가능합니다.';
+  }
+  return '';
+}
+
+async function openProjectOutputBulkAccessRequest(requestType) {
+  const type = String(requestType || '').trim();
+  if (type !== 'view' && type !== 'download') return;
+  const session = getSession();
+  const canAction = type === 'download'
+    ? _projectOutputsCanPortalAction(session, 'download')
+    : _projectOutputsCanPortalAction(session, 'export');
+  if (!canAction) {
+    Toast.warning(type === 'download' ? '다운로드 신청 권한이 없습니다.' : '열람(출력) 신청 권한이 없습니다.');
+    return;
+  }
+  const selected = _projectOutputsSelectedRows();
+  const invalidMsg = _projectOutputsValidateBulkRequest(type, selected);
+  if (invalidMsg) return Toast.warning(invalidMsg);
+  const ids = selected.map((r) => String(r.id || '').trim()).filter(Boolean);
+  if (!ids.length) return Toast.warning('선택된 결과물이 없습니다.');
+  await openProjectOutputAccessRequestModal(ids[0], type, ids);
 }
 
 async function _projectOutputsLoadList() {
   const body = document.getElementById('proj-out-body');
   const summary = document.getElementById('proj-out-summary');
   if (!body) return;
-  body.innerHTML = '<tr><td colspan="9" class="table-empty"><i class="fas fa-spinner fa-spin"></i><p>결과물 목록을 불러오는 중입니다...</p></td></tr>';
+  body.innerHTML = '<tr><td colspan="8" class="table-empty"><i class="fas fa-spinner fa-spin"></i><p>결과물 목록을 불러오는 중입니다...</p></td></tr>';
   try {
-    const monthEl = document.getElementById('proj-out-month');
+    const session = getSession();
+    const fromEl = document.getElementById('proj-out-date-from');
+    const toEl = document.getElementById('proj-out-date-to');
     const projectEl = document.getElementById('proj-out-project');
-    const monthVal = String((monthEl && monthEl.value) || '').trim();
+    const mainEl = document.getElementById('proj-out-main-category');
+    const subEl = document.getElementById('proj-out-sub-category');
+    const uploaderEl = document.getElementById('proj-out-uploader');
+    const kindEl = document.getElementById('proj-out-kind-filter');
+    const fromVal = String((fromEl && fromEl.value) || '').trim();
+    const toVal = String((toEl && toEl.value) || '').trim();
     const projectCode = String((projectEl && projectEl.value) || '').trim();
+    const mainCategory = String((mainEl && mainEl.value) || '').trim();
+    const subCategory = String((subEl && subEl.value) || '').trim();
+    const uploader = String((uploaderEl && uploaderEl.value) || '').trim().toLowerCase();
+    const kindFilter = String((kindEl && kindEl.value) || 'all').trim();
     let fromMs = 0;
     let toMs = 0;
-    if (/^\d{4}-\d{2}$/.test(monthVal)) {
-      const [y, m] = monthVal.split('-').map(Number);
-      fromMs = new Date(y, m - 1, 1).getTime();
-      toMs = new Date(y, m, 1).getTime();
-    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(fromVal)) fromMs = new Date(fromVal).getTime();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(toVal)) toMs = new Date(toVal).getTime() + (24 * 60 * 60 * 1000);
     const q = {
-      select: 'id,project_code,project_name,output_type,output_title,output_file_name,output_file_url,uploaded_by_name,uploaded_at,note,created_at',
+      select: 'id,project_code,project_name,output_type,output_title,output_main_category,output_sub_category,output_file_name,output_file_url,output_file_path,preview_file_path,preview_ready,preview_version,uploaded_by,uploaded_by_name,uploaded_at,note,created_at,publish_status,publish_approved_at,publish_approved_by_name',
       order: 'uploaded_at.desc,created_at.desc',
       limit: 1000,
     };
+    if (kindFilter === 'result') q.output_type = `eq.${_PROJECT_OUTPUT_TYPE_RESULT}`;
+    if (kindFilter === 'reference') q.output_type = `eq.${_PROJECT_OUTPUT_TYPE_REFERENCE}`;
+    q.publish_status = 'eq.published';
     if (projectCode) q.project_code = `eq.${projectCode}`;
     if (fromMs > 0) q.uploaded_at = `gte.${fromMs}`;
     if (toMs > 0) q.uploaded_at = `lt.${toMs}`;
-    const rows = await API.list('project_outputs', q);
-    const list = Array.isArray(rows) ? rows : [];
+    let rows = [];
+    try {
+      rows = await API.list('project_outputs', q);
+    } catch (qe) {
+      const msg = String(qe && qe.message || '');
+      const fallbackQ = { ...q };
+      let usedFallback = false;
+      if (/publish_status|publish_approved/i.test(msg)) {
+        delete fallbackQ.publish_status;
+        usedFallback = true;
+      }
+      if (/output_main_category|output_sub_category/i.test(msg)) {
+        usedFallback = true;
+      }
+      if (!usedFallback) throw qe;
+      fallbackQ.select = 'id,project_code,project_name,output_type,output_title,output_file_name,output_file_url,output_file_path,preview_file_path,preview_ready,preview_version,uploaded_by,uploaded_by_name,uploaded_at,note,created_at';
+      rows = await API.list('project_outputs', fallbackQ);
+      if (/publish_status|publish_approved/i.test(msg)) {
+        Toast.warning('게시승인 컬럼이 없어 결과보고서 전체를 표시합니다. SQL 반영 후 승인기반 필터가 적용됩니다.');
+      }
+    }
+    let list = _projectOutputsRows(rows);
+    if (projectCode) list = list.filter((r) => String(r.project_code || '').trim() === projectCode);
+    list = list.filter((r) => {
+      const cat = _projectOutputsCategoryForOutput(r);
+      if (mainCategory && cat.main !== mainCategory) return false;
+      if (subCategory && cat.sub !== subCategory) return false;
+      if (uploader && !String(r.uploaded_by_name || '').toLowerCase().includes(uploader)) return false;
+      if (fromMs > 0 && Number(r.uploaded_at || r.created_at || 0) < fromMs) return false;
+      if (toMs > 0 && Number(r.uploaded_at || r.created_at || 0) >= toMs) return false;
+      return true;
+    });
+    _PROJECT_OUTPUTS_STATE.outputRows = list;
     if (!list.length) {
-      body.innerHTML = '<tr><td colspan="9" class="table-empty"><i class="fas fa-folder-open"></i><p>등록된 결과물이 없습니다.</p></td></tr>';
+      body.innerHTML = '<tr><td colspan="8" class="table-empty"><i class="fas fa-folder-open"></i><p>등록된 결과물이 없습니다.</p></td></tr>';
       if (summary) summary.textContent = '총 0건';
+      _projectOutputsSyncSelectionUi();
       return;
     }
+    const canExportAction = _projectOutputsCanPortalAction(session, 'export');
+    const canDownloadAction = _projectOutputsCanPortalAction(session, 'download');
     body.innerHTML = list.map((r, i) => {
-      const fileBtn = String(r.output_file_url || '').trim()
-        ? `<a class="btn btn-xs btn-outline" href="${escapeHtml(r.output_file_url)}" target="_blank" rel="noopener">열기</a>`
+      const cat = _projectOutputsCategoryForOutput(r);
+      const canView = _projectOutputsMatchGrant(session, r, 'view');
+      const canDownload = _projectOutputsMatchGrant(session, r, 'download');
+      const filePath = _projectOutputsResolveStoragePath(r);
+      const viewBtn = filePath
+        ? (!canExportAction
+          ? '-'
+          : (canView
+          ? `<button type="button" class="btn btn-xs btn-ghost po-action-btn" onclick="_projectOutputsAccessFile('${escapeHtml(r.id || '')}','view')">열람</button>`
+          : `<button type="button" class="btn btn-xs btn-ghost po-action-btn po-action-btn-request" onclick="openProjectOutputAccessRequestModal('${escapeHtml(r.id || '')}','view')">열람신청</button>`))
         : '-';
+      const downloadBtn = filePath
+        ? (!canDownloadAction
+          ? '-'
+          : (canDownload
+          ? `<button type="button" class="btn btn-xs btn-outline po-action-btn po-action-btn-download" onclick="_projectOutputsAccessFile('${escapeHtml(r.id || '')}','download')">다운로드</button>`
+          : `<button type="button" class="btn btn-xs btn-ghost po-action-btn po-action-btn-request" onclick="openProjectOutputAccessRequestModal('${escapeHtml(r.id || '')}','download')">다운로드신청</button>`))
+        : '-';
+      const rowId = escapeHtml(String(r.id || '').trim());
       return [
         '<tr>',
+        `<td style="text-align:center"><input type="checkbox" class="proj-out-select-row" value="${rowId}" aria-label="선택" /></td>`,
         `<td style="text-align:center">${i + 1}</td>`,
-        `<td>${escapeHtml(r.project_code || '')}</td>`,
-        `<td>${escapeHtml(r.project_name || '')}</td>`,
-        `<td>${escapeHtml(r.output_type || '')}</td>`,
-        `<td>${escapeHtml(r.output_title || '')}</td>`,
         `<td>${escapeHtml(r.uploaded_by_name || '')}</td>`,
         `<td>${_projectOutputsFmtDate(r.uploaded_at || r.created_at)}</td>`,
-        `<td style="text-align:center">${fileBtn}</td>`,
+        `<td>${escapeHtml(cat.main || '-')}</td>`,
+        `<td>${escapeHtml(cat.sub || '-')}</td>`,
+        `<td style="text-align:center;white-space:nowrap" class="po-action-cell">${viewBtn} ${downloadBtn}</td>`,
         `<td>${escapeHtml(r.note || '')}</td>`,
         '</tr>',
       ].join('');
     }).join('');
+    Array.from(document.querySelectorAll('#proj-out-body .proj-out-select-row')).forEach((el) => {
+      el.addEventListener('change', _projectOutputsSyncSelectionUi);
+    });
+    const allEl = document.getElementById('proj-out-select-all');
+    if (allEl) {
+      allEl.checked = false;
+      allEl.indeterminate = false;
+    }
+    _projectOutputsSyncSelectionUi();
     if (summary) summary.textContent = `총 ${list.length.toLocaleString()}건`;
   } catch (e) {
     console.error('[project-outputs] load failed', e);
-    body.innerHTML = '<tr><td colspan="9" class="table-empty"><i class="fas fa-triangle-exclamation"></i><p>결과물 목록을 불러오지 못했습니다.</p></td></tr>';
+    body.innerHTML = '<tr><td colspan="8" class="table-empty"><i class="fas fa-triangle-exclamation"></i><p>결과물 목록을 불러오지 못했습니다.</p></td></tr>';
+    _PROJECT_OUTPUTS_STATE.outputRows = [];
+    _projectOutputsSyncSelectionUi();
     if (summary) summary.textContent = '조회 실패';
     Toast.error(e.message || '결과물 목록 조회 실패');
   }
 }
 
+async function _projectOutputsAccessFile(outputId, actionType) {
+  const id = String(outputId || '').trim();
+  const type = String(actionType || '').trim();
+  if (!id || (type !== 'view' && type !== 'download')) return;
+  const session = getSession();
+  const canAction = type === 'download'
+    ? _projectOutputsCanPortalAction(session, 'download')
+    : _projectOutputsCanPortalAction(session, 'export');
+  if (!canAction) {
+    Toast.warning(type === 'download' ? '직접 다운로드 권한이 없습니다.' : '열람(출력) 권한이 없습니다.');
+    return;
+  }
+  const rows = await API.listAllPages('project_outputs', {
+    filter: `id=eq.${id}`,
+    limit: 1,
+    maxPages: 1,
+  }).catch(() => []);
+  const row = (rows || [])[0] || null;
+  if (!row) return Toast.warning('대상 결과물을 찾을 수 없습니다.');
+  const hasGrant = _projectOutputsMatchGrant(session, row, type);
+  if (!hasGrant) {
+    openProjectOutputAccessRequestModal(id, type);
+    return;
+  }
+  try {
+    await API.create('project_output_access_logs', {
+      output_id: id,
+      project_code: String(row.project_code || ''),
+      event_type: type,
+      actor_user_id: _projectOutputsCurrentUserId(session),
+      actor_user_name: String(session?.name || session?.user_name || ''),
+      occurred_at: Date.now(),
+      user_agent: String(navigator.userAgent || '').slice(0, 500),
+    });
+  } catch (e) {
+    console.warn('[project-output-access-log] create failed', e);
+  }
+  await _projectOutputsCheckBulkAccessAlert(session).catch(() => {});
+  const storagePath = _projectOutputsResolveStoragePath(row);
+  if (!storagePath) return Toast.warning('파일 경로 정보가 없습니다. 관리자에게 문의하세요.');
+  try {
+    const issued = await API.invokeFunction(_PROJECT_OUTPUT_URL_ISSUE_FN, {
+      output_id: id,
+      request_type: type,
+      actor_user_id: _projectOutputsCurrentUserId(session),
+      actor_user_name: String(session?.name || session?.user_name || ''),
+      actor_role: String(session?.role || ''),
+      project_code: String(row.project_code || ''),
+      output_file_path: storagePath,
+      output_file_name: String(row.output_file_name || ''),
+      preview_file_path: String(row.preview_file_path || ''),
+      preview_ready: !!row.preview_ready,
+      user_agent: String(navigator.userAgent || '').slice(0, 500),
+    });
+    const signedUrl = String(issued && (issued.signed_url || issued.url) || '').trim();
+    if (!signedUrl) throw new Error('서명 URL 발급 결과가 비어 있습니다.');
+    if (type === 'download') {
+      const a = document.createElement('a');
+      a.href = signedUrl;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.download = String(row.output_file_name || 'project-output');
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      return;
+    }
+    window.open(signedUrl, '_blank', 'noopener');
+  } catch (e) {
+    console.error('[project-output-url-issue] failed', e);
+    Toast.error(
+      `보안 URL 발급 실패: ${e.message || e}. ` +
+      `Edge Function(${_PROJECT_OUTPUT_URL_ISSUE_FN}) 배포 및 스토리지 private 설정을 확인하세요.`
+    );
+  }
+}
+
+async function _projectOutputsCheckBulkAccessAlert(session) {
+  if (!session) return;
+  const uid = _projectOutputsCurrentUserId(session);
+  if (!uid) return;
+  const { from, to } = _projectOutputsDayRangeMs();
+  const logs = await API.listAllPages('project_output_access_logs', {
+    filter: `actor_user_id=eq.${uid}&occurred_at=gte.${from}&occurred_at=lt.${to}`,
+    limit: 1000,
+    maxPages: 5,
+    sort: 'occurred_at',
+  }).catch(() => []);
+  const cnt = (logs || []).filter((l) => {
+    const t = String(l.event_type || '').trim();
+    return t === 'view' || t === 'download';
+  }).length;
+  if (cnt < _PROJECT_OUTPUT_BULK_DAILY_THRESHOLD) return;
+  if (typeof createNotification !== 'function') return;
+  const stamp = new Date(from).toISOString().slice(0, 10).replace(/-/g, '');
+  const entryId = `bulk:${uid}:${stamp}`;
+  const exists = await API.listAllPages('notifications', {
+    filter: `type=eq.project_output_bulk_access_alert&entry_id=eq.${entryId}`,
+    limit: 10,
+    maxPages: 1,
+    sort: 'created_at',
+  }).catch(() => []);
+  if ((exists || []).length > 0) return;
+  const deptId = String(session.dept_id || '').trim();
+  const topMgrs = (_PROJECT_OUTPUTS_STATE.users || []).filter((u) =>
+    String(u.role || '').trim() === 'top_mgr' &&
+    deptId &&
+    String(u.dept_id || '').trim() === deptId
+  );
+  await Promise.allSettled(topMgrs.map((u) => createNotification({
+    toUserId: String(u.id || ''),
+    toUserName: String(u.name || ''),
+    fromUserId: uid,
+    fromUserName: String(session.name || session.user_name || ''),
+    type: 'project_output_bulk_access_alert',
+    entryId,
+    entrySummary: `${String(session.name || session.user_name || '-')}/${cnt}건`,
+    message: `${String(session.name || '사용자')}님의 당일 결과물 접근이 ${cnt}건입니다. (기준 ${_PROJECT_OUTPUT_BULK_DAILY_THRESHOLD}건)`,
+    targetMenu: 'project-deliverables',
+  })));
+}
+
+async function openProjectOutputAccessRequestModal(outputId, requestType, outputIds) {
+  const id = String(outputId || '').trim();
+  const type = String(requestType || '').trim();
+  if (!type) return;
+  const session = getSession();
+  const canAction = type === 'download'
+    ? _projectOutputsCanPortalAction(session, 'download')
+    : _projectOutputsCanPortalAction(session, 'export');
+  if (!canAction) {
+    Toast.warning(type === 'download' ? '다운로드 신청 권한이 없습니다.' : '열람(출력) 신청 권한이 없습니다.');
+    return;
+  }
+  const ids = (Array.isArray(outputIds) ? outputIds : [id])
+    .map((v) => String(v || '').trim())
+    .filter(Boolean);
+  if (!ids.length) return Toast.warning('신청 대상을 찾을 수 없습니다.');
+  let rows = (_PROJECT_OUTPUTS_STATE.outputRows || []).filter((r) => ids.includes(String(r.id || '').trim()));
+  if (!rows.length && ids.length === 1) {
+    rows = await API.listAllPages('project_outputs', {
+      filter: `id=eq.${ids[0]}`,
+      limit: 1,
+      maxPages: 1,
+      sort: 'uploaded_at',
+    }).catch(() => []);
+  }
+  const targets = Array.isArray(rows) ? rows : [];
+  if (!targets.length) return Toast.warning('신청 대상을 찾을 수 없습니다.');
+  const invalidMsg = _projectOutputsValidateBulkRequest(type, targets);
+  if (invalidMsg) return Toast.warning(invalidMsg);
+  const firstRow = targets[0];
+  const cat = _projectOutputsCategoryForOutput(firstRow);
+  const hidId = document.getElementById('proj-out-access-output-id');
+  const hidIds = document.getElementById('proj-out-access-output-ids');
+  const hidType = document.getElementById('proj-out-access-request-type');
+  const summary = document.getElementById('proj-out-access-summary');
+  const typeLabel = document.getElementById('proj-out-access-type-label');
+  const main = document.getElementById('proj-out-access-main');
+  const sub = document.getElementById('proj-out-access-sub');
+  const reason = document.getElementById('proj-out-access-reason');
+  if (hidId) hidId.value = String(firstRow.id || '');
+  if (hidIds) hidIds.value = ids.join(',');
+  if (hidType) hidType.value = type;
+  if (summary) {
+    if (targets.length === 1) summary.textContent = `${firstRow.project_code || ''} · ${firstRow.output_title || ''}`;
+    else summary.textContent = `${targets.length}건 선택됨 (${cat.main || '-'} / ${cat.sub || '-'})`;
+  }
+  if (typeLabel) typeLabel.value = type === 'download'
+    ? (targets.length > 1 ? `다운로드 복수 신청 (${targets.length}건)` : '다운로드 신청')
+    : (targets.length > 1 ? `열람 복수 신청 (${targets.length}건)` : '열람 신청');
+  if (main) main.value = String(cat.main || '-');
+  if (sub) sub.value = String(cat.sub || '-');
+  if (reason) reason.value = '';
+  openModal('projOutAccessReqModal');
+}
+
+async function submitProjectOutputAccessRequest() {
+  const session = getSession();
+  const outputId = String(document.getElementById('proj-out-access-output-id')?.value || '').trim();
+  const outputIdsRaw = String(document.getElementById('proj-out-access-output-ids')?.value || '').trim();
+  const requestType = String(document.getElementById('proj-out-access-request-type')?.value || '').trim();
+  const reason = String(document.getElementById('proj-out-access-reason')?.value || '').trim();
+  const outputIds = (outputIdsRaw || outputId).split(',').map((v) => String(v || '').trim()).filter(Boolean);
+  const canAction = requestType === 'download'
+    ? _projectOutputsCanPortalAction(session, 'download')
+    : _projectOutputsCanPortalAction(session, 'export');
+  if (!canAction) {
+    return Toast.warning(requestType === 'download' ? '다운로드 신청 권한이 없습니다.' : '열람(출력) 신청 권한이 없습니다.');
+  }
+  if (!outputIds.length) return Toast.warning('신청 대상이 없습니다.');
+  if (!reason) return Toast.warning('신청사유를 입력하세요.');
+  const me = _projectOutputsCurrentUserId(session);
+  if (!me) return Toast.warning('세션 정보를 찾지 못했습니다.');
+  let rows = (_PROJECT_OUTPUTS_STATE.outputRows || []).filter((r) => outputIds.includes(String(r.id || '').trim()));
+  if (!rows.length) {
+    const loaded = await Promise.all(outputIds.map((id) => API.listAllPages('project_outputs', {
+      filter: `id=eq.${id}`,
+      limit: 1,
+      maxPages: 1,
+      sort: 'uploaded_at',
+    }).catch(() => [])));
+    rows = loaded.map((arr) => (arr || [])[0]).filter(Boolean);
+  }
+  const targets = Array.isArray(rows) ? rows : [];
+  if (!targets.length) return Toast.warning('대상 결과물을 찾을 수 없습니다.');
+  const invalidMsg = _projectOutputsValidateBulkRequest(requestType, targets);
+  if (invalidMsg) return Toast.warning(invalidMsg);
+  const firstRow = targets[0];
+  const project = _projectOutputsProjectByCode(firstRow.project_code);
+  const cat = _projectOutputsCategoryForOutput(firstRow);
+  const approver = (_PROJECT_OUTPUTS_STATE.users || []).find((u) =>
+    String(u.role || '').trim() === 'director' &&
+    String(u.hq_id || '').trim() &&
+    String(u.hq_id || '').trim() === String(session?.hq_id || '').trim()
+  ) || null;
+  if (!approver) return Toast.warning('소속 본부장을 찾지 못했습니다. 관리자에게 문의하세요.');
+  const now = Date.now();
+  const accessRows = Array.isArray(_PROJECT_OUTPUTS_STATE.accessRequests) ? _PROJECT_OUTPUTS_STATE.accessRequests : [];
+  const targetsToCreate = [];
+  let pendingDupCnt = 0;
+  targets.forEach((row) => {
+    const targetId = String(row.id || '').trim();
+    const dup = accessRows.find((r) =>
+      String(r.output_id || '').trim() === targetId &&
+      String(r.request_type || '').trim() === requestType &&
+      String(r.requester_user_id || '').trim() === me &&
+      ['pending', 'approved'].includes(String(r.status || '').trim())
+    );
+    if (dup && String(dup.status || '').trim() === 'pending') pendingDupCnt += 1;
+    if (!dup) targetsToCreate.push(row);
+  });
+  if (!targetsToCreate.length) {
+    return Toast.warning(pendingDupCnt > 0 ? '선택 건에 이미 승인 대기 중인 신청이 있습니다.' : '이미 유효한 접근 권한이 있는 건입니다.');
+  }
+  try {
+    await Promise.all(targetsToCreate.map((row) => {
+      const rowCat = _projectOutputsCategoryForOutput(row);
+      return API.create('project_output_access_requests', {
+        output_id: String(row.id || ''),
+        project_code: String(row.project_code || ''),
+        output_title: String(row.output_title || ''),
+        request_type: requestType,
+        requester_user_id: me,
+        requester_user_name: String(session?.name || session?.user_name || ''),
+        requester_hq_id: String(session?.hq_id || ''),
+        requester_dept_id: String(session?.dept_id || ''),
+        approver_user_id: String(approver.id || ''),
+        approver_user_name: String(approver.name || ''),
+        scope_main_category: String(rowCat.main || ''),
+        scope_sub_category: String(rowCat.sub || ''),
+        request_reason: reason,
+        status: 'pending',
+        requested_at: now,
+        expires_at: now + _PROJECT_OUTPUT_ACCESS_VALID_MS,
+      });
+    }));
+    if (typeof createNotification === 'function') {
+      createNotification({
+        toUserId: String(approver.id || ''),
+        toUserName: String(approver.name || ''),
+        fromUserId: me,
+        fromUserName: String(session?.name || session?.user_name || ''),
+        type: 'project_output_access_request',
+        entryId: `bulk:${requestType}:${me}:${now}`,
+        entrySummary: `${String(project?.project_code || firstRow.project_code || '')} / ${String(cat.main || '-')}/${String(cat.sub || '-')} / ${targetsToCreate.length}건`,
+        message: `${String(session?.name || '사용자')}님이 ${requestType === 'download' ? '다운로드' : '열람'} 권한을 ${targetsToCreate.length}건 신청했습니다.`,
+        targetMenu: 'project-deliverables',
+      });
+    }
+    closeModal('projOutAccessReqModal');
+    Toast.success(`접근 신청이 ${targetsToCreate.length}건 등록되었습니다. (승인 유효기간 1일)`);
+    await _projectOutputsLoadMyAccessRequests();
+    await _projectOutputsLoadApprovalQueue();
+    await _projectOutputsLoadList();
+  } catch (e) {
+    console.error(e);
+    Toast.error('접근 신청 실패: ' + (e.message || e));
+  }
+}
+
+async function _projectOutputsLoadApprovalQueue() {
+  const session = getSession();
+  const wrap = document.getElementById('proj-out-approval-wrap');
+  const body = document.getElementById('proj-out-approval-body');
+  if (!wrap || !body) return;
+  const canApprove = !!(session && (Auth.isDirector(session) || Auth.isAdmin(session) || Auth.isTopMgr(session)));
+  wrap.style.display = canApprove ? '' : 'none';
+  if (!canApprove) return;
+  let filter = 'status=eq.pending';
+  if (Auth.isDirector(session)) {
+    const me = _projectOutputsCurrentUserId(session);
+    filter = `status=eq.pending&approver_user_id=eq.${me}`;
+  }
+  const rows = await API.listAllPages('project_output_access_requests', {
+    filter,
+    limit: 300,
+    maxPages: 5,
+    sort: 'requested_at',
+  }).catch((e) => {
+    const msg = String(e && e.message || '');
+    if (/project_output_access_requests|relation|schema cache/i.test(msg)) {
+      body.innerHTML = '<tr><td colspan="8" class="table-empty"><i class="fas fa-database"></i><p>접근신청 테이블이 필요합니다.</p></td></tr>';
+      return [];
+    }
+    throw e;
+  });
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) {
+    body.innerHTML = '<tr><td colspan="8" class="table-empty"><i class="fas fa-inbox"></i><p>대기중인 신청이 없습니다.</p></td></tr>';
+    return;
+  }
+  body.innerHTML = list.map((r) => `
+    <tr>
+      <td style="text-align:center">${escapeHtml(String(r.request_type || '') === 'download' ? '다운로드' : '열람')}</td>
+      <td>${escapeHtml(r.requester_user_name || '')}</td>
+      <td>${escapeHtml(r.project_code || '')}</td>
+      <td>${escapeHtml(r.scope_main_category || '')}</td>
+      <td>${escapeHtml(r.scope_sub_category || '')}</td>
+      <td>${escapeHtml(r.request_reason || '-')}</td>
+      <td style="text-align:center">${_projectOutputsFmtDate(r.requested_at)}</td>
+      <td style="text-align:center;white-space:nowrap">
+        <button type="button" class="btn btn-xs btn-ghost po-action-btn" onclick="approveProjectOutputAccessRequest('${escapeHtml(r.id || '')}')">승인</button>
+        <button type="button" class="btn btn-xs btn-ghost po-action-btn po-action-btn-danger" onclick="rejectProjectOutputAccessRequest('${escapeHtml(r.id || '')}')">반려</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function approveProjectOutputAccessRequest(requestId) {
+  const id = String(requestId || '').trim();
+  if (!id) return;
+  const session = getSession();
+  const now = Date.now();
+  try {
+    await API.patch('project_output_access_requests', id, {
+      status: 'approved',
+      approved_at: now,
+      approved_by: _projectOutputsCurrentUserId(session),
+      approved_by_name: String(session?.name || session?.user_name || ''),
+      expires_at: now + _PROJECT_OUTPUT_ACCESS_VALID_MS,
+    });
+    await _projectOutputsNotifyAccessDecision(id, true);
+    Toast.success('승인되었습니다. (유효기간 1일)');
+    await _projectOutputsLoadMyAccessRequests();
+    await _projectOutputsLoadApprovalQueue();
+    await _projectOutputsLoadList();
+  } catch (e) {
+    Toast.error('승인 처리 실패: ' + (e.message || e));
+  }
+}
+
+async function rejectProjectOutputAccessRequest(requestId) {
+  const id = String(requestId || '').trim();
+  if (!id) return;
+  const session = getSession();
+  const reason = String(window.prompt('반려 사유를 입력하세요.', '') || '').trim();
+  try {
+    await API.patch('project_output_access_requests', id, {
+      status: 'rejected',
+      approved_at: Date.now(),
+      approved_by: _projectOutputsCurrentUserId(session),
+      approved_by_name: String(session?.name || session?.user_name || ''),
+      decision_note: reason,
+    });
+    await _projectOutputsNotifyAccessDecision(id, false, reason);
+    Toast.success('반려 처리되었습니다.');
+    await _projectOutputsLoadApprovalQueue();
+  } catch (e) {
+    Toast.error('반려 처리 실패: ' + (e.message || e));
+  }
+}
+
+async function _projectOutputsNotifyAccessDecision(requestId, approved, reason = '') {
+  if (typeof createNotification !== 'function') return;
+  const rows = await API.listAllPages('project_output_access_requests', {
+    filter: `id=eq.${requestId}`,
+    limit: 1,
+    maxPages: 1,
+    sort: 'updated_at',
+  }).catch(() => []);
+  const row = (rows || [])[0] || null;
+  if (!row) return;
+  createNotification({
+    toUserId: String(row.requester_user_id || ''),
+    toUserName: String(row.requester_user_name || ''),
+    fromUserId: String(row.approved_by || ''),
+    fromUserName: String(row.approved_by_name || ''),
+    type: 'project_output_access_decision',
+    entryId: String(requestId || ''),
+    entrySummary: `${String(row.project_code || '')} / ${String(row.scope_main_category || '-')}/${String(row.scope_sub_category || '-')}`,
+    message: approved
+      ? `${String(row.request_type || '') === 'download' ? '다운로드' : '열람'} 신청이 승인되었습니다. (유효기간 1일)`
+      : `${String(row.request_type || '') === 'download' ? '다운로드' : '열람'} 신청이 반려되었습니다.${reason ? ` 사유: ${reason}` : ''}`,
+    targetMenu: 'project-deliverables',
+  });
+}
+
+async function openProjectOutputMyRequests() {
+  await _projectOutputsLoadMyAccessRequests();
+  const mine = (_PROJECT_OUTPUTS_STATE.accessRequests || [])
+    .sort((a, b) => Number(b.requested_at || b.created_at || 0) - Number(a.requested_at || a.created_at || 0))
+    .slice(0, 20);
+  if (!mine.length) {
+    Toast.info('최근 신청 내역이 없습니다.');
+    return;
+  }
+  const lines = mine.map((r) => {
+    const type = String(r.request_type || '') === 'download' ? '다운로드' : '열람';
+    const st = String(r.status || '');
+    const statusLabel = st === 'approved' ? '승인' : (st === 'rejected' ? '반려' : (st === 'expired' ? '만료' : '대기'));
+    return `${type} | ${String(r.project_code || '')} | ${String(r.scope_main_category || '-')}/${String(r.scope_sub_category || '-')} | ${statusLabel} | ${_projectOutputsFmtDate(r.requested_at)}`;
+  });
+  window.alert(['[최근 결과물 접근 신청]', ...lines].join('\n'));
+}
+
 async function _projectOutputsUpload() {
   const session = getSession();
-  const projectEl = document.getElementById('proj-out-project');
-  const typeEl = document.getElementById('proj-out-type');
-  const titleEl = document.getElementById('proj-out-title');
-  const noteEl = document.getElementById('proj-out-note');
-  const fileEl = document.getElementById('proj-out-file');
-  const btn = document.getElementById('proj-out-upload-btn');
-  if (!projectEl || !typeEl || !titleEl || !fileEl) return;
+  const mainEl = document.getElementById('proj-out-new-main-category');
+  const subEl = document.getElementById('proj-out-new-sub-category');
+  const titleEl = document.getElementById('proj-out-new-title');
+  const noteEl = document.getElementById('proj-out-new-note');
+  const fileEl = document.getElementById('proj-out-new-file');
+  const btn = document.getElementById('proj-out-new-upload-btn');
+  if (!mainEl || !subEl || !titleEl || !fileEl) return;
 
-  const projectCode = String(projectEl.value || '').trim();
-  const outputType = String(typeEl.value || '').trim();
+  const mainCategory = String(mainEl.value || '').trim();
+  const subCategory = String(subEl.value || '').trim();
+  const outputType = _PROJECT_OUTPUT_TYPE_REFERENCE;
   const outputTitle = String(titleEl.value || '').trim();
   const note = String((noteEl && noteEl.value) || '').trim();
   const file = fileEl.files && fileEl.files[0];
-  if (!projectCode) return Toast.warning('프로젝트를 선택해주세요.');
+  if (!mainCategory) return Toast.warning('프로젝트 대분류를 선택해주세요.');
+  if (!subCategory) return Toast.warning('프로젝트 소분류를 선택해주세요.');
   if (!outputTitle) return Toast.warning('결과물 제목을 입력해주세요.');
   if (!file) return Toast.warning('업로드할 파일을 선택해주세요.');
-  const project = (_PROJECT_OUTPUTS_STATE.projects || []).find((p) => String(p.project_code || '') === projectCode);
-  if (!project) return Toast.warning('유효한 프로젝트를 다시 선택해주세요.');
-  if (!_projectOutputsCanUpload(session, project)) {
-    return Toast.warning('해당 프로젝트 결과물 업로드 권한이 없습니다.');
-  }
 
   const prevText = btn ? btn.innerHTML : '';
   if (btn) {
@@ -5740,40 +6684,66 @@ async function _projectOutputsUpload() {
     const ext = String(file.name || '').split('.').pop() || 'bin';
     const stem = _projectOutputsSafeSegment(String(file.name || '').replace(/\.[^.]*$/, ''));
     const uniq = Math.random().toString(36).slice(2, 8);
-    const path = `project-outputs/${yyyy}/${mm}/${_projectOutputsSafeSegment(projectCode)}/${now}_${uniq}_${stem}.${ext}`;
+    const pathCode = `${mainCategory}-${subCategory}` || 'manual-reference';
+    const path = `project-outputs/${yyyy}/${mm}/${_projectOutputsSafeSegment(pathCode)}/${now}_${uniq}_${stem}.${ext}`;
     const up = await API.storageUpload(_PROJECT_OUTPUTS_BUCKET, path, file, { upsert: false });
 
     const payload = {
-      project_id: String(project.id || ''),
-      project_code: String(project.project_code || ''),
-      project_name: String(project.project_name || ''),
-      output_type: outputType || '기타',
+      project_id: '',
+      project_code: '',
+      project_name: '',
+      output_type: outputType || _PROJECT_OUTPUT_TYPE_REFERENCE,
+      output_main_category: mainCategory,
+      output_sub_category: subCategory,
       output_title: outputTitle,
       output_file_name: String(file.name || ''),
       output_file_url: String((up && up.publicUrl) || ''),
+      output_file_path: String((up && up.path) || ''),
+      preview_file_path: '',
+      preview_ready: false,
+      preview_version: 1,
       uploaded_by: String(session.user_id || session.id || ''),
       uploaded_by_name: String(session.name || session.user_name || ''),
       uploaded_at: now,
       note,
+      publish_status: 'published',
+      publish_approved_at: now,
+      publish_approved_by_name: String(session.name || session.user_name || ''),
     };
-    await API.create('project_outputs', payload);
+    let created = null;
+    try {
+      created = await API.create('project_outputs', payload);
+    } catch (createErr) {
+      const msg = String(createErr && createErr.message || '');
+      const fallbackPayload = { ...payload };
+      if (/publish_status|publish_approved/i.test(msg)) {
+        delete fallbackPayload.publish_status;
+        delete fallbackPayload.publish_approved_at;
+        delete fallbackPayload.publish_approved_by_name;
+      }
+      if (/output_main_category|output_sub_category|column/i.test(msg)) {
+        delete fallbackPayload.output_main_category;
+        delete fallbackPayload.output_sub_category;
+        const catLine = `[분류] 대분류:${mainCategory} / 소분류:${subCategory}`;
+        fallbackPayload.note = note ? `${catLine}\n${note}` : catLine;
+      }
+      created = await API.create('project_outputs', fallbackPayload);
+    }
 
-    const patch = {
-      lifecycle_updated_at: now,
-      lifecycle_updated_by: String(session.user_id || session.id || ''),
-      lifecycle_updated_by_name: String(session.name || session.user_name || ''),
-    };
-    if (!Number(project.work_closed_at || 0)) patch.work_closed_at = now;
-    await API.patch('registered_projects', project.id, patch);
+    await _projectOutputsPersistRagSeed(created || payload, session);
 
+    if (mainEl) mainEl.value = '';
+    if (subEl) subEl.value = '';
     if (titleEl) titleEl.value = '';
     if (noteEl) noteEl.value = '';
     if (fileEl) fileEl.value = '';
-    Toast.success('결과물이 저장되었습니다.');
+    _projectOutputsSyncNewCategoryOptions();
+    closeModal('projOutNewModal');
+    Toast.success('참고자료가 저장되었습니다.');
     await _projectOutputsLoadList();
   } catch (e) {
     console.error('[project-outputs] upload failed', e);
-    Toast.error(e.message || '결과물 업로드 실패');
+    Toast.error(e.message || '참고자료 업로드 실패');
   } finally {
     if (btn) {
       btn.disabled = false;
@@ -5782,26 +6752,191 @@ async function _projectOutputsUpload() {
   }
 }
 
-function init_project_deliverables() {
+function openProjectOutputNewModal() {
   const session = getSession();
   if (!Auth.canViewProjectDeliverables(session)) {
-    navigateTo('dashboard');
-    Toast.warning('프로젝트 산출물 열람 권한이 없습니다.');
+    Toast.warning('직접등록 권한이 없습니다.');
     return;
   }
-  const monthEl = document.getElementById('proj-out-month');
-  if (monthEl && !monthEl.value) {
+  const mainEl = document.getElementById('proj-out-new-main-category');
+  const subEl = document.getElementById('proj-out-new-sub-category');
+  const titleEl = document.getElementById('proj-out-new-title');
+  const noteEl = document.getElementById('proj-out-new-note');
+  const fileEl = document.getElementById('proj-out-new-file');
+  if (mainEl) mainEl.value = '';
+  if (subEl) subEl.value = '';
+  _projectOutputsSyncNewCategoryOptions();
+  if (titleEl) titleEl.value = '';
+  if (noteEl) noteEl.value = '';
+  if (fileEl) fileEl.value = '';
+  openModal('projOutNewModal');
+}
+
+async function openProjectOutputActionModal(outputId) {
+  const id = String(outputId || '').trim();
+  if (!id) return;
+  const session = getSession();
+  const rowRes = await API.list('project_outputs', {
+    select: 'id,project_code,project_name,output_type,output_title',
+    id: `eq.${id}`,
+    limit: 1,
+  }).catch(() => []);
+  const output = Array.isArray(rowRes) ? rowRes[0] : null;
+  if (!output) {
+    Toast.warning('유의사항 정보를 찾을 수 없습니다.');
+    return;
+  }
+  const project = (_PROJECT_OUTPUTS_STATE.projects || []).find((p) => String(p.project_code || '') === String(output.project_code || '')) || null;
+  if (!_projectOutputsCanAction(session, project)) {
+    Toast.warning('조치 등록 권한이 없습니다.');
+    return;
+  }
+  const hid = document.getElementById('proj-out-action-output-id');
+  const summary = document.getElementById('proj-out-action-output-summary');
+  const statusEl = document.getElementById('proj-out-action-status');
+  const noteEl = document.getElementById('proj-out-action-note');
+  if (hid) hid.value = id;
+  if (summary) summary.textContent = `${output.project_code || ''} · ${output.output_title || ''}`;
+  if (statusEl) statusEl.value = 'confirmed';
+  if (noteEl) noteEl.value = '';
+  await _projectOutputsRenderActionHistory(id);
+  openModal('projOutActionModal');
+}
+
+async function _projectOutputsRenderActionHistory(outputId) {
+  const wrap = document.getElementById('proj-out-action-history');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="color:var(--text-muted)">조치 이력을 불러오는 중...</div>';
+  try {
+    const rows = await API.listAllPages('project_output_actions', { limit: 500, maxPages: 5, sort: 'updated_at' });
+    const scoped = (rows || [])
+      .filter((r) => String(r.output_id || '').trim() === String(outputId || '').trim())
+      .sort((a, b) => Number(b.updated_at || b.created_at || 0) - Number(a.updated_at || a.created_at || 0));
+    if (!scoped.length) {
+      wrap.innerHTML = '<div style="color:var(--text-muted)">등록된 조치 이력이 없습니다.</div>';
+      return;
+    }
+    wrap.innerHTML = scoped.map((r) => `
+      <div style="border:1px solid var(--border-light);border-radius:8px;padding:8px 10px;margin-top:6px">
+        <div style="font-size:11px;color:var(--text-muted);display:flex;justify-content:space-between">
+          <span>${escapeHtml(r.action_user_name || '-')} · ${escapeHtml(_projectOutputsActionStatusLabel(r.action_status))}</span>
+          <span>${_projectOutputsFmtDate(r.action_at || r.updated_at || r.created_at)}</span>
+        </div>
+        <div style="font-size:12px;line-height:1.45;margin-top:4px;color:var(--text-secondary)">${escapeHtml(r.action_note || '-')}</div>
+      </div>
+    `).join('');
+  } catch (e) {
+    wrap.innerHTML = '<div style="color:var(--danger)">조치 이력을 불러올 수 없습니다. (DB 스키마 확인 필요)</div>';
+  }
+}
+
+async function saveProjectOutputAction() {
+  const session = getSession();
+  const outputId = String(document.getElementById('proj-out-action-output-id')?.value || '').trim();
+  const status = String(document.getElementById('proj-out-action-status')?.value || 'confirmed').trim();
+  const note = String(document.getElementById('proj-out-action-note')?.value || '').trim();
+  if (!outputId) {
+    Toast.warning('대상 유의사항이 없습니다.');
+    return;
+  }
+  if (!note) {
+    Toast.warning('조치내용을 입력하세요.');
+    return;
+  }
+  const outputRows = await API.list('project_outputs', { select: 'id,project_code', id: `eq.${outputId}`, limit: 1 }).catch(() => []);
+  const output = Array.isArray(outputRows) ? outputRows[0] : null;
+  const project = (_PROJECT_OUTPUTS_STATE.projects || []).find((p) => String(p.project_code || '') === String((output && output.project_code) || '')) || null;
+  if (!_projectOutputsCanAction(session, project)) {
+    Toast.warning('조치 등록 권한이 없습니다.');
+    return;
+  }
+  try {
+    const me = String(session.user_id || session.id || '');
+    const all = await API.listAllPages('project_output_actions', { limit: 500, maxPages: 5, sort: 'updated_at' }).catch(() => []);
+    const hit = (all || []).find((r) => String(r.output_id || '') === outputId && String(r.action_user_id || '') === me);
+    const payload = {
+      output_id: outputId,
+      project_code: String((output && output.project_code) || ''),
+      action_user_id: me,
+      action_user_name: String(session.name || session.user_name || ''),
+      action_role: String(session.role || ''),
+      action_status: status,
+      action_note: note,
+      action_at: Date.now(),
+      updated_at: Date.now(),
+    };
+    if (hit && hit.id) await API.patch('project_output_actions', hit.id, payload);
+    else await API.create('project_output_actions', payload);
+    Toast.success('조치사항이 저장되었습니다.');
+    await _projectOutputsRenderActionHistory(outputId);
+    await _projectOutputsLoadList();
+  } catch (e) {
+    console.error(e);
+    Toast.error('조치 저장 실패: project_output_actions 테이블/권한을 확인하세요.');
+  }
+}
+
+function init_project_deliverables() {
+  const session = getSession();
+  const canExportAction = _projectOutputsCanPortalAction(session, 'export');
+  const canDownloadAction = _projectOutputsCanPortalAction(session, 'download');
+  const fromEl = document.getElementById('proj-out-date-from');
+  const toEl = document.getElementById('proj-out-date-to');
+  if (fromEl && !fromEl.value) {
     const d = new Date();
-    monthEl.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const first = new Date(d.getFullYear(), d.getMonth(), 1);
+    fromEl.value = first.toISOString().slice(0, 10);
+  }
+  if (toEl && !toEl.value) {
+    const d = new Date();
+    toEl.value = d.toISOString().slice(0, 10);
   }
   if (!_PROJECT_OUTPUTS_STATE.initialized) {
     document.getElementById('proj-out-refresh-btn')?.addEventListener('click', _projectOutputsLoadList);
-    document.getElementById('proj-out-month')?.addEventListener('change', _projectOutputsLoadList);
+    document.getElementById('proj-out-date-from')?.addEventListener('change', _projectOutputsLoadList);
+    document.getElementById('proj-out-date-to')?.addEventListener('change', _projectOutputsLoadList);
+    document.getElementById('proj-out-kind-filter')?.addEventListener('change', _projectOutputsLoadList);
     document.getElementById('proj-out-project')?.addEventListener('change', _projectOutputsLoadList);
-    document.getElementById('proj-out-upload-btn')?.addEventListener('click', _projectOutputsUpload);
+    document.getElementById('proj-out-main-category')?.addEventListener('change', () => {
+      _projectOutputsSyncCategoryFilters();
+      _projectOutputsLoadList();
+    });
+    document.getElementById('proj-out-sub-category')?.addEventListener('change', _projectOutputsLoadList);
+    document.getElementById('proj-out-uploader')?.addEventListener('input', _projectOutputsLoadList);
+    document.getElementById('proj-out-new-main-category')?.addEventListener('change', _projectOutputsSyncNewCategoryOptions);
+    document.getElementById('proj-out-my-requests-btn')?.addEventListener('click', openProjectOutputMyRequests);
+    document.getElementById('proj-out-new-btn')?.addEventListener('click', openProjectOutputNewModal);
+    document.getElementById('proj-out-new-upload-btn')?.addEventListener('click', _projectOutputsUpload);
+    document.getElementById('proj-out-bulk-view-btn')?.addEventListener('click', () => openProjectOutputBulkAccessRequest('view'));
+    document.getElementById('proj-out-bulk-download-btn')?.addEventListener('click', () => openProjectOutputBulkAccessRequest('download'));
+    document.getElementById('proj-out-select-all')?.addEventListener('change', (e) => {
+      const checked = !!(e && e.target && e.target.checked);
+      Array.from(document.querySelectorAll('#proj-out-body .proj-out-select-row')).forEach((el) => {
+        el.checked = checked;
+      });
+      _projectOutputsSyncSelectionUi();
+    });
+    document.getElementById('proj-out-approval-refresh-btn')?.addEventListener('click', _projectOutputsLoadApprovalQueue);
     _PROJECT_OUTPUTS_STATE.initialized = true;
   }
-  _projectOutputsLoadProjects()
+  const msg = document.getElementById('proj-out-summary');
+  if (msg) {
+    if (!canExportAction && !canDownloadAction) {
+      msg.textContent = '열람(출력)/다운로드 권한이 없습니다. 권한관리에서 액션 권한을 설정하세요.';
+    } else if (Auth.canViewProjectDeliverables(session)) {
+      msg.textContent = '게시 승인된 결과보고서를 열람/다운로드할 수 있습니다.';
+    } else {
+      msg.textContent = '권한이 없으면 대/소분류 범위로 열람/다운로드 신청 후 이용 가능합니다.';
+    }
+  }
+  const bulkViewBtn = document.getElementById('proj-out-bulk-view-btn');
+  const bulkDownloadBtn = document.getElementById('proj-out-bulk-download-btn');
+  if (bulkViewBtn) bulkViewBtn.style.display = canExportAction ? '' : 'none';
+  if (bulkDownloadBtn) bulkDownloadBtn.style.display = canDownloadAction ? '' : 'none';
+  _projectOutputsLoadUsersAndCodeTypes()
+    .then(_projectOutputsLoadProjects)
+    .then(_projectOutputsLoadMyAccessRequests)
+    .then(_projectOutputsLoadApprovalQueue)
     .then(_projectOutputsLoadList)
     .catch((e) => {
       console.error('[project-outputs] init failed', e);

@@ -15,6 +15,11 @@ function _pcmNormCode(s) {
   return String(s || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
+function _pcmBoolYN(v) {
+  const t = String(v == null ? '' : v).trim().toLowerCase();
+  return t === 'y' || t === 'yes' || t === '1' || t === 'true' || t === '필수' || t === '해당';
+}
+
 async function init_master_project_codes() {
   const session = getSession();
   if (!_pcmCanManage(session)) {
@@ -76,7 +81,7 @@ function renderProjectCodeTypes() {
   const rows = _pcmGetFilteredRows();
 
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="table-empty"><i class="fas fa-code"></i><p>등록된 프로젝트 코드 유형이 없습니다.</p></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="table-empty"><i class="fas fa-code"></i><p>등록된 프로젝트 코드 유형이 없습니다.</p></td></tr>';
     return;
   }
 
@@ -87,6 +92,7 @@ function renderProjectCodeTypes() {
       <td>${Utils.escHtml(r.sub_category || '')}</td>
       <td><strong>${Utils.escHtml(r.sub_code || '')}</strong></td>
       <td>${Utils.escHtml(r.project_name_en || '')}</td>
+      <td style="text-align:center">${r.requires_clearance_note ? '<span class="status-badge status-pending">필수</span>' : '<span style="color:var(--text-muted)">-</span>'}</td>
       <td style="font-size:11px;color:var(--text-muted)">${Utils.escHtml(r.main_code || '')}_${Utils.escHtml(r.sub_code || '')}_<strong>YYMM</strong>_01</td>
       <td style="text-align:center">
         <div style="display:flex;gap:6px;justify-content:center">
@@ -105,6 +111,7 @@ function openProjectCodeModal(id) {
   document.getElementById('project-code-sub-cat').value = '';
   document.getElementById('project-code-sub-code').value = '';
   document.getElementById('project-code-name-en').value = '';
+  document.getElementById('project-code-requires-clearance').checked = false;
   document.getElementById('projectCodeModalTitle').textContent = id ? '프로젝트 Code 행 수정' : '프로젝트 Code 행 추가';
   if (id) {
     const r = _pcmRows.find((x) => x.id === id);
@@ -114,6 +121,7 @@ function openProjectCodeModal(id) {
       document.getElementById('project-code-sub-cat').value = r.sub_category || '';
       document.getElementById('project-code-sub-code').value = r.sub_code || '';
       document.getElementById('project-code-name-en').value = r.project_name_en || '';
+      document.getElementById('project-code-requires-clearance').checked = !!r.requires_clearance_note;
     }
   }
   openModal('projectCodeModal');
@@ -132,6 +140,7 @@ async function saveProjectCodeType() {
   const subCat = document.getElementById('project-code-sub-cat').value.trim();
   const subCode = _pcmNormCode(document.getElementById('project-code-sub-code').value);
   const nameEn = document.getElementById('project-code-name-en').value.trim();
+  const requiresClearance = !!document.getElementById('project-code-requires-clearance').checked;
 
   if (!mainCat || !mainCode || !subCat || !subCode || !nameEn) {
     Toast.warning('모든 필드를 입력하세요.');
@@ -158,6 +167,7 @@ async function saveProjectCodeType() {
     sub_category: subCat,
     sub_code: subCode,
     project_name_en: nameEn,
+    requires_clearance_note: requiresClearance,
   };
 
   try {
@@ -227,6 +237,7 @@ async function uploadProjectCodeTypes() {
       const subCat = String(row['소분류'] || row.sub_category || '').trim();
       const subCode = _pcmNormCode(row['소분류Code'] || row.sub_code || '');
       const nameEn = String(row['프로젝트명'] || row.project_name_en || row['프로젝트명(EN)'] || '').trim();
+      const reqClearance = _pcmBoolYN(row['통관유의사항필수'] ?? row.requires_clearance_note ?? row['유의사항필수']);
       if (!mainCat || !mainCode || !subCat || !subCode || !nameEn) {
         skipped++;
         continue;
@@ -238,10 +249,12 @@ async function uploadProjectCodeTypes() {
             main_category: mainCat,
             sub_category: subCat,
             project_name_en: nameEn,
+            requires_clearance_note: reqClearance,
           });
           existing.main_category = mainCat;
           existing.sub_category = subCat;
           existing.project_name_en = nameEn;
+          existing.requires_clearance_note = reqClearance;
           updated++;
         } else {
           const created = await API.create('project_code_types', {
@@ -250,6 +263,7 @@ async function uploadProjectCodeTypes() {
             sub_category: subCat,
             sub_code: subCode,
             project_name_en: nameEn,
+            requires_clearance_note: reqClearance,
           });
           if (created && created.id) working.push(created);
           added++;
@@ -280,9 +294,9 @@ async function downloadProjectCodeTemplate() {
   if (typeof XLSX === 'undefined') await LibLoader.load('xlsx');
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet([
-    ['대분류', '대분류Code', '소분류', '소분류Code', '프로젝트명'],
-    ['관세심사', 'AUD', 'AEO종합심사', 'AEO', 'AEO Audit'],
-    ['관세심사', 'AUD', '법인심사', 'Cor', 'Customs Corporate Audit'],
+    ['대분류', '대분류Code', '소분류', '소분류Code', '프로젝트명', '통관유의사항필수(Y/N)'],
+    ['관세심사', 'AUD', 'AEO종합심사', 'AEO', 'AEO Audit', 'Y'],
+    ['관세심사', 'AUD', '법인심사', 'COR', 'Customs Corporate Audit', 'N'],
   ]);
   XLSX.utils.book_append_sheet(wb, ws, '프로젝트코드');
   await xlsxDownload(wb, '프로젝트코드_DB_업로드_양식.xlsx');
@@ -302,13 +316,14 @@ async function downloadProjectCodeTypesExport() {
   }
   if (typeof XLSX === 'undefined') await LibLoader.load('xlsx');
   const aoa = [
-    ['대분류', '대분류Code', '소분류', '소분류Code', '프로젝트명'],
+    ['대분류', '대분류Code', '소분류', '소분류Code', '프로젝트명', '통관유의사항필수(Y/N)'],
     ...rows.map((r) => [
       r.main_category || '',
       r.main_code || '',
       r.sub_category || '',
       r.sub_code || '',
       r.project_name_en || '',
+      r.requires_clearance_note ? 'Y' : 'N',
     ]),
   ];
   const wb = XLSX.utils.book_new();
