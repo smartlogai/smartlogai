@@ -238,7 +238,8 @@ function _legacyCanReadMenuByPage(session, page) {
     case 'project-dashboard':
       return !!Auth.canViewDashboardMenu(session);
     case 'project-management':
-      return !!Auth.canManageProjectRegister(session);
+      // 프로젝트관리는 운영 민감 메뉴라 staff 기본허용을 두지 않는다.
+      return !!(Auth.isAdmin(session) || Auth.isTopMgr(session) || Auth.isDirector(session) || Auth.isManager(session));
     case 'analysis':
       return !!Auth.canViewAnalysis(session);
     case 'approval':
@@ -2318,6 +2319,12 @@ function setupMenuByRole(session) {
 async function _refreshProjectMgmtMenuVisibility(session, canProjectReg) {
   const projectMgmtMenu = document.getElementById('menu-project-management');
   if (!projectMgmtMenu) return;
+  const menuKey = _menuPolicyKeyByPage('project-management');
+  const legacyAllow = _legacyCanReadMenuByPage(session, 'project-management');
+  if (!_authCanReadMenuSync(session, menuKey, legacyAllow)) {
+    projectMgmtMenu.style.display = 'none';
+    return;
+  }
   if (!canProjectReg || !session) {
     projectMgmtMenu.style.display = 'none';
     return;
