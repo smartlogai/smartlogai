@@ -241,7 +241,7 @@
         };
         if (hit && hit.id) {
           await API.patch('permission_policies', hit.id, payload);
-        } else if (want) {
+        } else {
           await API.create('permission_policies', {
             ...payload,
             created_by: String(session?.id || ''),

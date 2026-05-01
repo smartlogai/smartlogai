@@ -226,6 +226,58 @@ function _authCanActionSync(session, menuKey, actionKey, fallbackAllow) {
   return !!hit;
 }
 
+function _legacyCanReadMenuByPage(session, page) {
+  if (!session) return false;
+  const p = String(page || '').trim();
+  const role = String(session.role || '');
+  const isMaster = Auth.canManageMaster(session);
+  const isTopMgr = Auth.isTopMgr(session);
+
+  switch (p) {
+    case 'dashboard':
+    case 'project-dashboard':
+      return !!Auth.canViewDashboardMenu(session);
+    case 'project-management':
+      return !!Auth.canManageProjectRegister(session);
+    case 'analysis':
+      return !!Auth.canViewAnalysis(session);
+    case 'approval':
+      return !!((Auth.canApprove(session) || Auth.canViewDeptScope(session)) && !Auth.canViewAll(session));
+    case 'archive':
+      return true;
+    case 'project-deliverables':
+      return !!Auth.canViewProjectDeliverables(session);
+    case 'entry-new-hourly':
+      return !!Auth.timesheetHourlyEnabled(session);
+    case 'entry-new-daily':
+      return !!Auth.timesheetDailyEnabled(session);
+    case 'entry-new':
+      return !!Auth.canWriteEntry(session);
+    case 'my-entries-hourly':
+      return !!Auth.timesheetHourlyEnabled(session);
+    case 'my-entries-daily':
+      return !!Auth.timesheetDailyEnabled(session);
+    case 'my-entries':
+      return !!(Auth.canViewAll(session) || role === 'top_mgr' || Auth.canWriteEntry(session));
+    case 'master-clients':
+      return !!(Auth.canManageRefData(session) || Auth.canRequestClient(session));
+    case 'master-categories':
+      return !!Auth.isAdmin(session);
+    case 'project-register':
+      return !!Auth.canManageProjectRegister(session);
+    case 'master-org':
+    case 'master-teams':
+    case 'master-csteams':
+    case 'master-project-codes':
+      return !!(isMaster || isTopMgr);
+    case 'users':
+    case 'permission-management':
+      return !!isMaster;
+    default:
+      return true;
+  }
+}
+
 async function _loadPermissionPoliciesForSession(session, force = false) {
   if (!session) {
     PERM_POLICY_CACHE.sessionKey = '';
@@ -1954,7 +2006,8 @@ function navigateTo(page) {
       return;
     }
     const menuKey = _menuPolicyKeyByPage(page);
-    if (!_authCanReadMenuSync(session, menuKey, true)) {
+    const legacyAllow = _legacyCanReadMenuByPage(session, page);
+    if (!_authCanReadMenuSync(session, menuKey, legacyAllow)) {
       Toast.warning('접근 권한이 없습니다.');
       return;
     }
@@ -2120,7 +2173,7 @@ function _applyPolicyToMenuVisibility(session) {
     const page = String(item.dataset.page || '').trim();
     if (!page) return;
     const menuKey = _menuPolicyKeyByPage(page);
-    const ok = _authCanReadMenuSync(session, menuKey, true);
+    const ok = _authCanReadMenuSync(session, menuKey, _legacyCanReadMenuByPage(session, page));
     if (!ok) item.style.display = 'none';
   });
   const settingsSection = document.querySelector('.menu-settings-section');
