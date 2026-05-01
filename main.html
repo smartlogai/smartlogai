@@ -26,7 +26,7 @@
   <script src="https://cdn.jsdelivr.net/npm/turndown/dist/turndown.js" defer></script>
   <!-- turndown-plugin-gfm: 테이블 등 GFM 확장 지원 -->
   <script src="https://cdn.jsdelivr.net/npm/turndown-plugin-gfm/dist/turndown-plugin-gfm.js" defer></script>
-  <link rel="stylesheet" href="css/style.css?v=20260419invoiceActionCol" />
+  <link rel="stylesheet" href="css/style.css?v=20260420projRegFocus2" />
   <!-- Chart.js: 대시보드/분석에서 사용 → defer로 DOM 파싱 차단 방지 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
   <!-- ★ 무거운 라이브러리는 필요한 시점에 동적으로 로드 (초기 blocking 제거) -->
@@ -132,10 +132,10 @@
       <!-- ── Main (전체 역할 공통) ─────────────────── -->
       <div class="nav-section-title">Main</div>
       <div class="nav-item active" data-page="dashboard" onclick="navigateTo('dashboard')">
-        <i class="fas fa-chart-pie nav-icon"></i> Dashboard
+        <i class="fas fa-chart-pie nav-icon"></i> Timelog dashboard
       </div>
       <div class="nav-item nav-item-sub menu-dashboard-sub" id="menu-project-dashboard" data-page="project-dashboard" onclick="navigateTo('project-dashboard')" style="display:none">
-        <i class="fas fa-briefcase nav-icon"></i> 프로젝트 대시보드
+        <i class="fas fa-briefcase nav-icon"></i> Project dashboard
       </div>
       <div class="nav-group-label" id="menu-smartlog-group">
         <i class="fas fa-book" style="font-size:10px;opacity:0.6"></i> Smart Log
@@ -188,9 +188,9 @@
       <div class="nav-item" id="menu-analysis" data-page="analysis" onclick="navigateTo('analysis')" style="display:none">
         <i class="fas fa-chart-bar nav-icon"></i> Analysis
       </div>
-      <!-- Admin 전용: Staff 전체 업무 기록 (상태 필터로 1·2차 대기 조회) -->
+      <!-- Admin 전용: 컨설턴트 전체 업무 기록 (상태 필터로 1·2차 대기 조회) -->
       <div class="nav-item" id="menu-admin-all-entries" data-page="my-entries" onclick="navigateTo('my-entries')" style="display:none">
-        <i class="fas fa-table nav-icon"></i> Staff 업무 기록
+        <i class="fas fa-table nav-icon"></i> 컨설턴트 업무 기록
       </div>
 
       <!-- ── Settings (Admin: 조직·직원·프로젝트 코드 마스터) ── -->
@@ -222,6 +222,9 @@
       <div class="nav-item menu-master" data-page="users" onclick="navigateTo('users')" style="display:none">
         <i class="fas fa-user-cog nav-icon"></i> User 등록
       </div>
+      <div class="nav-item menu-master" data-page="permission-management" onclick="navigateTo('permission-management')" style="display:none">
+        <i class="fas fa-shield-halved nav-icon"></i> 권한관리
+      </div>
 
     </nav>
 
@@ -251,11 +254,23 @@
       <button class="sidebar-toggle" onclick="toggleSidebar()">
         <i class="fas fa-bars"></i>
       </button>
-      <h1 id="pageTitle">Dashboard</h1>
+      <h1 id="pageTitle">Timelog dashboard</h1>
       <div class="header-actions" id="headerActions"></div>
 
-      <!-- 🔔 알림 버튼 -->
+      <!-- 🎧 Help Desk 버튼 -->
       <div style="position:relative;margin-left:8px;flex-shrink:0">
+        <button id="helpdesk-btn" title="Help Desk" onclick="navigateTo('helpdesk')"
+          style="position:relative;background:none;border:none;cursor:pointer;
+                 padding:6px 10px;border-radius:8px;color:#6b7280;font-size:14px;font-weight:700;
+                 display:flex;align-items:center;transition:background 0.15s"
+          onmouseover="this.style.background='#f3f4f6'"
+          onmouseout="this.style.background='none'">
+          <i class="fas fa-headset" style="font-size:16px;margin-right:6px"></i><span>Help Desk</span>
+        </button>
+      </div>
+
+      <!-- 🔔 알림 버튼 -->
+      <div style="position:relative;margin-left:2px;flex-shrink:0">
         <button id="notify-btn" title="알림"
           style="position:relative;background:none;border:none;cursor:pointer;
                  padding:6px 8px;border-radius:8px;color:#6b7280;font-size:18px;
@@ -321,15 +336,77 @@
               <button type="button" class="btn btn-sm btn-secondary" id="project-dash-refresh-btn"><i class="fas fa-sync-alt"></i> 새로고침</button>
             </div>
           </div>
-          <div class="card-body" id="project-dash-kpis" style="display:grid;grid-template-columns:repeat(6,minmax(120px,1fr));gap:10px">
-            <div class="table-empty" style="grid-column:1/-1"><i class="fas fa-chart-line"></i><p>프로젝트 KPI를 불러오는 중입니다.</p></div>
+        </div>
+
+        <div class="card" style="margin-bottom:12px">
+          <div class="card-header">
+            <h2><i class="fas fa-won-sign" style="color:var(--primary)"></i> 실적확인</h2>
+            <div class="card-actions" id="project-dash-sales-caption" style="font-size:12px;color:var(--text-muted)">
+              연도 기준 집계
+            </div>
+          </div>
+          <div class="card-body" id="project-dash-sales-kpis" style="display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:10px">
+            <div class="table-empty" style="grid-column:1/-1"><i class="fas fa-spinner fa-spin"></i><p>매출 지표를 불러오는 중입니다.</p></div>
           </div>
         </div>
 
-        <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px">
+        <div class="card" style="margin-bottom:12px">
+          <div class="card-header">
+            <h2><i class="fas fa-sitemap" style="color:var(--primary)"></i> 조직/유형별 누적 실적</h2>
+            <div class="card-actions" id="project-dash-type-caption" style="font-size:12px;color:var(--text-muted)">
+              조직별 및 프로젝트 대분류별 누적 프로젝트수/누적매출액
+            </div>
+          </div>
+          <div class="card-body" id="project-dash-type-summary" style="display:grid;gap:10px">
+            <div class="table-empty"><i class="fas fa-spinner fa-spin"></i><p>조직/유형별 누적 실적을 계산하는 중입니다.</p></div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:12px">
+          <div class="card-header">
+            <h2><i class="fas fa-list-check" style="color:var(--primary)"></i> 진행상태 확인</h2>
+            <div class="card-actions" id="project-dash-progress-caption" style="font-size:12px;color:var(--text-muted)">
+              프로젝트 진행현황 테이블
+            </div>
+          </div>
+          <div class="card-body" style="padding:0">
+            <div class="table-wrapper" style="border:none;border-radius:0;overflow:auto">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th style="width:42px;text-align:center">No</th>
+                    <th style="width:130px">프로젝트 코드</th>
+                    <th>프로젝트명</th>
+                    <th style="width:120px">고객사</th>
+                    <th style="width:180px">유형</th>
+                    <th style="width:100px;text-align:center">진행상태</th>
+                    <th style="width:120px">최근 상태일</th>
+                  </tr>
+                </thead>
+                <tbody id="project-dash-progress-body">
+                  <tr><td colspan="7" class="table-empty"><i class="fas fa-spinner fa-spin"></i><p>프로젝트 진행현황을 불러오는 중입니다.</p></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:12px">
+          <div class="card-header">
+            <h2><i class="fas fa-file-invoice-dollar" style="color:var(--primary)"></i> 세금계산서 발행관리</h2>
+            <div class="card-actions" id="project-dash-tax-caption" style="font-size:12px;color:var(--text-muted)">
+              월 기준 집계
+            </div>
+          </div>
+          <div class="card-body" id="project-dash-tax-kpis" style="display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:10px">
+            <div class="table-empty" style="grid-column:1/-1"><i class="fas fa-spinner fa-spin"></i><p>세금계산서 지표를 불러오는 중입니다.</p></div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:minmax(0,1fr);gap:10px">
           <div class="card">
             <div class="card-header">
-              <h2>입금예정일 초과 관리</h2>
+              <h2>당월 세금계산서 발행 대상 프로젝트</h2>
             </div>
             <div class="card-body" style="padding:0">
               <div class="table-wrapper" style="border:none;border-radius:0;overflow:auto">
@@ -337,7 +414,34 @@
                   <thead>
                     <tr>
                       <th style="width:42px;text-align:center">No</th>
-                      <th style="width:110px">프로젝트코드</th>
+                      <th style="width:120px">프로젝트 코드</th>
+                      <th>프로젝트명</th>
+                      <th style="width:86px;text-align:center">상태</th>
+                      <th style="width:116px;text-align:right">발행금액</th>
+                      <th style="width:116px;text-align:right">미수금</th>
+                      <th style="width:92px">예정일</th>
+                      <th style="width:120px">고객사</th>
+                    </tr>
+                  </thead>
+                  <tbody id="project-dash-target-body">
+                    <tr><td colspan="8" class="table-empty"><i class="fas fa-hourglass-half"></i><p>데이터를 불러오는 중입니다.</p></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h2>발행기간 경과 프로젝트</h2>
+            </div>
+            <div class="card-body" style="padding:0">
+              <div class="table-wrapper" style="border:none;border-radius:0;overflow:auto">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th style="width:42px;text-align:center">No</th>
+                      <th style="width:110px">프로젝트 코드</th>
                       <th style="width:86px">청구월</th>
                       <th style="width:92px">입금예정일</th>
                       <th style="width:80px;text-align:center">상태</th>
@@ -355,7 +459,7 @@
 
           <div class="card">
             <div class="card-header">
-              <h2>청구 배치 현황</h2>
+              <h2>미수금 프로젝트</h2>
             </div>
             <div class="card-body" style="padding:0">
               <div class="table-wrapper" style="border:none;border-radius:0;overflow:auto">
@@ -363,18 +467,166 @@
                   <thead>
                     <tr>
                       <th style="width:42px;text-align:center">No</th>
-                      <th style="width:110px">프로젝트코드</th>
                       <th style="width:86px">청구월</th>
-                      <th style="width:86px;text-align:center">상태</th>
-                      <th style="width:116px;text-align:right">청구합계</th>
+                      <th style="width:110px">프로젝트 코드</th>
+                      <th>프로젝트명</th>
+                      <th style="width:80px;text-align:center">상태</th>
+                      <th style="width:116px;text-align:right">발행금액</th>
                       <th style="width:116px;text-align:right">미수금</th>
                       <th>고객사</th>
                     </tr>
                   </thead>
-                  <tbody id="project-dash-batch-body">
+                  <tbody id="project-dash-receivable-body">
                     <tr><td colspan="7" class="table-empty"><i class="fas fa-layer-group"></i><p>데이터를 불러오는 중입니다.</p></td></tr>
                   </tbody>
                 </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="page-section" id="page-helpdesk">
+        <div class="card" style="margin-bottom:12px">
+          <div class="card-header">
+            <h2><i class="fas fa-headset" style="color:var(--primary)"></i> Help Desk</h2>
+          </div>
+          <div class="card-body" style="font-size:12.5px;color:var(--text-secondary);line-height:1.6">
+            운영 중 발생한 오류/개선요청을 등록하고 처리 이력을 추적합니다.
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:minmax(320px,420px) minmax(0,1fr);gap:12px;align-items:start">
+          <div class="card">
+            <div class="card-header"><h2>이슈 등록</h2></div>
+            <div class="card-body pm-exp-head-wrap">
+              <div class="form-group">
+                <label class="form-label">유형</label>
+                <select id="hd-form-category" class="form-control">
+                  <option value="bug">오류</option>
+                  <option value="improvement">개선</option>
+                  <option value="question">문의</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">심각도</label>
+                <select id="hd-form-severity" class="form-control">
+                  <option value="low">낮음</option>
+                  <option value="medium" selected>보통</option>
+                  <option value="high">높음</option>
+                  <option value="critical">긴급</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">화면/메뉴 코드</label>
+                <input type="text" id="hd-form-page-code" class="form-control" placeholder="예: project-management / approval" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">제목</label>
+                <input type="text" id="hd-form-title" class="form-control" placeholder="문제 핵심을 간단히 입력" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">상세 내용</label>
+                <textarea id="hd-form-description" class="form-control" rows="4" placeholder="현상, 영향 범위, 발생 시점"></textarea>
+              </div>
+              <div class="form-group">
+                <label class="form-label">재현 절차</label>
+                <textarea id="hd-form-repro" class="form-control" rows="3" placeholder="1) ... 2) ..."></textarea>
+              </div>
+              <div style="display:flex;gap:8px;justify-content:flex-end">
+                <button type="button" class="btn btn-sm btn-outline" id="hd-form-reset-btn"><i class="fas fa-undo"></i> 초기화</button>
+                <button type="button" class="btn btn-sm btn-primary" id="hd-form-submit-btn"><i class="fas fa-paper-plane"></i> 등록</button>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:grid;gap:12px">
+            <div class="card">
+              <div class="card-header">
+                <h2>티켓 목록</h2>
+                <div id="hd-list-summary" style="font-size:12px;color:var(--text-muted)">0건</div>
+              </div>
+              <div class="card-body" style="padding-bottom:10px">
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:10px">
+                  <select id="hd-filter-status" class="form-control">
+                    <option value="">상태 전체</option>
+                    <option value="open">접수</option>
+                    <option value="triaged">분석중</option>
+                    <option value="in_progress">처리중</option>
+                    <option value="waiting_user">사용자확인대기</option>
+                    <option value="resolved">해결</option>
+                    <option value="closed">종결</option>
+                    <option value="rejected">반려</option>
+                  </select>
+                  <select id="hd-filter-category" class="form-control">
+                    <option value="">유형 전체</option>
+                    <option value="bug">오류</option>
+                    <option value="improvement">개선</option>
+                    <option value="question">문의</option>
+                  </select>
+                  <select id="hd-filter-scope" class="form-control">
+                    <option value="mine">내 티켓</option>
+                    <option value="all">전체</option>
+                    <option value="assigned">내 담당</option>
+                  </select>
+                  <input type="search" id="hd-filter-q" class="form-control" placeholder="티켓번호/제목/등록자 검색" />
+                  <button type="button" class="btn btn-sm btn-outline" id="hd-refresh-btn"><i class="fas fa-sync-alt"></i> 새로고침</button>
+                </div>
+                <div class="table-wrapper" style="border:1px solid var(--border-light);border-radius:8px;overflow:auto;max-height:340px">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th style="width:120px">티켓번호</th>
+                        <th style="width:84px;text-align:center">상태</th>
+                        <th style="width:76px;text-align:center">유형</th>
+                        <th style="width:70px;text-align:center">심각도</th>
+                        <th>제목</th>
+                        <th style="width:90px;text-align:center">등록자</th>
+                        <th style="width:98px;text-align:center">등록일</th>
+                      </tr>
+                    </thead>
+                    <tbody id="hd-list-body">
+                      <tr><td colspan="7" class="table-empty"><i class="fas fa-inbox"></i><p>등록된 티켓이 없습니다.</p></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header"><h2>티켓 상세</h2></div>
+              <div class="card-body" id="hd-detail-wrap">
+                <div id="hd-detail-empty" class="table-empty"><i class="fas fa-ticket-alt"></i><p>목록에서 티켓을 선택하세요.</p></div>
+                <div id="hd-detail-card" style="display:none">
+                  <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px">
+                    <strong id="hd-detail-title">-</strong>
+                    <span id="hd-detail-status-badge"></span>
+                  </div>
+                  <div id="hd-detail-meta" style="font-size:12px;color:var(--text-muted);margin-bottom:10px"></div>
+                  <div id="hd-detail-description" style="white-space:pre-wrap;font-size:13px;line-height:1.5;background:#f8fafc;border:1px solid var(--border-light);border-radius:8px;padding:10px;margin-bottom:10px"></div>
+
+                  <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:10px">
+                    <select id="hd-detail-status" class="form-control">
+                      <option value="open">접수</option>
+                      <option value="triaged">분석중</option>
+                      <option value="in_progress">처리중</option>
+                      <option value="waiting_user">사용자확인대기</option>
+                      <option value="resolved">해결</option>
+                      <option value="closed">종결</option>
+                      <option value="rejected">반려</option>
+                    </select>
+                    <input type="text" id="hd-detail-assignee-id" class="form-control" placeholder="담당자 ID" />
+                    <input type="text" id="hd-detail-assignee-name" class="form-control" placeholder="담당자명" />
+                    <button type="button" class="btn btn-sm btn-primary" id="hd-detail-save-btn"><i class="fas fa-save"></i> 저장</button>
+                  </div>
+
+                  <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">처리 이력</div>
+                  <div id="hd-comment-list" style="display:grid;gap:8px;max-height:180px;overflow:auto;padding-right:2px;margin-bottom:10px"></div>
+                  <div style="display:grid;grid-template-columns:1fr auto;gap:8px">
+                    <textarea id="hd-comment-input" class="form-control" rows="2" placeholder="코멘트를 남기세요"></textarea>
+                    <button type="button" class="btn btn-sm btn-outline" id="hd-comment-submit-btn"><i class="fas fa-comment-dots"></i> 등록</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -451,7 +703,7 @@
                     </div>
                   </div>
 
-                  <!-- 수행 팀명 · Staff -->
+                  <!-- 수행 팀명 · 컨설턴트 -->
                   <div id="entry-team-row" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end">
                     <div>
                       <label class="ep-label">수행 팀명 <span class="required">*</span></label>
@@ -460,7 +712,7 @@
                       </select>
                     </div>
                     <div>
-                      <label class="ep-label">Staff</label>
+                      <label class="ep-label">컨설턴트</label>
                       <input type="text" class="ep-ctrl" id="entry-user-name" readonly style="background:#f8fafc" />
                     </div>
                   </div>
@@ -840,9 +1092,9 @@
           <div class="filter-group filter-group-period filter-group-modern-period">
             <span class="filter-label">기간</span>
             <div class="filter-period-row" style="display:flex;align-items:center;gap:4px">
-              <input type="date" class="filter-control" id="filter-entry-date-from" style="width:122px" />
+              <input type="date" class="filter-control" id="filter-entry-date-from" />
               <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">~</span>
-              <input type="date" class="filter-control" id="filter-entry-date-to" style="width:122px" />
+              <input type="date" class="filter-control" id="filter-entry-date-to" />
             </div>
             <div class="entry-quick-range-group">
               <button type="button" class="entry-quick-range-btn" data-entry-range="today">당일</button>
@@ -899,7 +1151,7 @@
               <table class="data-table approval-table" id="my-entries-table" style="width:100%;table-layout:fixed">
                 <colgroup>
                   <col style="width:36px">   <!-- No -->
-                  <col class="my-entries-col-author" style="width:68px">  <!-- Staff (admin만 표시) -->
+                  <col class="my-entries-col-author" style="width:68px">  <!-- 컨설턴트 (admin만 표시) -->
                   <col style="width:80px">   <!-- 작성일자 -->
                   <col style="width:120px">  <!-- 고객사 -->
                   <col class="my-entries-col-team" style="width:84px">  <!-- 업무팀 -->
@@ -914,7 +1166,7 @@
                 <thead>
                   <tr>
                     <th class="th-no" style="text-align:center">No</th>
-                    <th class="my-entries-col-author th-author">Staff</th>
+                    <th class="my-entries-col-author th-author">컨설턴트</th>
                     <th class="th-written">작성일자</th>
                     <th class="th-client">고객사</th>
                     <th class="my-entries-col-team th-team">소속(본부)</th>
@@ -949,13 +1201,13 @@
         <!-- Director/Admin 읽기전용 안내 배너 -->
         <div id="approval-readonly-banner" style="display:none;align-items:center;gap:10px;background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:13px;color:#92400e">
           <i class="fas fa-eye" style="font-size:16px;color:#b45309"></i>
-          <span><strong>열람 전용 모드</strong> — 현재 계정은 타임시트를 조회만 할 수 있습니다. 승인/반려는 Manager만 가능합니다.</span>
+          <span><strong>열람 전용 모드</strong> — 현재 계정은 타임시트를 조회만 할 수 있습니다. 승인/반려는 팀장만 가능합니다.</span>
         </div>
         <div class="approval-main-tabs" id="approval-main-tabs" role="tablist" aria-label="승인 구분">
           <button type="button" role="tab" id="approval-tab-timesheet" class="approval-main-tab is-active" aria-selected="true" onclick="switchApprovalMainTab('timesheet')">
             <i class="fas fa-clock" style="margin-right:6px"></i>타임시트 승인
           </button>
-          <button type="button" role="tab" id="approval-tab-project" class="approval-main-tab" aria-selected="false" onclick="switchApprovalMainTab('project')" style="display:none">
+          <button type="button" role="tab" id="approval-tab-project" class="approval-main-tab" aria-selected="false" onclick="switchApprovalMainTab('project')">
             <i class="fas fa-folder-open" style="margin-right:6px"></i>프로젝트 승인
           </button>
         </div>
@@ -964,9 +1216,9 @@
           <div class="filter-group filter-group-period filter-group-modern-period">
             <span class="filter-label">기간</span>
             <div class="filter-period-row" style="display:flex;align-items:center;gap:4px">
-              <input type="date" class="filter-control" id="filter-approval-date-from" style="width:122px" />
+              <input type="date" class="filter-control" id="filter-approval-date-from" />
               <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">~</span>
-              <input type="date" class="filter-control" id="filter-approval-date-to" style="width:122px" />
+              <input type="date" class="filter-control" id="filter-approval-date-to" />
             </div>
             <div class="approval-quick-range-group">
               <button type="button" class="approval-quick-range-btn" data-approval-range="today">당일</button>
@@ -986,7 +1238,7 @@
             <div id="filter-approval-client-wrap" class="cs-wrap" style="min-height:30px;width:220px"></div>
           </div>
           <div class="filter-group filter-group-modern-compact" id="filter-approval-staff-group">
-            <span class="filter-label">Staff</span>
+            <span class="filter-label">컨설턴트</span>
             <input type="text" class="filter-control" id="filter-approval-staff" placeholder="이름 검색" style="width:100px" />
           </div>
           <div class="filter-group filter-group-modern-compact" id="filter-approval-category-group">
@@ -1031,11 +1283,10 @@
                   <col style="width:40px">   <!-- No -->
                   <col style="width:90px">   <!-- 작성일자 -->
                   <col style="width:80px">   <!-- Staff -->
-                  <col style="width:80px">   <!-- 승인자 -->
                   <col style="width:90px">   <!-- 업무팀 -->
                   <col style="width:130px">  <!-- 고객사 -->
-                  <col style="width:130px">  <!-- 대분류 -->
-                  <col>                      <!-- 소분류 (flex) -->
+                  <col style="width:120px">  <!-- 대분류 -->
+                  <col style="width:180px">  <!-- 소분류 -->
                   <col style="width:110px">  <!-- 시작일시 -->
                   <col style="width:110px">  <!-- 종료일시 -->
                   <col style="width:68px">   <!-- 업무시간 -->
@@ -1046,8 +1297,7 @@
                   <tr>
                     <th style="text-align:center">No</th>
                     <th>작성일자</th>
-                    <th>Staff</th>
-                    <th>승인자</th>
+                    <th>컨설턴트</th>
                     <th>소속(본부)</th>
                     <th>고객사</th>
                     <th>대분류</th>
@@ -1060,7 +1310,7 @@
                   </tr>
                 </thead>
                 <tbody id="approval-list-body">
-                  <tr><td colspan="13" class="table-empty"><i class="fas fa-inbox"></i><p>데이터가 없습니다.</p></td></tr>
+                  <tr><td colspan="12" class="table-empty"><i class="fas fa-inbox"></i><p>데이터가 없습니다.</p></td></tr>
                 </tbody>
               </table>
             </div>
@@ -1091,8 +1341,8 @@
                       <th style="width:160px">프로젝트 코드</th>
                       <th>프로젝트명</th>
                       <th style="width:160px">고객사</th>
+                      <th style="width:120px">대표 수주자</th>
                       <th style="width:120px;text-align:center">수주참여자</th>
-                      <th style="width:150px;text-align:center">단계</th>
                       <th style="width:100px;text-align:center">등록일</th>
                       <th style="width:140px;text-align:center">관리</th>
                     </tr>
@@ -1129,6 +1379,11 @@
                    color:var(--text-secondary);border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s">
             <i class="fas fa-coins" style="margin-right:5px"></i>인건비 분석
           </button>
+          <button id="analysis-tab-project-profit" onclick="switchAnalysisTab('project-profit')"
+            style="padding:9px 20px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;
+                   color:var(--text-secondary);border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s">
+            <i class="fas fa-chart-line" style="margin-right:5px"></i>프로젝트 매출·이익 분석
+          </button>
         </div>
 
         <!-- ══════════════════════════════
@@ -1149,9 +1404,9 @@
                   </span>
                 </div>
                 <div style="display:flex;align-items:center;gap:4px">
-                  <input type="date" class="filter-control" id="filter-analysis-date-from" style="width:130px" />
+                  <input type="date" class="filter-control" id="filter-analysis-date-from" />
                   <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">~</span>
-                  <input type="date" class="filter-control" id="filter-analysis-date-to" style="width:130px" />
+                  <input type="date" class="filter-control" id="filter-analysis-date-to" />
                 </div>
               </div>
               <!-- 사업부 -->
@@ -1301,9 +1556,9 @@
               <div class="filter-group" style="grid-column:span 2">
                 <span class="filter-label">기간</span>
                 <div style="display:flex;align-items:center;gap:4px">
-                  <input type="date" class="filter-control" id="filter-staff-date-from" style="width:130px" />
+                  <input type="date" class="filter-control" id="filter-staff-date-from" />
                   <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">~</span>
-                  <input type="date" class="filter-control" id="filter-staff-date-to" style="width:130px" />
+                  <input type="date" class="filter-control" id="filter-staff-date-to" />
                 </div>
               </div>
               <!-- 사업부 -->
@@ -1477,11 +1732,11 @@
           <div class="filter-bar" style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-top:4px">
             <div class="filter-group">
               <span class="filter-label">배부 기간 From</span>
-              <input type="date" class="filter-control" id="filter-labor-date-from" style="width:150px" onchange="loadLaborAnalysis()" />
+              <input type="date" class="filter-control" id="filter-labor-date-from" onchange="loadLaborAnalysis()" />
             </div>
             <div class="filter-group">
               <span class="filter-label">To</span>
-              <input type="date" class="filter-control" id="filter-labor-date-to" style="width:150px" onchange="loadLaborAnalysis()" />
+              <input type="date" class="filter-control" id="filter-labor-date-to" onchange="loadLaborAnalysis()" />
             </div>
             <span style="font-size:11px;color:var(--text-muted);align-self:center;max-width:420px;line-height:1.4">
               비우면 해당 연도 1/1~12/31 전체. 연 인건비 × (기간 내 고객사 업무시간 ÷ 해당 연도 고객사 업무시간)으로 배분합니다.
@@ -1570,6 +1825,102 @@
 
         </div><!-- /analysis-panel-labor -->
 
+        <!-- ══════════════════════════════
+             서브탭4: 프로젝트 매출·이익 분석
+        ══════════════════════════════ -->
+        <div id="analysis-panel-project-profit" style="display:none">
+          <div style="background:#fff;border:1px solid var(--border-light);border-radius:10px;padding:12px 16px;margin-bottom:16px;">
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px 16px;align-items:end;">
+              <div class="filter-group" style="grid-column:span 2">
+                <span class="filter-label">비용 반영기간(월배부 기준)</span>
+                <div style="display:flex;align-items:center;gap:4px">
+                  <input type="date" class="filter-control" id="filter-project-profit-date-from" />
+                  <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">~</span>
+                  <input type="date" class="filter-control" id="filter-project-profit-date-to" />
+                </div>
+              </div>
+              <div class="filter-group">
+                <span class="filter-label">사업부</span>
+                <select class="filter-control" id="filter-project-profit-dept">
+                  <option value="">전체 사업부</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <span class="filter-label">본부</span>
+                <select class="filter-control" id="filter-project-profit-hq">
+                  <option value="">전체 본부</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <span class="filter-label">고객지원팀</span>
+                <select class="filter-control" id="filter-project-profit-csteam">
+                  <option value="">전체 팀</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <span class="filter-label">상태</span>
+                <select class="filter-control" id="filter-project-profit-status">
+                  <option value="closed">업무종료/정산완료</option>
+                  <option value="work_closed">업무종료</option>
+                  <option value="settled_done">정산완료</option>
+                  <option value="">전체 상태</option>
+                </select>
+              </div>
+              <div class="filter-actions" style="display:flex;gap:6px;align-items:flex-end;padding-top:16px">
+                <button class="btn btn-primary btn-sm" onclick="loadProjectProfitAnalysis()"><i class="fas fa-calculator"></i> 분석</button>
+                <button class="btn btn-ghost btn-sm" onclick="resetProjectProfitFilter()" title="초기화"><i class="fas fa-redo"></i></button>
+              </div>
+            </div>
+            <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px dashed var(--border-light)">
+              <div class="form-group" style="margin:0;min-width:150px">
+                <label class="form-label">직접인건비 배부기준월</label>
+                <input type="month" id="analysis-project-profit-labor-month" class="form-control" />
+              </div>
+              <button type="button" class="btn btn-sm btn-ghost" onclick="pmDownloadMonthlyLaborTemplate()"><i class="fas fa-download"></i> 직접인건비 양식</button>
+              <label class="btn btn-sm btn-outline" style="cursor:pointer;margin:0">
+                <i class="fas fa-file-excel"></i> 직접인건비 업로드
+                <input type="file" accept=".xlsx,.xls" style="display:none" onchange="pmUploadMonthlyLaborCostExcel(this)" />
+              </label>
+            </div>
+            <div id="pm-labor-upload-result" style="display:none;margin-top:10px"></div>
+          </div>
+
+          <div class="kpi-grid" id="analysis-project-profit-kpi" style="margin-bottom:16px"></div>
+
+          <div class="card">
+            <div class="card-header">
+              <h2><i class="fas fa-table" style="color:var(--primary)"></i>&nbsp; 프로젝트별 매출·비용·이익율</h2>
+              <div class="card-actions">
+                <span style="font-size:11px;color:var(--text-muted)">매출=계약금액 우선(없으면 청구일정 합계)</span>
+              </div>
+            </div>
+            <div class="card-body" style="padding:0">
+              <div class="table-wrapper" style="border:none;border-radius:0;overflow:auto">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th style="width:42px;text-align:center">No</th>
+                      <th style="width:110px">상태</th>
+                      <th style="width:120px">프로젝트코드</th>
+                      <th>프로젝트명</th>
+                      <th style="width:120px;text-align:right">매출(계약기준)</th>
+                      <th style="width:110px;text-align:right">직접인건비</th>
+                      <th style="width:110px;text-align:right">직접비용</th>
+                      <th style="width:100px;text-align:right">간접비</th>
+                      <th style="width:120px;text-align:right">총비용</th>
+                      <th style="width:110px;text-align:right">이익</th>
+                      <th style="width:90px;text-align:right">이익율</th>
+                    </tr>
+                  </thead>
+                  <tbody id="analysis-project-profit-body">
+                    <tr><td colspan="11" class="table-empty"><i class="fas fa-chart-line"></i><p>분석 실행 후 표시됩니다.</p></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div><!-- /analysis-panel-project-profit -->
+
       </section>
 
       <!-- ── 인건비 설정 모달 ── -->
@@ -1639,7 +1990,7 @@
         <!-- 상단 안내 -->
         <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;gap:10px;font-size:13px;color:#1e40af">
           <i class="fas fa-info-circle" style="font-size:15px;flex-shrink:0"></i>
-          <span>사업부 아래에 본부를 등록하세요. 본부장(Manager)을 지정하면 해당 본부 소속 팀원의 타임시트 승인자로 자동 연결됩니다.</span>
+          <span>사업부 아래에 본부를 등록하세요. 본부장(팀장 권한)을 지정하면 해당 본부 소속 팀원의 타임시트 승인자로 자동 연결됩니다.</span>
         </div>
 
         <!-- 2컬럼 레이아웃: 사업부 목록(좌) + 선택된 사업부의 본부 목록(우) -->
@@ -1858,7 +2209,6 @@
             <div class="card-actions">
               <button class="btn btn-sm btn-ghost" onclick="openCategoryUploadModal()"><i class="fas fa-file-excel"></i> 엑셀 업로드</button>
               <button class="btn btn-sm btn-outline" onclick="downloadCategoryTemplate()"><i class="fas fa-download"></i> 양식 다운로드</button>
-              <button class="btn btn-sm btn-outline" onclick="exportCategoriesToExcel()"><i class="fas fa-file-download"></i> 데이터 다운로드</button>
               <button class="btn btn-sm btn-primary" onclick="openCategoryModal()"><i class="fas fa-plus"></i> 대분류 추가</button>
             </div>
           </div>
@@ -1911,12 +2261,13 @@
                     <th>소분류</th>
                     <th>소분류Code</th>
                     <th>프로젝트명(EN)</th>
+                    <th style="width:120px;text-align:center">통관유의사항 필수</th>
                     <th>코드 형식 안내</th>
                     <th style="width:100px;text-align:center">관리</th>
                   </tr>
                 </thead>
                 <tbody id="project-code-types-body">
-                  <tr><td colspan="8" class="table-empty"><i class="fas fa-code"></i><p>등록된 프로젝트 코드 유형이 없습니다.</p></td></tr>
+                  <tr><td colspan="9" class="table-empty"><i class="fas fa-code"></i><p>등록된 프로젝트 코드 유형이 없습니다.</p></td></tr>
                 </tbody>
               </table>
             </div>
@@ -1967,9 +2318,7 @@
                 <select id="pm-progress-filter-csteam" class="form-control">
                   <option value="">고객지원팀 전체</option>
                 </select>
-                <select id="pm-progress-filter-client" class="form-control">
-                  <option value="">고객사 전체</option>
-                </select>
+                <input type="search" id="pm-progress-filter-client" class="form-control" placeholder="고객사 검색" />
                 <select id="pm-progress-filter-pm" class="form-control">
                   <option value="">PM 전체</option>
                 </select>
@@ -2005,10 +2354,11 @@
                     <th class="pm-progress-head-center" style="width:200px">프로젝트명</th>
                     <th class="pm-progress-head-center pm-progress-head-status" style="width:110px;text-align:center">상태</th>
                     <th class="pm-progress-head-center" style="width:96px;text-align:center">PM</th>
+                    <th class="pm-progress-head-center" style="width:110px;text-align:center">수행상세</th>
                   </tr>
                 </thead>
                 <tbody id="pm-progress-body">
-                  <tr><td colspan="7" class="table-empty"><i class="fas fa-spinner fa-spin"></i><p>프로젝트 진행현황을 불러오는 중입니다.</p></td></tr>
+                  <tr><td colspan="8" class="table-empty"><i class="fas fa-spinner fa-spin"></i><p>프로젝트 진행현황을 불러오는 중입니다.</p></td></tr>
                 </tbody>
               </table>
             </div>
@@ -2032,42 +2382,26 @@
               <div class="proj-reg-list-filters" id="proj-reg-list-filters">
                 <div class="proj-reg-list-filters-grid">
                   <div class="form-group" style="margin:0">
-                    <label class="form-label" for="proj-reg-filter-main">대분류</label>
-                    <select id="proj-reg-filter-main" class="form-control" title="프로젝트 코드 대분류"></select>
-                  </div>
-                  <div class="form-group" style="margin:0">
-                    <label class="form-label" for="proj-reg-filter-sub">소분류</label>
-                    <select id="proj-reg-filter-sub" class="form-control" title="프로젝트 코드 소분류(유형)"></select>
+                    <label class="form-label" for="proj-reg-filter-org">조직 (사업부/본부)</label>
+                    <select id="proj-reg-filter-org" class="form-control" title="조직(사업부/본부)"></select>
                   </div>
                   <div class="form-group" style="margin:0">
                     <label class="form-label" for="proj-reg-filter-client">고객사</label>
                     <input type="search" id="proj-reg-filter-client" class="form-control" placeholder="고객사 검색" title="고객사명 검색" />
                   </div>
                   <div class="form-group" style="margin:0">
+                    <label class="form-label" for="proj-reg-filter-main">프로젝트 유형 (대분류)</label>
+                    <select id="proj-reg-filter-main" class="form-control" title="프로젝트 유형 대분류"></select>
+                  </div>
+                  <div class="form-group" style="margin:0">
                     <label class="form-label" for="proj-reg-filter-status">상태</label>
                     <select id="proj-reg-filter-status" class="form-control" title="등록 상태">
                       <option value="">전체</option>
-                      <option value="draft">임시저장</option>
                       <option value="pending">승인대기</option>
                       <option value="approved">승인완료</option>
+                      <option value="conditional">조건부승인</option>
                       <option value="rejected">반려</option>
                     </select>
-                  </div>
-                  <div class="form-group" style="margin:0">
-                    <label class="form-label" for="proj-reg-filter-period-from">등록일 시작</label>
-                    <input type="date" id="proj-reg-filter-period-from" class="form-control" title="등록일 기준 시작일" />
-                  </div>
-                  <div class="form-group" style="margin:0">
-                    <label class="form-label" for="proj-reg-filter-period-to">등록일 종료</label>
-                    <input type="date" id="proj-reg-filter-period-to" class="form-control" title="등록일 기준 종료일" />
-                  </div>
-                  <div class="form-group" style="margin:0">
-                    <label class="form-label" for="proj-reg-filter-registrant">등록자</label>
-                    <input type="search" id="proj-reg-filter-registrant" class="form-control" placeholder="이름·ID" title="등록자" />
-                  </div>
-                  <div class="form-group" style="margin:0">
-                    <label class="form-label" for="proj-reg-filter-cpm">총괄 PM</label>
-                    <select id="proj-reg-filter-cpm" class="form-control" title="CPM"></select>
                   </div>
                 </div>
                 <div class="proj-reg-list-filters-actions">
@@ -2077,22 +2411,31 @@
             </div>
             <div class="card-body" style="padding:0">
               <div class="table-wrapper" style="border:none;border-radius:0">
-                <table class="data-table">
+                <table id="proj-reg-list-table" class="data-table" style="table-layout:fixed;width:100%">
+                  <colgroup>
+                    <col style="width:52px" />
+                    <col style="width:130px" />
+                    <col style="width:100px" />
+                    <col style="width:170px" />
+                    <col style="width:180px" />
+                    <col style="width:180px" />
+                    <col />
+                    <col style="width:110px" />
+                  </colgroup>
                   <thead>
                     <tr>
-                      <th style="width:44px;text-align:center">No</th>
-                      <th style="width:96px;text-align:center">상태</th>
-                      <th style="width:156px">프로젝트 코드</th>
-                      <th style="width:260px">프로젝트명</th>
-                      <th style="width:180px">고객사</th>
-                      <th style="width:124px;text-align:center">수주참여자</th>
-                      <th style="text-align:center">CPM</th>
-                      <th style="text-align:center">등록일</th>
-                      <th style="min-width:120px;text-align:center">관리</th>
+                      <th style="text-align:center">No</th>
+                      <th style="text-align:center">등록자</th>
+                      <th style="text-align:center">등록일자</th>
+                      <th>소속</th>
+                      <th>고객사</th>
+                      <th>프로젝트코드</th>
+                      <th>프로젝트명</th>
+                      <th style="text-align:center">상태</th>
                     </tr>
                   </thead>
                   <tbody id="proj-reg-list-body">
-                    <tr><td colspan="9" class="table-empty"><i class="fas fa-clipboard-list"></i><p>등록된 프로젝트가 없습니다.</p></td></tr>
+                    <tr><td colspan="8" class="table-empty"><i class="fas fa-clipboard-list"></i><p>등록된 프로젝트가 없습니다.</p></td></tr>
                   </tbody>
                 </table>
               </div>
@@ -2153,6 +2496,16 @@
               <span id="proj-reg-aside-toggle-text">도움말·유의사항 보기</span>
             </button>
 
+            <div id="proj-reg-detail-tabs" class="pm-tabs" style="margin-top:10px">
+              <button type="button" class="pm-tab is-active" data-proj-detail-tab="ops" onclick="projRegSwitchDetailTab('ops')">
+                <i class="fas fa-briefcase"></i> 업무수행 상세
+              </button>
+              <button type="button" class="pm-tab" data-proj-detail-tab="output" onclick="projRegSwitchDetailTab('output')">
+                <i class="fas fa-file-upload"></i> 프로젝트 산출물 업로드
+              </button>
+            </div>
+
+            <div id="proj-reg-detail-panel-ops" class="proj-reg-detail-panel">
             <div class="proj-reg-create-layout">
               <div class="proj-reg-main-col">
                 <input type="hidden" id="proj-reg-edit-id" />
@@ -2206,22 +2559,6 @@
                         <label class="form-label">대표 수주자</label>
                         <input type="text" id="proj-reg-order-owner" class="form-control" placeholder="대표 수주자 이름" autocomplete="off" />
                       </div>
-                      <div class="form-group" style="margin:0">
-                        <label class="form-label">수주경로</label>
-                        <select id="proj-reg-route" class="form-control" onchange="projRegOnRouteChange()">
-                          <option value="">선택</option>
-                          <option value="신규 발굴">신규 발굴 (신규 고객사 직접 영업)</option>
-                          <option value="기존 확장">기존 확장 (기존 고객사 선제적 제안)</option>
-                          <option value="단순 수주">단순 수주 (기존 고객사 자발적 의뢰)</option>
-                          <option value="외부 소개">외부 소개 (인맥 및 파트너사 추천)</option>
-                          <option value="경쟁 입찰">경쟁 입찰 (공개 RFP 및 조달 참여)</option>
-                          <option value="기타 수주">기타 수주</option>
-                        </select>
-                      </div>
-                      <div class="form-group" style="margin:0">
-                        <label class="form-label">총괄 프로젝트 매니저 (CPM)</label>
-                        <select id="proj-reg-cpm" class="form-control"></select>
-                      </div>
                     </div>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
                       <div class="form-group" style="margin:0">
@@ -2234,10 +2571,22 @@
                         </div>
                       </div>
                       <div class="form-group" style="margin:0">
-                        <label class="form-label">수주경로 세부내역</label>
-                        <textarea id="proj-reg-route-detail" class="form-control" rows="3" placeholder="수주경로 유형 선택 후 세부내역을 입력하세요."></textarea>
-                        <p id="proj-reg-route-guide" style="font-size:11px;color:var(--text-muted);margin:6px 0 0">가이드: 수주경로 유형을 선택하면 작성 포인트를 안내합니다.</p>
+                        <label class="form-label">수주경로</label>
+                        <select id="proj-reg-route" class="form-control" onchange="projRegOnRouteChange()">
+                          <option value="">선택</option>
+                          <option value="신규 발굴">신규 발굴 (신규 고객사 직접 영업)</option>
+                          <option value="기존 확장">기존 확장 (기존 고객사 선제적 제안)</option>
+                          <option value="단순 수주">단순 수주 (기존 고객사 자발적 의뢰)</option>
+                          <option value="외부 소개">외부 소개 (인맥 및 파트너사 추천)</option>
+                          <option value="경쟁 입찰">경쟁 입찰 (공개 RFP 및 조달 참여)</option>
+                          <option value="기타 수주">기타 수주</option>
+                        </select>
                       </div>
+                    </div>
+                    <div class="form-group" style="margin:12px 0 0">
+                      <label class="form-label">수주경로 세부내역</label>
+                      <textarea id="proj-reg-route-detail" class="form-control" rows="3" placeholder="수주경로 유형 선택 후 세부내역을 입력하세요."></textarea>
+                      <p id="proj-reg-route-guide" style="font-size:11px;color:var(--text-muted);margin:6px 0 0">가이드: 수주경로 유형을 선택하면 작성 포인트를 안내합니다.</p>
                     </div>
                     <div class="form-group" style="margin:12px 0 0">
                       <label class="form-label">수주경로 증빙 파일</label>
@@ -2275,13 +2624,15 @@
                           <tr><td class="proj-reg-bill-label">중도금</td><td class="proj-reg-bill-amt"><input type="text" id="proj-reg-bill-interim-amt" class="form-control proj-reg-amt-input" inputmode="numeric" placeholder="0" autocomplete="off" /></td><td class="proj-reg-bill-date"><input type="date" id="proj-reg-bill-interim-due" class="form-control" /></td></tr>
                           <tr><td class="proj-reg-bill-label">잔금</td><td class="proj-reg-bill-amt"><input type="text" id="proj-reg-bill-final-amt" class="form-control proj-reg-amt-input" inputmode="numeric" placeholder="0" autocomplete="off" /></td><td class="proj-reg-bill-date"><input type="date" id="proj-reg-bill-final-due" class="form-control" /></td></tr>
                           <tr>
-                            <td class="proj-reg-bill-label">추가보수</td>
+                            <td class="proj-reg-bill-label">Time Charge</td>
                             <td class="proj-reg-bill-terms">
                               <div class="proj-reg-bill-stack">
-                                <label class="proj-reg-bill-mini-label" for="proj-reg-bill-add-amt">금액(원)</label>
+                                <label class="proj-reg-bill-mini-label" for="proj-reg-bill-add-amt">Max(CAP) 금액</label>
                                 <input type="text" id="proj-reg-bill-add-amt" class="form-control proj-reg-amt-input" inputmode="numeric" placeholder="없으면 비움" autocomplete="off" />
-                                <label class="proj-reg-bill-mini-label" for="proj-reg-bill-add-note">조건·산정 (금액 대신 또는 병행)</label>
-                                <textarea id="proj-reg-bill-add-note" class="form-control proj-reg-bill-textarea" rows="3" placeholder="예: Time Charge (CAP 30,000,000), 시간당 ○○원 등"></textarea>
+                                <label class="proj-reg-bill-mini-label">계약단가 입력</label>
+                                <button type="button" class="btn btn-sm btn-outline" id="proj-reg-open-contract-rate-btn" onclick="projRegOpenContractRateInput()">
+                                  <i class="fas fa-sliders-h"></i> 계약단가입력
+                                </button>
                               </div>
                             </td>
                             <td class="proj-reg-bill-date proj-reg-bill-date--with-stack">
@@ -2310,6 +2661,81 @@
                           </tr>
                         </tbody>
                       </table>
+                    </div>
+                    <div style="margin:10px 0 0">
+                      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;
+                                    background:#f8fafc;border:1px solid var(--border-light);
+                                    border-radius:8px;padding:10px 12px;font-size:13px;font-weight:600;color:#0f172a">
+                        <input type="checkbox" id="proj-reg-timecharge-enabled-input"
+                               style="width:16px;height:16px;accent-color:var(--primary,#3b82f6)" />
+                        타임차지 조건 적용 (프로젝트 계약단가 설정)
+                      </label>
+                    </div>
+                    <div id="proj-reg-contract-rate-wrap" style="display:none;border:1px solid var(--border-light);border-radius:10px;padding:10px 12px;margin-top:8px;background:#f8fafc">
+                      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+                        <div style="font-size:13px;font-weight:700;color:#0f172a">타임차지 계약단가(프로젝트별) 설정</div>
+                        <div style="display:flex;gap:6px;flex-wrap:wrap">
+                          <button type="button" id="proj-reg-contract-rate-reload-btn" class="btn btn-sm btn-outline"><i class="fas fa-sync-alt"></i> 기준단가 새로고침</button>
+                          <button type="button" id="proj-reg-contract-rate-save-btn" class="btn btn-sm btn-primary"><i class="fas fa-save"></i> 계약단가 저장</button>
+                        </div>
+                      </div>
+                      <div class="table-wrapper" style="border:1px solid var(--border-light);border-radius:8px;overflow:auto;background:#fff">
+                        <table class="data-table" style="font-size:12px">
+                          <thead>
+                            <tr>
+                              <th style="width:96px">역할</th>
+                              <th style="width:120px;text-align:right">기준단가</th>
+                              <th style="width:180px">계약단가(원/h)</th>
+                              <th>비고</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td>선임</td>
+                              <td style="text-align:right"><strong id="proj-reg-contract-base-senior">0원</strong></td>
+                              <td><input type="text" id="proj-reg-contract-rate-senior" class="form-control proj-reg-amt-input" inputmode="numeric" placeholder="0" /></td>
+                              <td><input type="text" id="proj-reg-contract-note-senior" class="form-control" placeholder="선택" /></td>
+                            </tr>
+                            <tr>
+                              <td>전임</td>
+                              <td style="text-align:right"><strong id="proj-reg-contract-base-associate">0원</strong></td>
+                              <td><input type="text" id="proj-reg-contract-rate-associate" class="form-control proj-reg-amt-input" inputmode="numeric" placeholder="0" /></td>
+                              <td><input type="text" id="proj-reg-contract-note-associate" class="form-control" placeholder="선택" /></td>
+                            </tr>
+                            <tr>
+                              <td>책임</td>
+                              <td style="text-align:right"><strong id="proj-reg-contract-base-principal">0원</strong></td>
+                              <td><input type="text" id="proj-reg-contract-rate-principal" class="form-control proj-reg-amt-input" inputmode="numeric" placeholder="0" /></td>
+                              <td><input type="text" id="proj-reg-contract-note-principal" class="form-control" placeholder="선택" /></td>
+                            </tr>
+                            <tr>
+                              <td>팀장</td>
+                              <td style="text-align:right"><strong id="proj-reg-contract-base-team_lead">0원</strong></td>
+                              <td><input type="text" id="proj-reg-contract-rate-team_lead" class="form-control proj-reg-amt-input" inputmode="numeric" placeholder="0" /></td>
+                              <td><input type="text" id="proj-reg-contract-note-team_lead" class="form-control" placeholder="선택" /></td>
+                            </tr>
+                            <tr>
+                              <td>본부장</td>
+                              <td style="text-align:right"><strong id="proj-reg-contract-base-division_head">0원</strong></td>
+                              <td><input type="text" id="proj-reg-contract-rate-division_head" class="form-control proj-reg-amt-input" inputmode="numeric" placeholder="0" /></td>
+                              <td><input type="text" id="proj-reg-contract-note-division_head" class="form-control" placeholder="선택" /></td>
+                            </tr>
+                            <tr>
+                              <td>사업부장</td>
+                              <td style="text-align:right"><strong id="proj-reg-contract-base-bu_head">0원</strong></td>
+                              <td><input type="text" id="proj-reg-contract-rate-bu_head" class="form-control proj-reg-amt-input" inputmode="numeric" placeholder="0" /></td>
+                              <td><input type="text" id="proj-reg-contract-note-bu_head" class="form-control" placeholder="선택" /></td>
+                            </tr>
+                            <tr>
+                              <td>대표(한휘선)</td>
+                              <td style="text-align:right"><strong id="proj-reg-contract-base-ceo">0원</strong></td>
+                              <td><input type="text" id="proj-reg-contract-rate-ceo" class="form-control proj-reg-amt-input" inputmode="numeric" placeholder="0" /></td>
+                              <td><input type="text" id="proj-reg-contract-note-ceo" class="form-control" placeholder="선택" /></td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style="margin-top:6px;font-size:11px;color:var(--text-muted)">적용 우선순위: 프로젝트 계약단가 &gt; 사용자 표준단가</div>
                     </div>
                   </div>
                 </div>
@@ -2401,8 +2827,290 @@
                 </div>
               </aside>
             </div>
+            </div>
+
+            <div id="proj-reg-detail-panel-output" class="proj-reg-detail-panel" style="display:none;margin-top:12px">
+              <div class="card">
+                <div class="card-header">
+                  <h2><i class="fas fa-folder-open" style="color:var(--primary)"></i> 프로젝트 산출물 업로드</h2>
+                  <div class="card-actions">
+                    <button type="button" class="btn btn-sm btn-secondary" id="proj-reg-out-refresh-btn"><i class="fas fa-sync-alt"></i> 새로고침</button>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div id="proj-reg-out-project-info" class="alert alert-info" style="font-size:12px;line-height:1.5">
+                    <i class="fas fa-info-circle"></i> 먼저 프로젝트 상세를 저장(승인완료)한 후 산출물을 업로드하세요.
+                  </div>
+                  <div style="display:grid;grid-template-columns:1.3fr 1fr 1.7fr;gap:10px;margin-bottom:10px">
+                    <div class="form-group" style="margin:0">
+                      <label class="form-label">프로젝트코드</label>
+                      <input type="text" id="proj-reg-out-project-code" class="form-control" readonly style="background:#f8fafc" />
+                    </div>
+                    <div class="form-group" style="margin:0">
+                      <label class="form-label">결과물 유형</label>
+                      <select id="proj-reg-out-type" class="form-control">
+                        <option value="결과보고서">결과보고서</option>
+                        <option value="통관팀유의사항">통관팀유의사항</option>
+                      </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                      <label class="form-label">제목</label>
+                      <input type="text" id="proj-reg-out-title" class="form-control" placeholder="결과물 제목" />
+                    </div>
+                  </div>
+                  <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px;margin-bottom:10px">
+                    <div class="form-group" style="margin:0">
+                      <label class="form-label">비고</label>
+                      <input type="text" id="proj-reg-out-note" class="form-control" placeholder="메모" />
+                    </div>
+                    <div class="form-group" style="margin:0">
+                      <label class="form-label">파일</label>
+                      <input type="file" id="proj-reg-out-file" class="form-control" />
+                    </div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px;justify-content:flex-end">
+                    <span id="proj-reg-out-summary" style="font-size:12px;color:var(--text-secondary);margin-right:auto">총 0건</span>
+                    <button type="button" class="btn btn-sm btn-primary" id="proj-reg-out-upload-btn"><i class="fas fa-upload"></i> 업로드</button>
+                  </div>
+                  <div style="margin-top:8px;font-size:11.5px;color:var(--text-muted);line-height:1.55">
+                    <i class="fas fa-circle-info" style="color:var(--primary);margin-right:4px"></i>
+                    통관유의사항 필수 코드유형은 결과보고서 업로드 시 조치완료(본부장/사업부장 중 1명 이상) 조건을 검사합니다.
+                  </div>
+                </div>
+                <div class="card-body" style="padding:0">
+                  <div class="table-wrapper" style="border:none;border-radius:0;overflow:auto">
+                    <table class="data-table">
+                      <thead>
+                        <tr>
+                          <th style="width:42px;text-align:center">No</th>
+                          <th style="width:110px">유형</th>
+                          <th style="width:220px">제목</th>
+                          <th style="width:110px">업로드자</th>
+                          <th style="width:95px">업로드일</th>
+                          <th style="width:90px;text-align:center">파일</th>
+                          <th>비고</th>
+                        </tr>
+                      </thead>
+                      <tbody id="proj-reg-out-body">
+                        <tr><td colspan="7" class="table-empty"><i class="fas fa-folder-open"></i><p>산출물 데이터를 불러오는 중입니다.</p></td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
+        </div>
+
+        <div class="modal-overlay" id="pmProgressDetailModal">
+          <div class="modal pm-detail-modal">
+            <div class="modal-header">
+              <h3><i class="fas fa-clipboard-list" style="color:var(--primary)"></i> 프로젝트 수행상세</h3>
+              <button class="btn-close" onclick="closeModal('pmProgressDetailModal')">×</button>
+            </div>
+            <div class="modal-body pm-detail-body">
+              <div id="pm-detail-project-summary" class="alert alert-info pm-detail-summary">
+                프로젝트를 불러오는 중입니다.
+              </div>
+              <div class="pm-tabs pm-detail-tabs">
+                <button type="button" class="pm-tab is-active" data-pm-detail-tab="ops" onclick="pmProgressDetailSwitchTab('ops')">
+                  <i class="fas fa-briefcase"></i> 업무수행 상세
+                </button>
+                <button type="button" class="pm-tab" data-pm-detail-tab="output" onclick="pmProgressDetailSwitchTab('output')">
+                  <i class="fas fa-file-upload"></i> 결과물 업로드
+                </button>
+              </div>
+
+              <div id="pm-detail-panel-ops" class="pm-detail-card">
+                <div class="pm-detail-grid">
+                  <div class="form-group pm-detail-field">
+                    <label class="form-label">총괄 프로젝트 매니저 (CPM)</label>
+                    <select id="pm-detail-cpm" class="form-control"></select>
+                  </div>
+                  <div class="form-group pm-detail-field">
+                    <label class="form-label">용역 시작일</label>
+                    <input type="date" id="pm-detail-start-date" class="form-control" />
+                  </div>
+                </div>
+                <div class="form-group pm-detail-assistant-group">
+                  <div class="pm-detail-assistant-head">
+                    <div>
+                      <label class="form-label" style="margin:0">투입인력현황</label>
+                      <p class="pm-detail-assistant-help">실제 용역 투입인력을 입력하세요. (수주참여자 정보와 별개)</p>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline pm-detail-add-btn" onclick="pmProgressDetailAddAssistantRow()">
+                      <i class="fas fa-plus"></i> 인력 추가
+                    </button>
+                  </div>
+                  <div class="table-wrapper pm-detail-assistant-wrap">
+                    <table class="data-table pm-detail-assistant-table" style="table-layout:fixed;min-width:980px">
+                      <thead>
+                        <tr>
+                          <th style="width:44px;text-align:center">No</th>
+                          <th style="width:170px">이름</th>
+                          <th style="width:120px">직급</th>
+                          <th style="width:210px">역할</th>
+                          <th style="width:210px;text-align:center">투입빈도</th>
+                          <th>비고</th>
+                          <th style="width:74px;text-align:center">관리</th>
+                        </tr>
+                      </thead>
+                      <tbody id="pm-detail-assistant-body">
+                        <tr><td colspan="7" class="table-empty"><i class="fas fa-users"></i><p>등록된 투입인력이 없습니다.</p></td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <datalist id="pm-detail-assistant-user-list"></datalist>
+                </div>
+                <div class="pm-detail-actions">
+                  <button type="button" class="btn btn-primary" id="pm-detail-save-btn"><i class="fas fa-save"></i> 저장</button>
+                </div>
+              </div>
+
+              <div id="pm-detail-panel-output" class="pm-detail-card" style="display:none">
+                <div class="pm-detail-grid pm-detail-output-grid">
+                  <div class="form-group pm-detail-field">
+                    <label class="form-label">프로젝트코드</label>
+                    <input type="text" id="pm-detail-output-code" class="form-control" readonly style="background:#f8fafc" />
+                  </div>
+                  <div class="form-group pm-detail-field">
+                    <label class="form-label">고객사</label>
+                    <input type="text" id="pm-detail-output-client" class="form-control" readonly style="background:#f8fafc" />
+                  </div>
+                  <div class="form-group pm-detail-field">
+                    <label class="form-label">결과물 유형</label>
+                    <select id="pm-detail-output-type" class="form-control">
+                      <option value="결과보고서">결과보고서</option>
+                      <option value="통관팀유의사항">통관팀유의사항</option>
+                    </select>
+                  </div>
+                  <div class="form-group pm-detail-field">
+                    <label class="form-label">제목</label>
+                    <input type="text" id="pm-detail-output-title" class="form-control" placeholder="결과물 제목" />
+                  </div>
+                </div>
+                <div class="pm-detail-grid pm-detail-output-grid-2">
+                  <div class="form-group pm-detail-field">
+                    <label class="form-label">비고</label>
+                    <input type="text" id="pm-detail-output-note" class="form-control" placeholder="메모" />
+                  </div>
+                  <div class="form-group pm-detail-field">
+                    <label class="form-label">파일</label>
+                    <input type="file" id="pm-detail-output-file" class="form-control" />
+                  </div>
+                </div>
+                <div id="pm-detail-output-target-wrap" class="pm-detail-grid pm-detail-output-target-grid" style="margin-top:10px;display:none">
+                  <div class="form-group pm-detail-field">
+                    <label class="form-label">통관유의사항 대상 사업부 <span class="required">*</span></label>
+                    <select id="pm-detail-output-target-dept" class="form-control">
+                      <option value="">선택</option>
+                    </select>
+                  </div>
+                  <div class="form-group pm-detail-field">
+                    <label class="form-label">통관유의사항 대상 본부 <span class="required">*</span></label>
+                    <select id="pm-detail-output-target-hq" class="form-control">
+                      <option value="">선택</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="pm-detail-output-actions">
+                  <span id="pm-detail-output-summary" style="font-size:12px;color:var(--text-secondary);margin-right:auto">총 0건</span>
+                  <button type="button" class="btn btn-sm btn-secondary" id="pm-detail-output-refresh-btn"><i class="fas fa-sync-alt"></i> 새로고침</button>
+                  <button type="button" class="btn btn-sm btn-primary" id="pm-detail-output-upload-btn"><i class="fas fa-upload"></i> 업로드</button>
+                </div>
+                <div class="table-wrapper pm-detail-output-wrap">
+                  <table class="data-table pm-detail-output-table">
+                    <thead>
+                      <tr>
+                        <th style="width:44px;text-align:center">No</th>
+                        <th style="width:180px">고객사</th>
+                        <th style="width:110px">유형</th>
+                        <th>제목</th>
+                        <th style="width:95px">업로드일</th>
+                        <th style="width:98px;text-align:center">상태</th>
+                        <th style="width:90px;text-align:center">파일</th>
+                        <th style="width:90px;text-align:center">후속처리</th>
+                      </tr>
+                    </thead>
+                    <tbody id="pm-detail-output-body">
+                      <tr><td colspan="8" class="table-empty"><i class="fas fa-folder-open"></i><p>결과물 데이터를 불러오는 중입니다.</p></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-ghost" onclick="closeModal('pmProgressDetailModal')">닫기</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-overlay" id="pmOutputActionModal">
+          <div class="modal modal-sm">
+            <div class="modal-header">
+              <h3><i class="fas fa-clipboard-check" style="color:var(--primary)"></i> 통관유의사항 조치 등록</h3>
+              <button class="btn-close" onclick="closeModal('pmOutputActionModal')">×</button>
+            </div>
+            <div class="modal-body">
+              <input type="hidden" id="pm-output-action-output-id" />
+              <div class="alert alert-info" style="font-size:12px;line-height:1.5">
+                <i class="fas fa-info-circle"></i>
+                <span id="pm-output-action-summary">선택된 유의사항을 확인하세요.</span>
+              </div>
+              <div class="form-group">
+                <label class="form-label">조치상태</label>
+                <select id="pm-output-action-status" class="form-control">
+                  <option value="confirmed">확인</option>
+                  <option value="in_progress">진행중</option>
+                  <option value="completed">완료</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin-bottom:0">
+                <label class="form-label">조치내용</label>
+                <textarea id="pm-output-action-note" class="form-control" rows="4" placeholder="조치사항을 입력하세요."></textarea>
+              </div>
+              <div id="pm-output-action-history" style="margin-top:10px;border-top:1px solid var(--border-light);padding-top:8px;font-size:12px;color:var(--text-secondary)">
+                등록된 조치 이력이 없습니다.
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-ghost" onclick="closeModal('pmOutputActionModal')">닫기</button>
+              <button class="btn btn-primary" onclick="pmSaveOutputAction()"><i class="fas fa-save"></i> 저장</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-overlay" id="pmOutputPublishModal">
+          <div class="modal modal-sm">
+            <div class="modal-header">
+              <h3><i class="fas fa-bullhorn" style="color:var(--primary)"></i> 결과보고서 게시 처리</h3>
+              <button class="btn-close" onclick="closeModal('pmOutputPublishModal')">×</button>
+            </div>
+            <div class="modal-body">
+              <input type="hidden" id="pm-output-publish-output-id" />
+              <div class="alert alert-info" style="font-size:12px;line-height:1.5">
+                <i class="fas fa-info-circle"></i>
+                <span id="pm-output-publish-summary">선택된 결과보고서를 확인하세요.</span>
+              </div>
+              <div class="form-group">
+                <label class="form-label">게시상태</label>
+                <select id="pm-output-publish-status" class="form-control">
+                  <option value="published">게시</option>
+                  <option value="hold">보류</option>
+                  <option value="blocked">금지</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin-bottom:0">
+                <label class="form-label">처리 사유</label>
+                <textarea id="pm-output-publish-note" class="form-control" rows="4" placeholder="게시/보류/금지 처리 사유를 입력하세요."></textarea>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-ghost" onclick="closeModal('pmOutputPublishModal')">닫기</button>
+              <button class="btn btn-primary" onclick="pmSaveOutputPublishDecision()"><i class="fas fa-save"></i> 저장</button>
+            </div>
+          </div>
         </div>
 
         <div id="pm-panel-timecharge" style="display:none">
@@ -2410,57 +3118,142 @@
             <div class="card-header" style="align-items:flex-start">
               <div>
                 <h2 style="margin:0">Time Charge</h2>
-                <p style="margin:6px 0 0;font-size:12.5px;color:var(--text-secondary)">승인된 타임시트를 프로젝트코드 기준으로 불러와 인력별로 통합하고 청구 라인으로 보정합니다.</p>
               </div>
               <div class="card-actions">
                 <span id="pm-tc-status-badge" class="badge badge-gray">배치 없음</span>
               </div>
             </div>
             <div class="card-body">
-              <div class="pm-filter-grid pm-inv-detail-grid-main">
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">프로젝트</label>
-                  <select id="pm-tc-project" class="form-control"></select>
-                </div>
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">청구월</label>
-                  <input type="month" id="pm-tc-month" class="form-control" />
-                </div>
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">라인 통합 기준</label>
-                  <input type="text" class="form-control" value="투입인력 + 작업일 + 업무유형" readonly />
-                </div>
-              </div>
-              <div class="pm-action-row">
-                <button type="button" class="btn btn-sm btn-primary" id="pm-tc-import-btn"><i class="fas fa-download"></i> 승인 타임시트 불러오기</button>
-                <button type="button" class="btn btn-sm btn-secondary" id="pm-tc-save-btn"><i class="fas fa-save"></i> 조정 내역 저장</button>
-                <button type="button" class="btn btn-sm btn-outline" id="pm-tc-request-btn"><i class="fas fa-paper-plane"></i> 세금계산서 발행 요청</button>
-                <span id="pm-tc-summary" class="pm-summary-text">라인 0건 · 청구금액 0원</span>
-              </div>
-            </div>
-            <div class="card-body" style="padding:0">
-              <div class="table-wrapper" style="border:none;border-radius:0;overflow:auto">
-                <table class="data-table pm-tc-table">
-                  <thead>
-                    <tr>
-                      <th style="width:42px;text-align:center">No</th>
-                      <th style="width:84px">작업일</th>
-                      <th style="width:90px">투입인력</th>
-                      <th style="width:94px">업무유형</th>
-                      <th>수행내역</th>
-                      <th style="width:86px;text-align:right">원본시간</th>
-                      <th style="width:88px;text-align:right">조정시간</th>
-                      <th style="width:110px;text-align:right">기준단가</th>
-                      <th style="width:124px;text-align:right">청구금액</th>
-                      <th style="width:88px;text-align:center">단가출처</th>
-                      <th style="width:80px;text-align:center">청구여부</th>
-                      <th style="width:180px">조정사유</th>
-                    </tr>
-                  </thead>
-                  <tbody id="pm-tc-body">
-                    <tr><td colspan="12" class="table-empty"><i class="fas fa-layer-group"></i><p>불러온 라인이 없습니다.</p></td></tr>
-                  </tbody>
-                </table>
+              <div class="pm-tc-stage-wrap">
+                <section class="pm-tc-stage-card">
+                  <div class="pm-tc-stage-head">
+                    <h3>Time Charge 청구대상</h3>
+                  </div>
+                  <div class="pm-filter-grid pm-inv-detail-grid-main pm-inv-list-filter-grid">
+                    <div class="form-group" style="margin:0">
+                      <input type="text" id="pm-tc-client-search" class="form-control" list="pm-tc-client-options" placeholder="고객사명 입력 후 목록에서 지정" />
+                      <datalist id="pm-tc-client-options"></datalist>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                      <select id="pm-tc-main-code" class="form-control">
+                        <option value="">전체 대분류</option>
+                      </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                      <select id="pm-tc-project" class="form-control"></select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                      <label class="form-label">데이터 소스</label>
+                      <select id="pm-tc-data-source" class="form-control">
+                        <option value="mixed">혼합(타임시트 + 엑셀)</option>
+                        <option value="timesheet">타임시트만</option>
+                        <option value="excel">엑셀만</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="pm-action-row pm-tc-stage-actions">
+                    <button type="button" class="btn btn-sm btn-outline" id="pm-tc-download-template-btn"><i class="fas fa-file-excel"></i> 업로드 양식</button>
+                    <button type="button" class="btn btn-sm btn-outline" id="pm-tc-upload-open-btn"><i class="fas fa-upload"></i> 타임시트 엑셀 업로드</button>
+                    <button type="button" class="btn btn-sm btn-primary" id="pm-tc-import-btn"><i class="fas fa-download"></i> 승인 타임시트 불러오기</button>
+                    <button type="button" class="btn btn-sm btn-secondary" id="pm-tc-upload-save-btn" style="display:none"><i class="fas fa-check"></i> 검토 확정</button>
+                    <button type="button" class="btn btn-sm btn-ghost" id="pm-tc-upload-cancel-btn" style="display:none"><i class="fas fa-times"></i> 업로드 취소</button>
+                    <button type="button" class="btn btn-sm btn-ghost" id="pm-tc-save-btn" style="display:none"><i class="fas fa-save"></i> 저장</button>
+                  </div>
+                  <div id="pm-tc-source-guide" class="pm-summary-text">혼합 모드에서는 승인 타임시트 불러오기와 엑셀 업로드를 함께 사용할 수 있습니다. (중복 기준: 프로젝트코드+일자+컨설턴트+시작/종료시간+내용)</div>
+                  <input type="file" id="pm-tc-upload-file" accept=".xlsx,.xls" style="display:none" />
+                  <div id="pm-tc-upload-preview" class="pm-summary-text" style="display:none"></div>
+                  <div id="pm-tc-pending-wrap" style="display:none;margin-top:10px">
+                    <div class="pm-summary-text" style="margin-bottom:6px">저장 전 검토 목록</div>
+                    <div class="table-wrapper" style="border:1px solid var(--border-light);border-radius:8px;overflow:auto">
+                      <table class="data-table pm-tc-table">
+                        <thead>
+                          <tr>
+                            <th style="width:42px;text-align:center">No</th>
+                            <th style="width:120px">용역일자</th>
+                            <th style="width:140px">컨설턴트</th>
+                            <th style="width:130px">수행시간</th>
+                            <th style="width:95px">투입시간</th>
+                            <th style="width:130px">수행장소</th>
+                            <th>수행업무</th>
+                            <th style="width:100px">상태</th>
+                          </tr>
+                        </thead>
+                        <tbody id="pm-tc-pending-body">
+                          <tr><td colspan="8" class="table-empty"><i class="fas fa-inbox"></i><p>검토 중인 데이터가 없습니다.</p></td></tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </section>
+                <section class="pm-tc-stage-card">
+                  <div class="pm-tc-stage-head">
+                    <h3>Time Charge 청구현황</h3>
+                  </div>
+                  <div class="pm-tc-doc-canvas">
+                    <div id="pm-tc-doc-status-wrap">
+                      <div class="table-wrapper pm-tc-status-summary-wrap" style="border:1px solid var(--border-light);border-radius:8px;overflow:auto;margin-bottom:10px">
+                        <table class="data-table pm-tc-table">
+                          <thead>
+                            <tr>
+                              <th style="width:42px;text-align:center">No</th>
+                              <th style="width:170px">프로젝트코드</th>
+                              <th>고객사</th>
+                              <th style="width:90px">건수</th>
+                              <th style="width:130px">총투입시간</th>
+                              <th style="width:130px">청구금액</th>
+                              <th style="width:90px">상세</th>
+                            </tr>
+                          </thead>
+                          <tbody id="pm-tc-status-summary-body">
+                            <tr><td colspan="7" class="table-empty"><i class="fas fa-layer-group"></i><p>프로젝트코드를 선택하세요.</p></td></tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      <div class="table-wrapper" style="border:none;border-radius:0;overflow:auto">
+                        <table id="pm-tc-table-overall" class="data-table pm-tc-table">
+                          <thead>
+                            <tr>
+                              <th style="width:42px;text-align:center">No</th>
+                              <th style="width:160px">Consultant</th>
+                              <th style="width:120px">Position</th>
+                              <th style="width:130px;text-align:right">Time Rate</th>
+                              <th style="width:95px;text-align:right">Time</th>
+                              <th style="width:130px;text-align:right">Time Charge</th>
+                            </tr>
+                          </thead>
+                          <tbody id="pm-tc-body">
+                            <tr><td colspan="6" class="table-empty"><i class="fas fa-layer-group"></i><p>불러온 라인이 없습니다.</p></td></tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                    <div id="pm-tc-doc-invoice-wrap" style="display:none">
+                      <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:8px">
+                        <button type="button" class="btn btn-sm btn-outline" id="pm-tc-invoice-pdf-btn"><i class="fas fa-file-pdf"></i> PDF 다운로드</button>
+                        <button type="button" class="btn btn-sm btn-ghost" id="pm-tc-invoice-close-btn"><i class="fas fa-times"></i> 닫기</button>
+                      </div>
+                      <div id="pm-tc-invoice-preview" class="pm-inv-doc-preview">
+                        <div class="pm-inv-doc-preview-empty">청구서 미리보기를 실행하면 문서가 표시됩니다.</div>
+                      </div>
+                    </div>
+                    <div id="pm-tc-doc-tax-wrap" style="display:none">
+                      <div id="pm-tc-tax-preview" class="pm-inv-doc-preview">
+                        <div class="pm-inv-doc-preview-empty">세금계산서 미리보기를 실행하면 문서가 표시됩니다.</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="pm-tc-stage-kpis pm-tc-validation-kpis" style="display:none">
+                    <div class="pm-kpi-card"><div class="pm-kpi-label">검토 건수</div><div class="pm-kpi-value" id="pm-tc-stage2-count">0건</div></div>
+                    <div class="pm-kpi-card"><div class="pm-kpi-label">검토 시간</div><div class="pm-kpi-value" id="pm-tc-stage2-minutes">0분</div></div>
+                    <div class="pm-kpi-card"><div class="pm-kpi-label">오류/중복</div><div class="pm-kpi-value" id="pm-tc-stage2-issues">0 / 0</div></div>
+                  </div>
+                  <div class="pm-summary-text pm-tc-validation-guide">현황표 검증 후 <b>청구서 생성·출력</b>을 먼저 수행하고, 그 다음 세금계산서 발행요청을 진행하세요.</div>
+                  <div class="pm-action-row pm-tc-stage-actions pm-tc-doc-actions pm-tc-bottom-bar">
+                    <button type="button" class="btn btn-sm btn-outline" id="pm-tc-generate-print-btn"><i class="fas fa-print"></i> 청구서 생성·출력</button>
+                    <button type="button" class="btn btn-sm btn-primary" id="pm-tc-request-btn"><i class="fas fa-paper-plane"></i> 세금계산서 발행요청</button>
+                    <span id="pm-tc-summary" class="pm-summary-text">현재 배치 0건 · 공급가액 0원</span>
+                  </div>
+                </section>
               </div>
             </div>
           </div>
@@ -2474,20 +3267,50 @@
                 <p style="margin:6px 0 0;font-size:12.5px;color:var(--text-secondary)">입금예정일 초과/미수금 관리, 발행 요청, 입금확인을 처리합니다.</p>
               </div>
             </div>
-            <div class="card-body">
-              <div class="pm-summary-text" style="font-weight:700;margin:8px 0 6px">세금계산서 발행현황 조회</div>
-              <div class="pm-filter-grid pm-inv-detail-grid-main">
+            <div class="card-body pm-inv-overview-body">
+              <div class="pm-inv-kpi-grid">
+                <div class="pm-inv-kpi-card">
+                  <p class="pm-inv-kpi-label">당월 발행예정</p>
+                  <p class="pm-inv-kpi-value" id="pm-inv-kpi-planned-count">0건</p>
+                  <p class="pm-inv-kpi-sub" id="pm-inv-kpi-planned-amt">0원</p>
+                </div>
+                <div class="pm-inv-kpi-card">
+                  <p class="pm-inv-kpi-label">당월 발행완료</p>
+                  <p class="pm-inv-kpi-value" id="pm-inv-kpi-issued-count">0건</p>
+                  <p class="pm-inv-kpi-sub" id="pm-inv-kpi-issued-amt">0원</p>
+                </div>
+                <div class="pm-inv-kpi-card">
+                  <p class="pm-inv-kpi-label">예정대비 발행률</p>
+                  <p class="pm-inv-kpi-value" id="pm-inv-kpi-rate">0%</p>
+                  <p class="pm-inv-kpi-sub">건수 기준</p>
+                </div>
+                <div class="pm-inv-kpi-card">
+                  <p class="pm-inv-kpi-label">지연 건수</p>
+                  <p class="pm-inv-kpi-value" id="pm-inv-kpi-delayed-count">0건</p>
+                  <p class="pm-inv-kpi-sub">예정일 경과 미발행</p>
+                </div>
+              </div>
+              <div class="pm-summary-text pm-inv-filter-title">세금계산서 조회 조건</div>
+              <div class="pm-filter-grid pm-inv-detail-grid-main pm-inv-list-filter-grid">
                 <div class="form-group" style="margin:0">
                   <label class="form-label">고객사</label>
-                  <select id="pm-inv-filter-client" class="form-control"></select>
+                  <input type="text" id="pm-inv-filter-client" class="form-control" placeholder="고객사명 검색" />
                 </div>
                 <div class="form-group" style="margin:0">
-                  <label class="form-label">PM</label>
-                  <select id="pm-inv-filter-pm" class="form-control"></select>
+                  <label class="form-label">CPM</label>
+                  <input type="text" id="pm-inv-filter-pm" class="form-control" placeholder="CPM 이름 검색" />
                 </div>
                 <div class="form-group" style="margin:0">
-                  <label class="form-label">소속</label>
-                  <select id="pm-inv-filter-team" class="form-control"></select>
+                  <label class="form-label">사업부</label>
+                  <select id="pm-inv-filter-dept" class="form-control"></select>
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">본부</label>
+                  <select id="pm-inv-filter-hq" class="form-control"></select>
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">조회월</label>
+                  <input type="month" id="pm-inv-month" class="form-control" />
                 </div>
               </div>
               <div id="pm-inv-hidden-fields" style="display:none" aria-hidden="true">
@@ -2500,34 +3323,66 @@
                   <option value="paid">입금완료</option>
                   <option value="overdue">입금지연</option>
                 </select>
-                <input type="month" id="pm-inv-month" />
               </div>
               <div class="pm-action-row">
                 <button type="button" class="btn btn-sm btn-primary" id="pm-inv-load-btn"><i class="fas fa-search"></i> 조회</button>
-                <span id="pm-inv-summary" class="pm-summary-text">미수금 0원</span>
+                <span id="pm-inv-summary" class="pm-summary-text">당월 기준</span>
                 <span id="pm-inv-quality-summary" class="pm-summary-text">정합성 점검 대기</span>
               </div>
+              <div id="pm-inv-alert-guide" class="pm-inv-alert-guide" style="display:none"></div>
             </div>
             <div class="card-body" style="padding:0">
-              <div class="table-wrapper" style="border:none;border-radius:0;overflow:auto">
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th style="width:42px;text-align:center">No</th>
-                      <th style="width:110px">프로젝트코드</th>
-                      <th style="width:180px">고객사명</th>
-                      <th style="width:120px">소속</th>
-                      <th style="width:88px">PM</th>
-                      <th style="width:84px">청구월</th>
-                      <th style="width:116px;text-align:right">발행금액</th>
-                      <th style="width:116px;text-align:right">미수금</th>
-                      <th style="width:48px;text-align:center;padding-left:4px;padding-right:4px" class="pm-inv-action-th" aria-label="발행·입금 내역"></th>
-                    </tr>
-                  </thead>
-                  <tbody id="pm-inv-body">
-                    <tr><td colspan="9" class="table-empty"><i class="fas fa-file-invoice"></i><p>발행 내역이 없습니다.</p></td></tr>
-                  </tbody>
-                </table>
+              <div class="pm-tabs pm-inv-tabs-wrap" style="padding:10px 12px 0">
+                <button type="button" class="pm-tab is-active" data-pm-inv-tab="planned" onclick="pmInvoiceSwitchListTab('planned')">
+                  <i class="fas fa-calendar-check"></i> 발행예정목록
+                </button>
+                <button type="button" class="pm-tab" data-pm-inv-tab="issued" onclick="pmInvoiceSwitchListTab('issued')">
+                  <i class="fas fa-file-invoice-dollar"></i> 발행목록
+                </button>
+              </div>
+              <div id="pm-inv-tab-planned-wrap" class="pm-inv-tab-panel" style="display:block">
+                <div class="table-wrapper" style="border:none;border-radius:0;overflow:auto">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th style="width:42px;text-align:center">No</th>
+                        <th style="width:130px">프로젝트코드</th>
+                        <th style="width:200px">고객사</th>
+                        <th style="width:92px">CPM</th>
+                        <th style="width:110px;text-align:center">예정일</th>
+                        <th style="width:130px;text-align:right">예정금액(공급가액)</th>
+                        <th style="width:90px;text-align:center">요청자</th>
+                        <th style="width:120px;text-align:center">요청일시</th>
+                        <th style="width:90px;text-align:center">상태</th>
+                        <th style="width:54px;text-align:center;padding-left:6px;padding-right:6px" class="pm-inv-action-th" aria-label="상세"></th>
+                      </tr>
+                    </thead>
+                    <tbody id="pm-inv-planned-body">
+                      <tr><td colspan="10" class="table-empty"><i class="fas fa-calendar-check"></i><p>발행예정 내역이 없습니다.</p></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div id="pm-inv-tab-issued-wrap" class="pm-inv-tab-panel" style="display:none">
+                <div class="table-wrapper" style="border:none;border-radius:0;overflow:auto">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th style="width:42px;text-align:center">No</th>
+                        <th style="width:136px;text-align:center">프로젝트코드</th>
+                        <th style="width:220px">고객사</th>
+                        <th style="width:108px;text-align:center">발행일</th>
+                        <th style="width:170px;text-align:center">세금계산서번호</th>
+                        <th style="width:150px;text-align:right">발행금액(VAT포함)</th>
+                        <th style="width:108px;text-align:center">입금상태</th>
+                        <th style="width:54px;text-align:center;padding-left:6px;padding-right:6px" class="pm-inv-action-th" aria-label="상세"></th>
+                      </tr>
+                    </thead>
+                    <tbody id="pm-inv-issued-body">
+                      <tr><td colspan="8" class="table-empty"><i class="fas fa-file-invoice"></i><p>당월 발행 내역이 없습니다.</p></td></tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
             <div class="card-body" id="pm-inv-detail-wrap" style="display:none;border-top:1px solid var(--border-light)">
@@ -2549,54 +3404,157 @@
                       <th style="width:42px;text-align:center">No</th>
                       <th style="width:130px">청구유형</th>
                       <th style="width:92px">예정일</th>
-                      <th style="width:120px;text-align:right">예정금액</th>
+                      <th style="width:120px;text-align:right">예정금액(공급가액)</th>
+                      <th style="width:120px;text-align:right">요청합계</th>
+                      <th style="width:120px;text-align:right">잔액</th>
                     </tr>
                   </thead>
                   <tbody id="pm-inv-plan-body">
-                    <tr><td colspan="4" class="table-empty"><i class="fas fa-calendar-check"></i><p>청구일정 정보가 없습니다.</p></td></tr>
+                    <tr><td colspan="6" class="table-empty"><i class="fas fa-calendar-check"></i><p>청구일정 정보가 없습니다.</p></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div id="pm-inv-plan-selection-hint" class="pm-summary-text" style="margin:-2px 0 8px 0">발행 대상을 선택하면 요청금액과 잔액 검증이 자동 적용됩니다.</div>
+              <div id="pm-inv-lock-guide" class="pm-summary-text" style="display:none;margin:-2px 0 8px 0;color:#92400e"></div>
+              <div class="pm-inv-section-title"><i class="fas fa-list-check"></i><span>청구비용 항목(고객청구/공통)</span></div>
+              <div class="pm-action-row" style="margin:0 0 6px 0">
+                <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);cursor:pointer">
+                  <input type="checkbox" id="pm-inv-include-billable-costs" checked />
+                  청구비용 항목을 이번 발행요청에 포함
+                </label>
+                <span id="pm-inv-billable-cost-summary" class="pm-summary-text" style="margin-left:auto">청구비용 항목 0건 · 공급가액 0원</span>
+                <button type="button" class="btn btn-sm btn-ghost" id="pm-inv-billable-toggle-btn"><i class="fas fa-chevron-down"></i> 상세보기</button>
+              </div>
+              <div class="table-wrapper" id="pm-inv-billable-wrap" style="margin-bottom:10px;display:none">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th style="width:42px;text-align:center">No</th>
+                      <th style="width:96px">비용일자</th>
+                      <th style="width:110px">비용유형</th>
+                      <th style="width:160px">비용내역</th>
+                      <th style="width:130px;text-align:right">청구대상(원화)</th>
+                      <th>비고</th>
+                    </tr>
+                  </thead>
+                  <tbody id="pm-inv-billable-cost-body">
+                    <tr><td colspan="6" class="table-empty"><i class="fas fa-receipt"></i><p>청구 가능한 비용 항목이 없습니다.</p></td></tr>
                   </tbody>
                 </table>
               </div>
               <div class="pm-inv-section-title"><i class="fas fa-pen-to-square"></i><span>세금계산서 신규 발행</span></div>
-              <div class="pm-filter-grid pm-inv-detail-grid-main">
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">예상청구일정</label>
-                  <input type="date" id="pm-inv-planned-issue-date" class="form-control" />
+              <section class="pm-inv-form-section">
+                <div class="pm-inv-form-section-title"><span>1. 청구유형과 청구예정일 관리항목</span></div>
+                <div id="pm-inv-request-mode-guide" class="pm-summary-text pm-inv-request-mode-guide" style="margin:0 0 8px 0">
+                  청구유형을 먼저 선택하세요.
                 </div>
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">예상입금일정</label>
-                  <input type="date" id="pm-inv-expected-pay-date" class="form-control" />
+                <div class="pm-filter-grid pm-inv-grid-policy">
+                  <div class="form-group pm-inv-request-mode-group" style="margin:0">
+                    <label class="form-label">청구유형(필수)</label>
+                    <select id="pm-inv-request-mode" class="form-control">
+                      <option value="merged">합산(용역 + 청구비용)</option>
+                      <option value="service_only">용역대금 단독</option>
+                      <option value="cost_only">청구비용 단독</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label">세금계산서 발행예정일(연기 가능)</label>
+                    <input type="date" id="pm-inv-planned-issue-date" class="form-control" />
+                  </div>
                 </div>
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">수신자 이메일</label>
-                  <input type="email" id="pm-inv-recipient-email" class="form-control" placeholder="email@company.com" />
+              </section>
+
+              <section class="pm-inv-form-section">
+                <div class="pm-inv-form-section-title"><span>2. 세금계산서 발행 대상금액</span></div>
+                <div class="pm-filter-grid pm-inv-grid-amount">
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label">용역대금(공급가액, VAT별도)</label>
+                    <input type="text" id="pm-inv-invoice-amount" class="form-control" inputmode="numeric" placeholder="용역대금 입력" />
+                  </div>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label">청구비용 합계(공급가액)</label>
+                    <input type="text" id="pm-inv-billable-cost-amount" class="form-control" readonly />
+                  </div>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label">부가세</label>
+                    <input type="text" id="pm-inv-vat-amount" class="form-control" readonly />
+                  </div>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label">합계금액(VAT포함)</label>
+                    <input type="text" id="pm-inv-total-amount" class="form-control" readonly />
+                  </div>
+                  <div class="form-group" id="pm-inv-service-item-wrap" style="margin:0">
+                    <label class="form-label">용역대금 품목</label>
+                    <input type="text" id="pm-inv-service-item-name" class="form-control" placeholder="예: Customs Corporate Audit 용역" />
+                  </div>
+                  <div class="form-group" id="pm-inv-cost-item-wrap" style="margin:0">
+                    <label class="form-label">청구비용 품목</label>
+                    <input type="text" id="pm-inv-cost-item-name" class="form-control" placeholder="예: 프로젝트비용" />
+                  </div>
+                  <div class="form-group" id="pm-inv-service-item-change-wrap" style="margin:0;display:none">
+                    <label class="form-label">용역 품목 변경사유(필수)</label>
+                    <select id="pm-inv-service-item-change-reason-select" class="form-control">
+                      <option value="">변경사유 선택</option>
+                      <option value="customer_request">고객 요청</option>
+                      <option value="contract_alignment">계약 문구 일치</option>
+                      <option value="internal_correction">내부 정정</option>
+                      <option value="other">기타</option>
+                    </select>
+                    <input type="text" id="pm-inv-service-item-change-reason-text" class="form-control" style="margin-top:6px;display:none" placeholder="기타 사유를 입력하세요" />
+                  </div>
+                  <div class="form-group" id="pm-inv-cost-item-change-wrap" style="margin:0;display:none">
+                    <label class="form-label">청구비용 품목 변경사유(필수)</label>
+                    <select id="pm-inv-cost-item-change-reason-select" class="form-control">
+                      <option value="">변경사유 선택</option>
+                      <option value="customer_request">고객 요청</option>
+                      <option value="contract_alignment">계약 문구 일치</option>
+                      <option value="internal_correction">내부 정정</option>
+                      <option value="other">기타</option>
+                    </select>
+                    <input type="text" id="pm-inv-cost-item-change-reason-text" class="form-control" style="margin-top:6px;display:none" placeholder="기타 사유를 입력하세요" />
+                  </div>
                 </div>
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">수신자 성명 / 연락처</label>
-                  <input type="text" id="pm-inv-recipient-name" class="form-control" placeholder="홍길동 / 010-0000-0000" />
+              </section>
+
+              <section class="pm-inv-form-section">
+                <div class="pm-inv-form-section-title"><span>3. 세금계산서 발행 상세내용</span></div>
+                <div class="pm-filter-grid pm-inv-detail-grid-main">
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label">수신자 이메일</label>
+                    <input type="email" id="pm-inv-recipient-email" class="form-control" placeholder="email@company.com" />
+                  </div>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label">수신자 성명 / 연락처</label>
+                    <input type="text" id="pm-inv-recipient-name" class="form-control" placeholder="홍길동 / 010-0000-0000" />
+                  </div>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label">공급받는자 상호</label>
+                    <input type="text" id="pm-inv-buyer-company" class="form-control" placeholder="고객사 상호" />
+                  </div>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label">공급받는자 사업자번호</label>
+                    <input type="text" id="pm-inv-buyer-bizno" class="form-control" placeholder="000-00-00000" />
+                  </div>
                 </div>
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">공급받는자 상호</label>
-                  <input type="text" id="pm-inv-buyer-company" class="form-control" placeholder="고객사 상호" />
+                <div class="pm-filter-grid pm-inv-detail-grid-note" style="grid-template-columns:1fr">
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label">사업자등록증 첨부(선택)</label>
+                    <input type="file" id="pm-inv-biz-cert-file" class="form-control" accept=".pdf,.png,.jpg,.jpeg,.webp" />
+                    <div id="pm-inv-biz-cert-meta" class="pm-summary-text" style="margin-top:4px">첨부 파일 없음</div>
+                  </div>
                 </div>
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">공급받는자 사업자번호</label>
-                  <input type="text" id="pm-inv-buyer-bizno" class="form-control" placeholder="000-00-00000" />
-                </div>
-              </div>
-              <div class="pm-filter-grid pm-inv-detail-grid-note" style="grid-template-columns:2fr 1fr">
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">품목(용역명)</label>
-                  <input type="text" id="pm-inv-item-name" class="form-control" placeholder="예: Customs Corporate Audit 용역" />
-                </div>
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">요청 메모</label>
-                  <input type="text" id="pm-inv-legal-note" class="form-control" placeholder="요청사항 / 지연사유 등" />
-                </div>
-              </div>
+              </section>
               <div class="pm-action-row" style="margin-bottom:8px">
                 <button type="button" class="btn btn-sm btn-outline" id="pm-inv-quality-btn" style="display:none"><i class="fas fa-shield-check"></i> 데이터 정합성 검증</button>
+                <button type="button" class="btn btn-sm btn-outline" id="pm-inv-generate-mail-btn"><i class="fas fa-file-lines"></i> 세금계산서 미리보기</button>
                 <button type="button" class="btn btn-sm btn-primary" id="pm-inv-create-btn"><i class="fas fa-paper-plane"></i> 세금계산서 발행/전송</button>
+              </div>
+              <div class="form-group" style="margin:0 0 12px 0">
+                <label class="form-label">세금계산서 미리보기</label>
+                <div id="pm-inv-doc-preview" class="pm-inv-doc-preview">
+                  <div class="pm-inv-doc-preview-empty">세금계산서 미리보기를 실행하면 실제 전송 전 검토용 양식이 표시됩니다.</div>
+                </div>
+                <textarea id="pm-inv-mail-preview" class="form-control" style="display:none" rows="2" readonly></textarea>
               </div>
               <div class="pm-inv-section-title"><i class="fas fa-receipt"></i><span>기존 발행/입금 이력</span></div>
               <div class="table-wrapper" style="border:none;border-radius:0;overflow:auto">
@@ -2604,16 +3562,34 @@
                   <thead>
                     <tr>
                       <th style="width:42px;text-align:center">No</th>
-                      <th style="text-align:center">발행일자</th>
-                      <th style="text-align:right">발행금액(VAT포함)</th>
-                      <th style="text-align:center">상태</th>
-                      <th style="width:132px;text-align:center">입금액</th>
-                      <th style="width:118px;text-align:center">미수금</th>
-                      <th style="width:92px;text-align:center">처리</th>
+                      <th style="width:118px;text-align:center">발행일자</th>
+                      <th style="width:146px;text-align:right">발행금액(VAT포함)</th>
+                      <th style="width:96px;text-align:center">상태</th>
+                      <th style="width:116px;text-align:center">누적입금액</th>
+                      <th style="width:120px;text-align:center">미수금</th>
+                      <th style="width:74px;text-align:center">처리</th>
                     </tr>
                   </thead>
                   <tbody id="pm-inv-detail-body">
                     <tr><td colspan="7" class="table-empty"><i class="fas fa-file-invoice"></i><p>상세 발행 내역이 없습니다.</p></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="pm-inv-section-title" style="margin-top:10px"><i class="fas fa-coins"></i><span>입금 이력 (일자/금액/메모)</span></div>
+              <div class="table-wrapper" style="border:none;border-radius:0;overflow:auto">
+                <table class="data-table pm-inv-history-table">
+                  <thead>
+                    <tr>
+                      <th style="width:42px;text-align:center">No</th>
+                      <th style="width:110px;text-align:center">발행일</th>
+                      <th style="width:140px;text-align:center">세금계산서번호</th>
+                      <th style="width:110px;text-align:center">입금일자</th>
+                      <th style="width:130px;text-align:right">입금금액</th>
+                      <th>메모</th>
+                    </tr>
+                  </thead>
+                  <tbody id="pm-inv-payment-body">
+                    <tr><td colspan="6" class="table-empty"><i class="fas fa-coins"></i><p>입금 이력이 없습니다.</p></td></tr>
                   </tbody>
                 </table>
               </div>
@@ -2624,6 +3600,7 @@
                     <ul>
                       <li>예상청구일정 경과 건은 PM에게 일 1회 자동 리마인드됩니다.</li>
                       <li>일정 수정 또는 발행 처리 시 리마인드 대상에서 제외됩니다.</li>
+                      <li>입금액은 회차별 금액이 아닌 누적입금액 기준으로 입력합니다.</li>
                       <li>입금완료는 미수금 0원일 때만 저장 가능합니다.</li>
                     </ul>
                   </div>
@@ -2631,7 +3608,7 @@
                     <h4><i class="fas fa-user-shield"></i> 권한 안내</h4>
                     <ul>
                       <li>PM: 발행요청 작성, 예상청구일정 조정</li>
-                      <li>경영지원팀: 발행 확정, 국세청 전송, 입금 확인</li>
+                      <li>경영지원팀: 국세청 전송, 입금 확인</li>
                       <li>저장 시 상태/금액 정합성은 자동 검증됩니다.</li>
                     </ul>
                   </div>
@@ -2647,65 +3624,169 @@
             <div class="card-header" style="align-items:flex-start">
               <div>
                 <h2 style="margin:0">프로젝트비용관리</h2>
-                <p style="margin:6px 0 0;font-size:12.5px;color:var(--text-secondary)">프로젝트별 비용을 기록하고 Time Charge/세금계산서와 함께 수익성을 점검합니다.</p>
               </div>
             </div>
             <div class="card-body">
-              <div class="pm-filter-grid">
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">프로젝트</label>
-                  <select id="pm-cost-project" class="form-control"></select>
+              <div class="pm-action-row pm-exp-upload-toolbar">
+                <div class="form-group pm-exp-upload-month-group" style="margin:0;min-width:160px">
+                  <label class="form-label">업로드기준월</label>
+                  <input type="month" id="pm-exp-upload-month" class="form-control" />
                 </div>
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">비용일자</label>
-                  <input type="date" id="pm-cost-date" class="form-control" />
-                </div>
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">비용유형</label>
-                  <input type="text" id="pm-cost-type" class="form-control" placeholder="예: 외주, 교통, 출장, 자료구매" />
-                </div>
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">거래처</label>
-                  <input type="text" id="pm-cost-vendor" class="form-control" placeholder="거래처명" />
-                </div>
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">공급가액</label>
-                  <input type="number" id="pm-cost-amount" class="form-control" min="0" step="1000" />
-                </div>
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">부가세</label>
-                  <input type="number" id="pm-cost-vat" class="form-control" min="0" step="1000" />
-                </div>
+                <button type="button" class="btn btn-sm btn-ghost" id="pm-exp-download-template-btn"><i class="fas fa-download"></i> ERP 양식</button>
+                <label class="btn btn-sm btn-outline" style="cursor:pointer;margin:0">
+                  <i class="fas fa-file-excel"></i> 비용 업로드
+                  <input type="file" id="pm-exp-upload-file" accept=".xlsx,.xls,.csv" style="display:none" />
+                </label>
+                <button type="button" class="btn btn-sm btn-secondary" id="pm-exp-refresh-btn"><i class="fas fa-sync-alt"></i> 새로고침</button>
+                <span id="pm-exp-summary-text" class="pm-summary-text pm-exp-summary-badge">업로드 0건 · 집계 0건</span>
               </div>
-              <div class="pm-action-row">
-                <button type="button" class="btn btn-sm btn-primary" id="pm-cost-save-btn"><i class="fas fa-plus"></i> 비용 추가</button>
-                <button type="button" class="btn btn-sm btn-outline" id="pm-cost-load-btn"><i class="fas fa-search"></i> 조회</button>
-                <span id="pm-cost-summary" class="pm-summary-text">총 비용 0원</span>
+              <div id="pm-exp-upload-result" style="display:none;margin-top:10px"></div>
+              <div class="pm-action-row pm-exp-pending-actions" id="pm-exp-pending-actions" style="display:none;margin-top:10px">
+                <div class="pm-exp-pending-btn-row">
+                  <button type="button" class="btn btn-sm btn-primary" id="pm-exp-upload-save-btn"><i class="fas fa-save"></i> 확인 후 저장</button>
+                  <button type="button" class="btn btn-sm btn-outline" id="pm-exp-upload-cancel-btn"><i class="fas fa-times"></i> 업로드 취소</button>
+                  <button type="button" class="btn btn-sm btn-ghost" id="pm-exp-upload-delete-last-btn" style="display:none"><i class="fas fa-trash"></i> 방금 업로드 삭제</button>
+                </div>
+                <div id="pm-exp-pending-summary" class="pm-summary-text"></div>
               </div>
             </div>
             <div class="card-body" style="padding:0">
+              <div class="pm-filter-grid pm-exp-filter-strip" style="padding:12px 16px;border-bottom:1px solid var(--border-light)">
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">프로젝트코드 검색</label>
+                  <input type="text" id="pm-exp-filter-project" class="form-control" list="pm-exp-filter-project-options" placeholder="예: PJT-2026-001" />
+                  <datalist id="pm-exp-filter-project-options"></datalist>
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">고객사 검색</label>
+                  <input type="text" id="pm-exp-filter-client" class="form-control" list="pm-exp-filter-client-options" placeholder="예: 고객사명" />
+                  <datalist id="pm-exp-filter-client-options"></datalist>
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">청구상태</label>
+                  <select id="pm-exp-filter-status" class="form-control">
+                    <option value="">전체</option>
+                    <option value="unbilled">미청구</option>
+                    <option value="requested">청구요청</option>
+                    <option value="billed">청구완료</option>
+                    <option value="paid">입금완료</option>
+                    <option value="excluded">청구제외</option>
+                  </select>
+                </div>
+              </div>
+              <div class="pm-inv-section-title" style="padding:10px 16px 0 16px"><i class="fas fa-layer-group"></i><span>프로젝트코드/고객사 집계</span></div>
               <div class="table-wrapper" style="border:none;border-radius:0;overflow:auto">
                 <table class="data-table">
                   <thead>
                     <tr>
                       <th style="width:42px;text-align:center">No</th>
-                      <th style="width:110px">프로젝트코드</th>
-                      <th style="width:90px">비용일자</th>
-                      <th style="width:110px">비용유형</th>
-                      <th style="width:130px">거래처</th>
-                      <th style="width:116px;text-align:right">공급가액</th>
-                      <th style="width:100px;text-align:right">부가세</th>
-                      <th style="width:116px;text-align:right">합계</th>
-                      <th>비고</th>
-                      <th style="width:60px;text-align:center">관리</th>
+                      <th style="width:130px;text-align:center">프로젝트코드</th>
+                      <th style="text-align:center">고객사</th>
+                      <th style="width:100px;text-align:right">건수</th>
+                      <th style="width:140px;text-align:right">총비용</th>
+                      <th style="width:140px;text-align:right">청구선택금액</th>
+                      <th style="width:110px;text-align:center">상태</th>
+                      <th style="width:140px;text-align:center">작업</th>
                     </tr>
                   </thead>
-                  <tbody id="pm-cost-body">
-                    <tr><td colspan="10" class="table-empty"><i class="fas fa-receipt"></i><p>등록된 비용이 없습니다.</p></td></tr>
+                  <tbody id="pm-exp-summary-body">
+                    <tr><td colspan="8" class="table-empty"><i class="fas fa-file-import"></i><p>업로드 내역이 없습니다.</p></td></tr>
                   </tbody>
                 </table>
               </div>
+              <div class="table-wrapper" style="border:none;border-radius:0;overflow:auto">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th style="width:42px;text-align:center"><input type="checkbox" id="pm-exp-detail-check-all" /></th>
+                      <th style="width:42px;text-align:center">No</th>
+                      <th style="width:110px">비용일자</th>
+                      <th style="width:110px">비용유형</th>
+                      <th style="width:110px;text-align:right">금액</th>
+                      <th style="width:360px;text-align:center">비용내역</th>
+                      <th style="width:96px;text-align:center">청구상태</th>
+                      <th style="min-width:280px;text-align:center">비고</th>
+                    </tr>
+                  </thead>
+                  <tbody id="pm-exp-detail-body">
+                    <tr><td colspan="8" class="table-empty"><i class="fas fa-list"></i><p>집계 목록에서 프로젝트를 선택하세요.</p></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="pm-action-row" style="padding:10px 16px 12px 16px">
+                <button type="button" class="btn btn-sm btn-outline" id="pm-exp-mark-billable-btn"><i class="fas fa-check"></i> 선택건 청구대상</button>
+                <button type="button" class="btn btn-sm btn-outline" id="pm-exp-mark-excluded-btn"><i class="fas fa-ban"></i> 선택건 청구제외</button>
+                <button type="button" class="btn btn-sm btn-primary" id="pm-exp-request-invoice-btn"><i class="fas fa-file-invoice"></i> 선택건 세금계산서 발행요청</button>
+                <span id="pm-exp-detail-summary" class="pm-summary-text">선택 항목 0건</span>
+              </div>
             </div>
+          </div>
+        </div>
+
+        <div id="pm-cinv-backdrop" style="display:none"></div>
+        <div id="pm-cinv-modal" style="display:none">
+          <div class="pm-cinv-header">
+            <div>
+              <h3 style="margin:0">프로젝트비용 청구서 작성</h3>
+              <p id="pm-cinv-subtitle" style="margin:4px 0 0;color:var(--text-secondary);font-size:12px">프로젝트 청구목록 문서화</p>
+            </div>
+            <button type="button" class="btn btn-sm btn-ghost" id="pm-cinv-close-btn"><i class="fas fa-times"></i> 닫기</button>
+          </div>
+          <div class="pm-cinv-body">
+            <div class="pm-cinv-meta-grid">
+              <div class="form-group" style="margin:0">
+                <label class="form-label">문서번호</label>
+                <input type="text" id="pm-cinv-doc-no" class="form-control" />
+              </div>
+              <div class="form-group" style="margin:0">
+                <label class="form-label">작성일</label>
+                <input type="date" id="pm-cinv-doc-date" class="form-control" />
+              </div>
+              <div class="form-group" style="margin:0">
+                <label class="form-label">청구월</label>
+                <input type="month" id="pm-cinv-billing-month" class="form-control" />
+              </div>
+              <div class="form-group" style="margin:0">
+                <label class="form-label">상태</label>
+                <input type="text" id="pm-cinv-status" class="form-control" value="임시작성" readonly />
+              </div>
+              <div class="form-group" style="margin:0">
+                <label class="form-label">수신자</label>
+                <input type="text" id="pm-cinv-recipient-name" class="form-control" placeholder="예: 김OO 차장" />
+              </div>
+              <div class="form-group" style="margin:0">
+                <label class="form-label">수신자 이메일</label>
+                <input type="email" id="pm-cinv-recipient-email" class="form-control" placeholder="email@client.com" />
+              </div>
+            </div>
+            <div class="table-wrapper" style="border:1px solid var(--border-light);border-radius:10px;overflow:auto">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th style="width:42px;text-align:center">No</th>
+                    <th style="width:120px">비용일자</th>
+                    <th style="width:120px">비용유형</th>
+                    <th style="width:120px;text-align:right">금액</th>
+                    <th style="min-width:260px">비용내역</th>
+                    <th style="min-width:240px">비고(추가 가능)</th>
+                  </tr>
+                </thead>
+                <tbody id="pm-cinv-body">
+                  <tr><td colspan="6" class="table-empty"><i class="fas fa-file-invoice"></i><p>청구 목록을 불러오는 중입니다.</p></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="form-group" style="margin:10px 0 0 0">
+              <label class="form-label">문서 비고</label>
+              <textarea id="pm-cinv-note" class="form-control" rows="3" placeholder="고객 안내용 추가 메모를 입력하세요."></textarea>
+            </div>
+            <div class="pm-cinv-preview" id="pm-cinv-preview"></div>
+          </div>
+          <div class="pm-cinv-actions">
+            <span id="pm-cinv-summary" class="pm-summary-text">항목 0건 · 공급가액 0원</span>
+            <button type="button" class="btn btn-sm btn-outline" id="pm-cinv-print-btn"><i class="fas fa-print"></i> 문서 출력</button>
+            <button type="button" class="btn btn-sm btn-outline" id="pm-cinv-download-xlsx-btn"><i class="fas fa-file-excel"></i> 엑셀 다운로드</button>
+            <button type="button" class="btn btn-sm btn-primary" id="pm-cinv-save-btn"><i class="fas fa-save"></i> 정식 저장</button>
           </div>
         </div>
 
@@ -2724,17 +3805,27 @@
             </div>
             <div class="card-body" style="padding:0">
               <div class="table-wrapper" style="border:none;border-radius:0;overflow:auto">
-                <table class="data-table">
+                <table id="pm-contract-table" class="data-table pm-contract-table" style="table-layout:fixed;width:100%;min-width:1116px">
+                  <colgroup>
+                    <col class="pm-col-no" style="width:44px" />
+                    <col class="pm-col-code" style="width:220px" />
+                    <col class="pm-col-name" style="width:260px" />
+                    <col class="pm-col-client" style="width:200px" />
+                    <col class="pm-col-status" style="width:72px" />
+                    <col class="pm-col-file" style="width:100px" />
+                    <col class="pm-col-file" style="width:100px" />
+                    <col class="pm-col-file" style="width:120px" />
+                  </colgroup>
                   <thead>
                     <tr>
-                      <th style="width:42px;text-align:center">No</th>
-                      <th style="width:116px">프로젝트코드</th>
-                      <th style="width:180px">프로젝트명</th>
-                      <th style="width:150px">고객사</th>
-                      <th style="width:96px;text-align:center">상태</th>
-                      <th style="width:200px">계약서 파일</th>
-                      <th style="width:180px">합의근거 파일</th>
-                      <th style="width:180px">수주증빙 파일</th>
+                      <th style="text-align:center">No</th>
+                      <th>프로젝트코드</th>
+                      <th>프로젝트명</th>
+                      <th>고객사</th>
+                      <th style="text-align:center">상태</th>
+                      <th>계약서 파일</th>
+                      <th>합의근거 파일</th>
+                      <th>수주증빙 파일</th>
                     </tr>
                   </thead>
                   <tbody id="pm-contract-body">
@@ -2757,7 +3848,6 @@
             <div class="card-actions">
               <button class="btn btn-sm btn-ghost" onclick="openUserUploadModal()"><i class="fas fa-file-excel"></i> 엑셀 업로드</button>
               <button class="btn btn-sm btn-outline" onclick="downloadUserTemplate()"><i class="fas fa-download"></i> 양식 다운로드</button>
-              <button class="btn btn-sm btn-outline" onclick="exportUsersToExcel()"><i class="fas fa-file-download"></i> 데이터 다운로드</button>
               <button class="btn btn-sm btn-warning" onclick="openBulkPwModal()" style="background:#f59e0b;color:#fff;border-color:#f59e0b"><i class="fas fa-key"></i> 비밀번호 일괄 초기화</button>
               <button class="btn btn-sm btn-primary" onclick="openUserModal()"><i class="fas fa-user-plus"></i> 직원 추가</button>
             </div>
@@ -2766,6 +3856,48 @@
             <div style="display:flex;align-items:center;gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;font-size:12px;color:#475569">
               <i class="fas fa-sitemap" style="color:#64748b"></i>
               <span><strong>소속 자동분기 정책</strong> — CCB 사업부는 Daily, CRB/COB 사업부는 Hourly로 자동 분기됩니다.</span>
+            </div>
+            <div style="margin-top:8px;border:1px solid var(--border-light);border-radius:10px;padding:10px 12px;background:#f8fafc">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+                <strong style="font-size:13px;color:var(--text-primary)">타임차지 표준단가(마스터)</strong>
+                <div style="display:flex;gap:6px;flex-wrap:wrap">
+                  <button type="button" class="btn btn-sm btn-outline" id="user-std-rate-reload-btn"><i class="fas fa-sync-alt"></i> 새로고침</button>
+                  <button type="button" class="btn btn-sm btn-primary" id="user-std-rate-save-btn"><i class="fas fa-save"></i> 저장</button>
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:8px">
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">선임</label>
+                  <input type="text" id="user-std-rate-senior" class="form-control" inputmode="numeric" placeholder="0" />
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">전임</label>
+                  <input type="text" id="user-std-rate-associate" class="form-control" inputmode="numeric" placeholder="0" />
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">책임</label>
+                  <input type="text" id="user-std-rate-principal" class="form-control" inputmode="numeric" placeholder="0" />
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">팀장</label>
+                  <input type="text" id="user-std-rate-team_lead" class="form-control" inputmode="numeric" placeholder="0" />
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">본부장</label>
+                  <input type="text" id="user-std-rate-division_head" class="form-control" inputmode="numeric" placeholder="0" />
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">사업부장</label>
+                  <input type="text" id="user-std-rate-bu_head" class="form-control" inputmode="numeric" placeholder="0" />
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">대표(한휘선)</label>
+                  <input type="text" id="user-std-rate-ceo" class="form-control" inputmode="numeric" placeholder="0" />
+                </div>
+              </div>
+              <div style="margin-top:6px;font-size:11px;color:var(--text-muted)">
+                변경 즉시 타임차지 재계산에 반영됩니다. 우선순위: 프로젝트 계약단가 &gt; 표준단가(예외 포함)
+              </div>
             </div>
           </div>
           <div class="card-body" style="padding:0">
@@ -2787,16 +3919,16 @@
                     <th style="text-align:center;padding:10px 6px">No</th>
                     <th style="padding:10px 10px">이름</th>
                     <th style="padding:10px 10px">이메일</th>
-                    <th style="text-align:center;padding:10px 6px">역할</th>
+                    <th style="text-align:center;padding:10px 6px">직책</th>
                     <th style="padding:10px 10px">사업부</th>
                     <th style="padding:10px 10px">본부</th>
                     <th style="text-align:center;padding:10px 8px">
                       <div style="font-size:11px;font-weight:600">1차 승인자</div>
-                      <div style="font-size:10px;color:var(--text-muted);font-weight:400">팀장·Manager</div>
+                      <div style="font-size:10px;color:var(--text-muted);font-weight:400">팀장</div>
                     </th>
                     <th style="text-align:center;padding:10px 8px">
                       <div style="font-size:11px;font-weight:600">2차 승인자</div>
-                      <div style="font-size:10px;color:var(--text-muted);font-weight:400">본부장·Director</div>
+                      <div style="font-size:10px;color:var(--text-muted);font-weight:400">본부장</div>
                     </th>
                     <th style="text-align:center;padding:10px 6px">관리</th>
                   </tr>
@@ -2811,50 +3943,154 @@
       </section>
 
       <!-- ──────────────────────────
-           10. 자문 자료실
+           10. 권한관리 (Admin 전용)
+      ────────────────────────── -->
+      <section class="page-section" id="page-permission-management">
+        <div class="card">
+          <div class="card-header">
+            <h2>권한정책 관리</h2>
+            <div class="card-actions">
+              <button class="btn btn-sm btn-outline" id="perm-policy-reload-btn"><i class="fas fa-sync-alt"></i> 새로고침</button>
+              <button class="btn btn-sm btn-outline" id="perm-policy-reset-inherit-btn" style="color:#92400e;border-color:#fcd34d;background:#fffbeb"><i class="fas fa-rotate-left"></i> 상속값으로 재초기화</button>
+              <button class="btn btn-sm btn-primary" id="perm-policy-save-btn"><i class="fas fa-save"></i> 저장</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:end">
+              <div class="form-group" style="margin:0">
+                <label class="form-label">정책 범위</label>
+                <select id="perm-policy-scope" class="form-control">
+                  <option value="dept_job" selected>사업부 + 직책</option>
+                  <option value="role">역할(전체 공통)</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin:0">
+                <label class="form-label">사업부</label>
+                <select id="perm-policy-dept" class="form-control">
+                  <option value="">사업부 선택</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin:0">
+                <label class="form-label">직책 / 역할</label>
+                <select id="perm-policy-target" class="form-control">
+                  <option value="">대상 선택</option>
+                </select>
+              </div>
+            </div>
+            <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">
+              세로축은 전체 메뉴(상/하/최하위), 가로축은 권한(읽기/쓰기/출력/다운로드)입니다.
+              체크된 권한만 정책으로 저장되며, 해제 시 접근이 차단됩니다.
+            </div>
+          </div>
+          <div class="card-body" style="padding:0">
+            <div class="table-wrapper" style="border:none;border-radius:0;max-height:560px;overflow:auto">
+              <table class="data-table" id="perm-policy-table" style="width:100%;table-layout:fixed">
+                <colgroup>
+                  <col style="width:68px">
+                  <col style="width:280px">
+                  <col style="width:92px">
+                  <col style="width:92px">
+                  <col style="width:92px">
+                  <col style="width:92px">
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th style="text-align:center">레벨</th>
+                    <th>메뉴</th>
+                    <th style="text-align:center">읽기</th>
+                    <th style="text-align:center">쓰기</th>
+                    <th style="text-align:center">출력</th>
+                    <th style="text-align:center">다운로드</th>
+                  </tr>
+                </thead>
+                <tbody id="perm-policy-body">
+                  <tr><td colspan="6" class="table-empty"><i class="fas fa-shield-halved"></i><p>정책 대상을 선택하면 권한 매트릭스가 표시됩니다.</p></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ──────────────────────────
+           11. 자문 자료실
       ────────────────────────── -->
       <section class="page-section" id="page-project-deliverables">
         <div class="card">
           <div class="card-header">
-            <h2><i class="fas fa-folder-open" style="color:var(--primary)"></i> Project Outputs</h2>
+            <h2><i class="fas fa-folder-open" style="color:var(--primary)"></i> Project Output Library</h2>
             <div class="card-actions" style="display:flex;gap:8px;align-items:center">
-              <input type="month" id="proj-out-month" class="form-control" style="min-height:30px;max-width:150px" />
+              <select id="proj-out-kind-filter" class="form-control" style="min-height:30px;max-width:150px">
+                <option value="all">전체 자료</option>
+                <option value="result">결과보고서</option>
+                <option value="reference">참고자료</option>
+              </select>
+              <input type="date" id="proj-out-date-from" class="form-control" style="min-height:30px;max-width:150px" />
+              <span style="font-size:12px;color:var(--text-muted)">~</span>
+              <input type="date" id="proj-out-date-to" class="form-control" style="min-height:30px;max-width:150px" />
               <button type="button" class="btn btn-sm btn-secondary" id="proj-out-refresh-btn"><i class="fas fa-sync-alt"></i> 새로고침</button>
             </div>
           </div>
           <div class="card-body">
-            <div style="display:grid;grid-template-columns:2fr 1fr 1.5fr;gap:10px;margin-bottom:10px">
+            <div style="display:grid;grid-template-columns:2fr 1fr 1.2fr 1.2fr;gap:10px;margin-bottom:10px">
               <div class="form-group" style="margin:0">
                 <label class="form-label">프로젝트 (승인완료)</label>
                 <select id="proj-out-project" class="form-control"></select>
               </div>
               <div class="form-group" style="margin:0">
-                <label class="form-label">결과물 유형</label>
-                <select id="proj-out-type" class="form-control">
-                  <option value="보고서">보고서</option>
-                  <option value="발표자료">발표자료</option>
-                  <option value="산출물">산출물</option>
-                  <option value="기타">기타</option>
+                <label class="form-label">대분류</label>
+                <select id="proj-out-main-category" class="form-control">
+                  <option value="">전체</option>
                 </select>
               </div>
               <div class="form-group" style="margin:0">
-                <label class="form-label">제목</label>
-                <input type="text" id="proj-out-title" class="form-control" placeholder="결과물 제목" />
-              </div>
-            </div>
-            <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px;margin-bottom:10px">
-              <div class="form-group" style="margin:0">
-                <label class="form-label">비고</label>
-                <input type="text" id="proj-out-note" class="form-control" placeholder="메모" />
+                <label class="form-label">소분류</label>
+                <select id="proj-out-sub-category" class="form-control">
+                  <option value="">전체</option>
+                </select>
               </div>
               <div class="form-group" style="margin:0">
-                <label class="form-label">파일</label>
-                <input type="file" id="proj-out-file" class="form-control" />
+                <label class="form-label">등록자</label>
+                <input type="text" id="proj-out-uploader" class="form-control" placeholder="등록자명 검색" />
               </div>
             </div>
-            <div style="display:flex;align-items:center;gap:8px;justify-content:flex-end">
+            <div style="display:flex;align-items:center;gap:8px;justify-content:flex-end;flex-wrap:wrap">
               <span id="proj-out-summary" style="font-size:12px;color:var(--text-secondary);margin-right:auto">총 0건</span>
-              <button type="button" class="btn btn-sm btn-primary" id="proj-out-upload-btn"><i class="fas fa-upload"></i> 결과물 업로드</button>
+              <button type="button" class="btn btn-sm btn-primary" id="proj-out-new-btn"><i class="fas fa-plus"></i> 참고자료 직접등록</button>
+              <button type="button" class="btn btn-sm btn-outline" id="proj-out-bulk-view-btn"><i class="fas fa-eye"></i> 선택 열람신청</button>
+              <button type="button" class="btn btn-sm btn-outline" id="proj-out-bulk-download-btn"><i class="fas fa-download"></i> 선택 다운로드신청</button>
+              <button type="button" class="btn btn-sm btn-ghost" id="proj-out-my-requests-btn"><i class="fas fa-clock-rotate-left"></i> 신청내역</button>
+            </div>
+            <div style="margin-top:8px;font-size:11.5px;color:var(--text-muted);line-height:1.55">
+              <i class="fas fa-circle-info" style="color:var(--primary);margin-right:4px"></i>
+              결과보고서는 게시승인 완료본을 기준으로 제공되며, <strong>참고자료 직접등록</strong>은 과거 우수 사례를 공유하기 위한 별도 등록 흐름입니다.
+            </div>
+            <div style="margin-top:4px;font-size:11px;color:var(--text-muted);line-height:1.5">
+              열람신청은 동일 소분류 내에서 최대 20건, 다운로드신청은 최대 2건까지 복수 선택이 가능합니다.
+            </div>
+            <div id="proj-out-approval-wrap" style="display:none;margin-top:10px;border:1px solid var(--border-light);border-radius:10px;padding:10px;background:#fafcff">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                <strong style="font-size:13px;color:var(--text-primary)"><i class="fas fa-user-check" style="color:var(--primary)"></i> 열람/다운로드 신청 승인</strong>
+              </div>
+              <div class="table-wrapper" style="margin-top:8px;max-height:240px;overflow:auto">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th style="width:70px;text-align:center">신청유형</th>
+                      <th style="width:100px">신청자</th>
+                      <th style="width:120px">프로젝트코드</th>
+                      <th style="width:90px">대분류</th>
+                      <th style="width:110px">소분류</th>
+                      <th>사유</th>
+                      <th style="width:90px;text-align:center">요청일</th>
+                      <th style="width:140px;text-align:center">처리</th>
+                    </tr>
+                  </thead>
+                  <tbody id="proj-out-approval-body">
+                    <tr><td colspan="8" class="table-empty"><i class="fas fa-inbox"></i><p>대기중인 신청이 없습니다.</p></td></tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
           <div class="card-body" style="padding:0">
@@ -2862,25 +4098,141 @@
               <table class="data-table">
                 <thead>
                   <tr>
+                    <th style="width:44px;text-align:center">
+                      <input type="checkbox" id="proj-out-select-all" aria-label="전체선택" />
+                    </th>
                     <th style="width:42px;text-align:center">No</th>
-                    <th style="width:120px">프로젝트코드</th>
-                    <th style="width:190px">프로젝트명</th>
-                    <th style="width:90px">유형</th>
-                    <th style="width:180px">제목</th>
                     <th style="width:110px">업로드자</th>
                     <th style="width:95px">업로드일</th>
-                    <th style="width:90px;text-align:center">파일</th>
+                    <th style="width:90px">대분류</th>
+                    <th style="width:110px">소분류</th>
+                    <th style="width:180px;text-align:center">열람/다운로드</th>
                     <th>비고</th>
                   </tr>
                 </thead>
                 <tbody id="proj-out-body">
-                  <tr><td colspan="9" class="table-empty"><i class="fas fa-folder-open"></i><p>결과물 데이터를 불러오는 중입니다.</p></td></tr>
+                  <tr><td colspan="8" class="table-empty"><i class="fas fa-folder-open"></i><p>결과물 데이터를 불러오는 중입니다.</p></td></tr>
                 </tbody>
               </table>
             </div>
           </div>
         </div>
       </section>
+
+      <div class="modal-overlay" id="projOutAccessReqModal">
+        <div class="modal modal-sm">
+          <div class="modal-header">
+            <h3><i class="fas fa-file-signature" style="color:var(--primary)"></i> 결과물 접근 신청</h3>
+            <button class="btn-close" onclick="closeModal('projOutAccessReqModal')">×</button>
+          </div>
+          <div class="modal-body">
+            <input type="hidden" id="proj-out-access-output-id" />
+            <input type="hidden" id="proj-out-access-output-ids" />
+            <input type="hidden" id="proj-out-access-request-type" />
+            <div class="alert alert-info" style="font-size:12px;line-height:1.5">
+              <span id="proj-out-access-summary">신청 대상을 확인하세요.</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label">신청유형</label>
+              <input type="text" id="proj-out-access-type-label" class="form-control" readonly />
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div class="form-group" style="margin:0">
+                <label class="form-label">대분류</label>
+                <input type="text" id="proj-out-access-main" class="form-control" readonly />
+              </div>
+              <div class="form-group" style="margin:0">
+                <label class="form-label">소분류</label>
+                <input type="text" id="proj-out-access-sub" class="form-control" readonly />
+              </div>
+            </div>
+            <div class="form-group" style="margin-top:10px;margin-bottom:0">
+              <label class="form-label">신청사유</label>
+              <textarea id="proj-out-access-reason" class="form-control" rows="4" placeholder="업무 목적과 필요 범위를 입력하세요."></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="closeModal('projOutAccessReqModal')">닫기</button>
+            <button class="btn btn-primary" onclick="submitProjectOutputAccessRequest()"><i class="fas fa-paper-plane"></i> 신청</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-overlay" id="projOutActionModal">
+        <div class="modal modal-sm">
+          <div class="modal-header">
+            <h3><i class="fas fa-clipboard-check" style="color:var(--primary)"></i> 통관유의사항 조치 등록</h3>
+            <button class="btn-close" onclick="closeModal('projOutActionModal')">×</button>
+          </div>
+          <div class="modal-body">
+            <input type="hidden" id="proj-out-action-output-id" />
+            <div class="alert alert-info" style="font-size:12px;line-height:1.5">
+              <i class="fas fa-info-circle"></i>
+              <span id="proj-out-action-output-summary">선택된 유의사항을 확인하세요.</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label">조치상태</label>
+              <select id="proj-out-action-status" class="form-control">
+                <option value="confirmed">확인</option>
+                <option value="in_progress">진행중</option>
+                <option value="completed">완료</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label class="form-label">조치내용</label>
+              <textarea id="proj-out-action-note" class="form-control" rows="4" placeholder="조치사항을 입력하세요."></textarea>
+            </div>
+            <div id="proj-out-action-history" style="margin-top:10px;border-top:1px solid var(--border-light);padding-top:8px;font-size:12px;color:var(--text-secondary)">
+              등록된 조치 이력이 없습니다.
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="closeModal('projOutActionModal')">닫기</button>
+            <button class="btn btn-primary" onclick="saveProjectOutputAction()"><i class="fas fa-save"></i> 저장</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-overlay" id="projOutNewModal">
+        <div class="modal" style="max-width:760px">
+          <div class="modal-header">
+            <h3><i class="fas fa-plus-circle" style="color:var(--primary)"></i> 참고자료 직접 등록</h3>
+            <button class="btn-close" onclick="closeModal('projOutNewModal')">×</button>
+          </div>
+          <div class="modal-body">
+            <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:10px">
+              <div class="form-group" style="margin:0">
+                <label class="form-label">프로젝트 대분류</label>
+                <select id="proj-out-new-main-category" class="form-control">
+                  <option value="">대분류 선택</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin:0">
+                <label class="form-label">프로젝트 소분류</label>
+                <select id="proj-out-new-sub-category" class="form-control">
+                  <option value="">소분류 선택</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group" style="margin-top:10px">
+              <label class="form-label">제목</label>
+              <input type="text" id="proj-out-new-title" class="form-control" placeholder="예: Customs Corporate Audit 결과보고서" />
+            </div>
+            <div class="form-group" style="margin-top:10px">
+              <label class="form-label">파일</label>
+              <input type="file" id="proj-out-new-file" class="form-control" />
+            </div>
+            <div class="form-group" style="margin-top:10px;margin-bottom:0">
+              <label class="form-label">비고</label>
+              <textarea id="proj-out-new-note" class="form-control" rows="3" placeholder="필요 시 설명을 입력하세요."></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="closeModal('projOutNewModal')">취소</button>
+            <button type="button" class="btn btn-primary" id="proj-out-new-upload-btn"><i class="fas fa-upload"></i> 등록</button>
+          </div>
+        </div>
+      </div>
 
       <section class="page-section" id="page-archive">
 
@@ -3235,11 +4587,11 @@
         <input type="text" class="form-control" id="dept-name-input" placeholder="예: COB사업부" />
       </div>
       <div class="form-group">
-        <label class="form-label">사업부장 (Director)</label>
+        <label class="form-label">사업부장 (본부장 권한)</label>
         <select class="form-control" id="dept-director-input">
           <option value="">사업부장 선택 (미지정)</option>
         </select>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:4px"><i class="fas fa-info-circle"></i> Director 역할의 직원만 표시됩니다.</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px"><i class="fas fa-info-circle"></i> 본부장 권한(director)의 직원만 표시됩니다.</div>
       </div>
       <div class="form-group">
         <label class="form-label">설명</label>
@@ -3272,11 +4624,11 @@
         <input type="text" class="form-control" id="hq-name-input" placeholder="예: 세무본부" />
       </div>
       <div class="form-group">
-        <label class="form-label">본부장 (Manager)</label>
+        <label class="form-label">본부장 (팀장 권한)</label>
         <select class="form-control" id="hq-manager-input">
           <option value="">본부장 선택 (미지정)</option>
         </select>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:4px"><i class="fas fa-info-circle"></i> Manager 역할의 직원만 표시됩니다. 본부장은 소속 팀원의 타임시트 승인자로 자동 연결됩니다.</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px"><i class="fas fa-info-circle"></i> 팀장 권한(manager)의 직원만 표시됩니다. 본부장은 소속 팀원의 타임시트 승인자로 자동 연결됩니다.</div>
       </div>
     </div>
     <div class="modal-footer">
@@ -3443,6 +4795,12 @@
         <label class="form-label">프로젝트명(영문) <span class="required">*</span></label>
         <input type="text" class="form-control" id="project-code-name-en" placeholder="예: AEO Audit" autocomplete="off" />
       </div>
+      <div class="form-group">
+        <label class="form-label" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="project-code-requires-clearance" />
+          통관유의사항 필수 (결과보고서 업로드 시 조치완료 게이트 적용)
+        </label>
+      </div>
       <div class="alert alert-info" style="font-size:12px;margin:0">
         <i class="fas fa-info-circle"></i> 등록 시 최종 코드: <strong>대분류Code_소분류Code_YYMM_01</strong> (YYMM·일련은 프로젝트 등록 단계에서 부여)
       </div>
@@ -3463,7 +4821,7 @@
     <div class="modal-body">
       <div class="alert alert-info">
         <i class="fas fa-info-circle"></i>
-        <span>열: <strong>대분류, 대분류Code, 소분류, 소분류Code, 프로젝트명</strong><br>
+        <span>열: <strong>대분류, 대분류Code, 소분류, 소분류Code, 프로젝트명, 통관유의사항필수(Y/N)</strong><br>
         동일 대분류Code+소분류Code는 갱신, 없으면 추가됩니다.</span>
       </div>
       <div class="form-group">
@@ -3520,18 +4878,29 @@
         </div>
       </div>
       <div class="table-wrapper" style="border:1px solid var(--border-light);border-radius:10px">
-        <table class="data-table" style="min-width:980px">
+        <table class="data-table pm-contract-doc-table" style="table-layout:fixed;width:1492px">
+          <colgroup>
+            <col style="width:44px" />
+            <col style="width:120px" />
+            <col style="width:300px" />
+            <col style="width:200px" />
+            <col style="width:160px" />
+            <col style="width:260px" />
+            <col style="width:108px" />
+            <col style="width:100px" />
+            <col style="width:200px" />
+          </colgroup>
           <thead>
             <tr>
-              <th style="width:44px">No</th>
-              <th style="width:116px">문서유형</th>
-              <th style="width:170px">프로젝트코드</th>
+              <th>No</th>
+              <th>문서유형</th>
+              <th>프로젝트코드</th>
               <th>프로젝트명</th>
-              <th style="width:160px">고객사</th>
-              <th style="width:220px">파일명</th>
-              <th style="width:104px">등록일</th>
-              <th style="width:100px">등록자</th>
-              <th style="width:190px;text-align:center">관리</th>
+              <th>고객사</th>
+              <th>파일명</th>
+              <th>등록일</th>
+              <th>등록자</th>
+              <th style="text-align:center">관리</th>
             </tr>
           </thead>
           <tbody id="proj-reg-contract-doc-body">
@@ -3983,12 +5352,12 @@
           <input type="password" class="form-control" id="user-pw-confirm-input" placeholder="비밀번호 재입력" autocomplete="new-password" />
         </div>
 
-        <div class="form-group">
+        <div class="form-group" style="display:none">
           <label class="form-label">역할 <span class="required">*</span></label>
           <select class="form-control" id="user-role-input" onchange="_onUserRoleChange(this.value)">
-            <option value="staff">Staff (담당자)</option>
-            <option value="manager">Manager (팀장)</option>
-            <option value="director">Director (본부장·2차 승인)</option>
+            <option value="staff">담당</option>
+            <option value="manager">팀장 (1차 승인)</option>
+            <option value="director">본부장 (2차 승인)</option>
             <option value="top_mgr">Top Mgr (사업부장·대표·경영지원)</option>
             <option value="admin">Admin (시스템 관리자)</option>
           </select>
@@ -4002,28 +5371,23 @@
         </div>
 
         <div class="form-group" style="grid-column:1/-1">
-          <label class="form-label">직책</label>
-          <select class="form-control" id="user-job-title-input">
+          <label class="form-label">직책 <span class="required">*</span></label>
+          <select class="form-control" id="user-job-title-input" onchange="_onUserJobTitleChange()">
             <option value="">(미지정)</option>
+            <option value="senior">선임</option>
+            <option value="associate">전임</option>
+            <option value="principal">책임</option>
+            <option value="team_lead">팀장</option>
             <option value="division_head">본부장</option>
             <option value="bu_head">사업부장</option>
-            <option value="ceo">대표</option>
-            <option value="mgmt_support">경영지원팀장</option>
+            <option value="system_admin">시스템관리자</option>
+            <option value="ceo">대표이사</option>
+            <option value="mgmt_support">경영지원팀장(레거시)</option>
           </select>
           <div style="font-size:11px;color:var(--text-muted);margin-top:3px">
-            <i class="fas fa-info-circle"></i> 조직 직책 표시용입니다. 시스템 권한(역할)과 별도로 설정합니다.
+            <i class="fas fa-info-circle"></i> 역할은 직책 기준으로 시스템이 자동 매핑합니다.
           </div>
         </div>
-        <div class="form-group" style="grid-column:1/-1">
-          <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;
-                        background:var(--bg-secondary,#f8fafc);border:1px solid var(--border-light,#e2e8f0);
-                        border-radius:8px;padding:10px 14px;font-size:13px;font-weight:500;color:var(--text-primary,#1e293b)">
-            <input type="checkbox" id="user-deliverables-view-input"
-                   style="width:16px;height:16px;margin-top:2px;accent-color:var(--primary,#3b82f6);cursor:pointer;flex-shrink:0" />
-            <span>프로젝트 산출물(Deliverables) 열람 허용</span>
-          </label>
-        </div>
-
         <!-- 소속 정보 구분선 -->
         <div style="grid-column:1/-1;border-top:1px solid var(--border-light);margin:4px 0 2px;
                     padding-top:10px;font-size:11px;font-weight:700;color:#9aa4b2;
@@ -4076,7 +5440,7 @@
         <!-- 2차 승인자: staff/manager 모두 표시 -->
         <div class="form-group" style="grid-column:1/-1" id="reviewer2-select-wrap">
           <label class="form-label">
-            2차 승인자 <small style="font-weight:400;color:var(--text-muted)">(본부장 · Director)</small>
+            2차 승인자 <small style="font-weight:400;color:var(--text-muted)">(본부장)</small>
           </label>
           <select class="form-control" id="user-reviewer2-input">
             <option value="">2차 승인자 선택 (미지정)</option>
@@ -4304,11 +5668,11 @@
 <script src="js/dashboard.js?v=20260410a"></script>
 <script src="js/entry.js?v=20260423topmgrScope1"></script>
 <script src="js/daily-module.js?v=20260419dailyModePlan1"></script>
-<script src="js/approval.js?v=20260419projRegSplit1"></script>
+<script src="js/approval.js?v=20260420approvalFix2"></script>
 <script src="js/analysis.js?v=20260410a"></script>
 <script src="js/archive.js?v=20260410d"></script>
-<script src="js/project-management.js?v=20260419invoiceActionCol"></script>
-<script src="js/project-dashboard.js?v=20260419projectDashboard1"></script>
+<script src="js/project-management.js?v=20260420pmProgressCascade3"></script>
+<script src="js/project-dashboard-v2.js?v=20260430projectDashboardRevamp1"></script>
 <!-- master.js / users.js: Settings 메뉴 진입 시 동적 로드 (초기 81KB 절감) -->
 <script src="js/main.js?v=20260423topmgrScope1"></script>
 

@@ -3,7 +3,18 @@
    ============================================ */
 
 let _analysisCharts = {};
-let _currentAnalysisTab = 'work'; // 'work' | 'staff' | 'labor'
+let _currentAnalysisTab = 'work'; // 'work' | 'staff' | 'labor' | 'project-profit'
+
+function _canAccessAnalysisPage(session) {
+  if (!session) return false;
+  const fallback = Auth.canViewAnalysis(session);
+  const root = Auth.canReadMenu(session, 'analysis', fallback);
+  const work = Auth.canReadMenu(session, 'analysis-work', fallback);
+  const staff = Auth.canReadMenu(session, 'analysis-staff', Auth.canViewStaffAnalysis(session));
+  const labor = Auth.canReadMenu(session, 'analysis-labor', Auth.canViewCostFinancials(session));
+  const profit = Auth.canReadMenu(session, 'analysis-project-profit', Auth.canViewProjectProfitAnalysis(session));
+  return !!(root || work || staff || labor || profit);
+}
 
 // ─────────────────────────────────────────────
 // 업무분석 통계 공통 유틸
@@ -119,14 +130,32 @@ function _getVisibleUserIdSetForAnalysis(session, allUsers) {
 // ─────────────────────────────────────────────
 function switchAnalysisTab(tab) {
   const session = getSession();
+  const canWorkTab = session && Auth.canReadMenu(session, 'analysis-work', Auth.canViewAnalysis(session));
+  const canStaffTab = session
+    && Auth.canReadMenu(session, 'analysis-staff', Auth.canViewStaffAnalysis(session));
+  const canProjectProfitTab = session
+    && Auth.canReadMenu(session, 'analysis-project-profit', Auth.canViewProjectProfitAnalysis(session));
+  const canLaborTab = session
+    && Auth.canReadMenu(session, 'analysis-labor', Auth.canViewCostFinancials(session));
 
   // 인건비 탭: director·top_mgr (admin 제외)
   if (tab === 'labor') {
-    const canLaborTab = session && Auth.canViewCostFinancials(session);
     if (!canLaborTab) {
       Toast.warning('인건비 분석 탭은 본부장·경영층(Top Mgr)만 접근 가능합니다.');
       return;
     }
+  }
+  if (tab === 'work' && !canWorkTab) {
+    Toast.warning('업무분석 탭 접근 권한이 없습니다.');
+    return;
+  }
+  if (tab === 'staff' && !canStaffTab) {
+    Toast.warning('고과 분석 탭은 본부장 이상만 접근 가능합니다.');
+    return;
+  }
+  if (tab === 'project-profit' && !canProjectProfitTab) {
+    Toast.warning('프로젝트 매출·이익 분석 탭은 본부장 이상만 접근 가능합니다.');
+    return;
   }
 
   _currentAnalysisTab = tab;
@@ -136,12 +165,14 @@ function switchAnalysisTab(tab) {
     work:  document.getElementById('analysis-tab-work'),
     staff: document.getElementById('analysis-tab-staff'),
     labor: document.getElementById('analysis-tab-labor'),
+    'project-profit': document.getElementById('analysis-tab-project-profit'),
   };
   // 패널 요소
   const panels = {
     work:  document.getElementById('analysis-panel-work'),
     staff: document.getElementById('analysis-panel-staff'),
     labor: document.getElementById('analysis-panel-labor'),
+    'project-profit': document.getElementById('analysis-panel-project-profit'),
   };
 
   // 모든 탭 비활성화
@@ -159,6 +190,7 @@ function switchAnalysisTab(tab) {
   // 탭별 데이터 로드 (버튼 클릭 전환 시)
   if (tab === 'labor') _initLaborTab();
   if (tab === 'staff') loadStaffAnalysis();
+  if (tab === 'project-profit') loadProjectProfitAnalysis();
 }
 
 // ─────────────────────────────────────────────
@@ -166,20 +198,41 @@ function switchAnalysisTab(tab) {
 // ─────────────────────────────────────────────
 async function init_analysis() {
   const session = getSession();
-  if (!Auth.canViewAnalysis(session)) {
+  if (!_canAccessAnalysisPage(session)) {
     navigateTo('dashboard');
     Toast.warning('분석 열람 권한이 없습니다.');
     return;
   }
+  if (Auth.refreshPolicyCache) {
+    await Auth.refreshPolicyCache(session);
+  }
 
   // ── 인건비 탭: director·top_mgr (admin 제외) ──────────────
-  const canLaborTab = session && Auth.canViewCostFinancials(session);
+  const canWorkTab = session && Auth.canReadMenu(session, 'analysis-work', Auth.canViewAnalysis(session));
+  const canLaborTab = session && Auth.canReadMenu(session, 'analysis-labor', Auth.canViewCostFinancials(session));
   const tabLaborBtn = document.getElementById('analysis-tab-labor');
   if (tabLaborBtn) tabLaborBtn.style.display = canLaborTab ? '' : 'none';
+  const canStaffTab = session && Auth.canReadMenu(session, 'analysis-staff', Auth.canViewStaffAnalysis(session));
+  const tabStaffBtn = document.getElementById('analysis-tab-staff');
+  if (tabStaffBtn) tabStaffBtn.style.display = canStaffTab ? '' : 'none';
+  const canProjectProfitTab = session && Auth.canReadMenu(session, 'analysis-project-profit', Auth.canViewProjectProfitAnalysis(session));
+  const tabProjectProfitBtn = document.getElementById('analysis-tab-project-profit');
+  if (tabProjectProfitBtn) tabProjectProfitBtn.style.display = canProjectProfitTab ? '' : 'none';
+  const tabWorkBtn = document.getElementById('analysis-tab-work');
+  if (tabWorkBtn) tabWorkBtn.style.display = canWorkTab ? '' : 'none';
 
   // manager인데 labor 탭으로 설정돼 있으면 work로 초기화
+  if (!canWorkTab && _currentAnalysisTab === 'work') {
+    _currentAnalysisTab = canStaffTab ? 'staff' : (canLaborTab ? 'labor' : (canProjectProfitTab ? 'project-profit' : 'work'));
+  }
   if (!canLaborTab && _currentAnalysisTab === 'labor') {
-    _currentAnalysisTab = 'work';
+    _currentAnalysisTab = canWorkTab ? 'work' : (canStaffTab ? 'staff' : (canProjectProfitTab ? 'project-profit' : 'work'));
+  }
+  if (!canStaffTab && _currentAnalysisTab === 'staff') {
+    _currentAnalysisTab = canWorkTab ? 'work' : (canLaborTab ? 'labor' : (canProjectProfitTab ? 'project-profit' : 'work'));
+  }
+  if (!canProjectProfitTab && _currentAnalysisTab === 'project-profit') {
+    _currentAnalysisTab = canWorkTab ? 'work' : (canStaffTab ? 'staff' : (canLaborTab ? 'labor' : 'work'));
   }
 
   // ── 날짜 초기값 ─────────────────────────────────────────
@@ -296,11 +349,15 @@ async function init_analysis() {
   _fillLaborHqOptions('filter-labor-hq', '', allUsers);
   _fillLaborCsTeamOptions('filter-labor-csteam', '', '', allUsers, csTeamList);
   _initStaffSearch('filter-labor-staff-wrap', '', '');
+  _fillDept('filter-project-profit-dept');
+  _fillLaborHqOptions('filter-project-profit-hq', '', allUsers);
+  _fillLaborCsTeamOptions('filter-project-profit-csteam', '', '', allUsers, csTeamList);
 
   // ── 현재 탭으로 전환 — switchAnalysisTab 내부에서 탭별 데이터 로드 실행됨 ──
   switchAnalysisTab(_currentAnalysisTab);
   // work 탭은 switchAnalysisTab에서 자동 호출하지 않으므로 여기서 직접 호출
   if (_currentAnalysisTab === 'work') await loadAnalysis();
+  if (_currentAnalysisTab === 'project-profit') await loadProjectProfitAnalysis();
 
   // ── 전역에 헬퍼 저장 (사업부 변경 시 재사용) ────────────
   window._analysisFillCsTeam  = _fillCsTeam;
@@ -1389,7 +1446,7 @@ async function loadStaffAnalysis() {
     // (삭제됨) 별점 집계 카드 렌더링
 
   } catch(err) {
-    console.error('Staff Analysis error:', err);
+    console.error('Consultant Analysis error:', err);
     Toast.error('고과 분석 데이터 로드 실패: ' + (err?.message || String(err)), 6000);
   }
 }
@@ -2461,7 +2518,7 @@ async function loadLaborCostList() {
       const rowId    = `labor-row-${u.id}`;
       return `<tr id="${rowId}" style="border-bottom:1px solid var(--border-light)" data-user-id="${u.id}" data-user-name="${u.name}" data-record-id="${existing.id||''}">
         <td style="padding:9px 12px;font-size:12.5px;font-weight:600;color:var(--text-primary)">${u.name}</td>
-        <td style="padding:9px 12px;font-size:12px;color:var(--text-secondary)">${Utils.roleBadge(u.role)}</td>
+        <td style="padding:9px 12px;font-size:12px;color:var(--text-secondary)">${Utils.roleBadge(u.role, u.job_title)}</td>
         <td style="padding:9px 12px">
           <input type="text" class="labor-cost-input"
             style="width:100%;padding:5px 8px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:12.5px;text-align:right;font-family:'Noto Sans KR',sans-serif"
@@ -2603,7 +2660,7 @@ async function downloadLaborCostTemplate() {
     { '항목': 'B열 - 연간 인건비(원)', '설명': '숫자만 입력 (예: 60000000 → 6,000만원), 쉼표 제거' },
     { '항목': 'C열 - 비고',           '설명': '선택 입력 (메모 용도)' },
     { '항목': '주의사항',              '설명': '이름이 시스템 등록 직원과 정확히 일치해야 반영됩니다.' },
-    { '항목': '대상 직원',             '설명': 'Staff/Advisor 역할만 해당 (Manager, Director, Admin 제외)' },
+    { '항목': '대상 직원',             '설명': '담당/자문 역할만 해당 (팀장, 본부장, Admin 제외)' },
   ];
   const wsGuide = XLSX.utils.json_to_sheet(guideRows);
   wsGuide['!cols'] = [{ wch: 22 }, { wch: 52 }];
@@ -2992,7 +3049,7 @@ async function exportAnalysisExcel() {
 
     const wb = XLSX.utils.book_new();
     const rows = entries.map((e,i)=>({
-      'No':i+1,'Staff':safeStr(e.user_name),'수행팀':safeStr(e.team_name),
+      'No':i+1,'컨설턴트':safeStr(e.user_name),'수행팀':safeStr(e.team_name),
       '고객사':safeStr(e.client_name)||'내부업무','대분류':safeStr(e.work_category_name),
       '소분류':safeStr(e.work_subcategory_name),'시작일자':fmtDate(e.work_start_at),
       '시작시간':fmtTime(e.work_start_at),'종료일자':fmtDate(e.work_end_at),
@@ -3097,6 +3154,214 @@ async function exportAnalysisExcel() {
     console.error('exportAnalysisExcel 오류:', err);
     Toast.error('내보내기 실패: ' + (err?.message || String(err)), 6000);
   }
+}
+
+function _analysisProjectRevenue(project) {
+  const p = project || {};
+  const candidate = [
+    p.contract_amount,
+    p.contract_value,
+    p.total_contract_amount,
+    p.order_amount,
+    p.sales_amount,
+  ].map((v) => Number(v || 0)).find((n) => Number.isFinite(n) && n > 0);
+  if (candidate && candidate > 0) return candidate;
+  let schedule = p.billing_schedule;
+  if (!schedule) return 0;
+  if (typeof schedule === 'string') {
+    try { schedule = JSON.parse(schedule); } catch (_) { schedule = null; }
+  }
+  if (!schedule || typeof schedule !== 'object') return 0;
+  const vals = [];
+  const pushOne = (obj) => {
+    if (!obj || typeof obj !== 'object') return;
+    vals.push(Number(obj.amount || obj.invoice_amount || 0));
+  };
+  Object.keys(schedule).forEach((k) => {
+    const v = schedule[k];
+    if (Array.isArray(v)) v.forEach(pushOne);
+    else pushOne(v);
+  });
+  return vals.reduce((s, n) => s + (Number.isFinite(n) ? n : 0), 0);
+}
+
+function _analysisProjectStatusCode(row) {
+  const r = row || {};
+  if (Number(r.settled_at || 0) > 0) return 'settled_done';
+  if (Number(r.work_closed_at || 0) > 0) return 'work_closed';
+  if (Number(r.execution_started_at || 0) > 0) return 'in_progress';
+  return 'contract_completed';
+}
+
+function _analysisProjectStatusLabel(code) {
+  if (code === 'settled_done') return '정산완료';
+  if (code === 'work_closed') return '업무종료';
+  if (code === 'in_progress') return '수행중';
+  return '계약완료';
+}
+
+function _analysisCostBucket(costType) {
+  const t = String(costType || '').trim().toLowerCase();
+  if (t.includes('간접')) return 'indirect';
+  if (t.includes('직접인건') || t.includes('인건비') || t.includes('labor')) return 'direct_labor';
+  return 'direct_expense';
+}
+
+function _analysisDateInRange(dateText, from, to) {
+  const d = String(dateText || '').slice(0, 10);
+  if (!d) return false;
+  if (from && d < from) return false;
+  if (to && d > to) return false;
+  return true;
+}
+
+function _analysisKrw(n) {
+  return `${Math.round(Number(n || 0)).toLocaleString('ko-KR')}원`;
+}
+
+async function loadProjectProfitAnalysis() {
+  const session = getSession();
+  const body = document.getElementById('analysis-project-profit-body');
+  const kpi = document.getElementById('analysis-project-profit-kpi');
+  if (!body || !kpi) return;
+  const from = String(document.getElementById('filter-project-profit-date-from')?.value || '').trim();
+  const to = String(document.getElementById('filter-project-profit-date-to')?.value || '').trim();
+  const fDept = String(document.getElementById('filter-project-profit-dept')?.value || '').trim();
+  const fHq = String(document.getElementById('filter-project-profit-hq')?.value || '').trim();
+  const fCs = String(document.getElementById('filter-project-profit-csteam')?.value || '').trim();
+  const fStatus = String(document.getElementById('filter-project-profit-status')?.value || 'closed').trim();
+  body.innerHTML = '<tr><td colspan="11" class="table-empty"><i class="fas fa-spinner fa-spin"></i><p>분석 데이터를 불러오는 중입니다.</p></td></tr>';
+  try {
+    const [projects, users, costItems, expenseRows] = await Promise.all([
+      API.listAllPages('registered_projects', { limit: 700, maxPages: 30, sort: 'updated_at' }).catch(() => []),
+      Master.users(),
+      API.listAllPages('project_cost_items', { limit: 5000, maxPages: 60, sort: 'updated_at' }).catch(() => []),
+      API.listAllPages('project_expense_uploads', { limit: 7000, maxPages: 80, sort: 'updated_at' }).catch(() => []),
+    ]);
+    const userById = {};
+    (users || []).forEach((u) => { userById[String(u.id || '')] = u; });
+    const allowedCodes = new Set((projects || []).map((p) => String(p.project_code || '').trim()).filter(Boolean));
+    const costByCode = {};
+    (costItems || []).forEach((c) => {
+      const code = String(c.project_code || '').trim();
+      if (!code || !allowedCodes.has(code)) return;
+      if (!_analysisDateInRange(String(c.cost_date || ''), from, to)) return;
+      if (!costByCode[code]) costByCode[code] = { direct_labor: 0, direct_expense: 0, indirect: 0 };
+      const bucket = _analysisCostBucket(c.cost_type || c.cost_category || c.category || '');
+      const amt = Number(c.total_amount || c.amount || 0);
+      costByCode[code][bucket] += Number.isFinite(amt) ? amt : 0;
+    });
+    (expenseRows || []).forEach((r) => {
+      const code = String(r.project_code || '').trim();
+      if (!code || !allowedCodes.has(code)) return;
+      if (!_analysisDateInRange(String(r.expense_date || ''), from, to)) return;
+      if (!costByCode[code]) costByCode[code] = { direct_labor: 0, direct_expense: 0, indirect: 0 };
+      const amt = Number(r.total_amount || r.amount || 0);
+      costByCode[code].direct_expense += Number.isFinite(amt) ? amt : 0;
+    });
+
+    const rows = (projects || []).filter((p) => {
+      if (String(p.registration_status || '').trim() !== 'approved') return false;
+      const code = String(p.project_code || '').trim();
+      if (!code) return false;
+      if (Auth.isAdmin(session) || Auth.isTopMgr(session)) return true;
+      const pm = userById[String(p.cpm_user_id || '')] || null;
+      if (pm && Auth.scopeMatch(session, pm)) return true;
+      const sid = String(session && session.id || '');
+      return [
+        p.created_by,
+        p.first_approved_by,
+        p.second_approved_by,
+        p.final_approved_by,
+        p.cpm_user_id,
+      ].some((v) => String(v || '').trim() === sid);
+    }).map((p) => {
+      const code = String(p.project_code || '').trim();
+      const pm = userById[String(p.cpm_user_id || '')] || {};
+      const statusCode = _analysisProjectStatusCode(p);
+      const c = costByCode[code] || { direct_labor: 0, direct_expense: 0, indirect: 0 };
+      const revenue = _analysisProjectRevenue(p);
+      const totalCost = Number(c.direct_labor || 0) + Number(c.direct_expense || 0) + Number(c.indirect || 0);
+      const profit = revenue - totalCost;
+      const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+      return {
+        code,
+        name: String(p.project_name || '-'),
+        statusCode,
+        statusLabel: _analysisProjectStatusLabel(statusCode),
+        dept: String(pm.dept_name || ''),
+        hq: String(pm.hq_name || ''),
+        cs: String(pm.cs_team_name || ''),
+        revenue,
+        directLabor: Number(c.direct_labor || 0),
+        directExpense: Number(c.direct_expense || 0),
+        indirect: Number(c.indirect || 0),
+        totalCost,
+        profit,
+        margin,
+      };
+    }).filter((r) => {
+      if (fStatus === 'closed' && !['work_closed', 'settled_done'].includes(r.statusCode)) return false;
+      if (fStatus && fStatus !== 'closed' && r.statusCode !== fStatus) return false;
+      if (fDept && r.dept !== fDept) return false;
+      if (fHq && r.hq !== fHq) return false;
+      if (fCs && r.cs !== fCs) return false;
+      return true;
+    }).sort((a, b) => Number(a.margin || 0) - Number(b.margin || 0));
+
+    const sumRevenue = rows.reduce((s, r) => s + Number(r.revenue || 0), 0);
+    const sumCost = rows.reduce((s, r) => s + Number(r.totalCost || 0), 0);
+    const sumProfit = sumRevenue - sumCost;
+    const avgMargin = sumRevenue > 0 ? (sumProfit / sumRevenue) * 100 : 0;
+    const lossCount = rows.filter((r) => Number(r.profit || 0) < 0).length;
+    kpi.innerHTML = `
+      <div class="kpi-card"><div class="kpi-label">프로젝트 수</div><div class="kpi-value">${rows.length}</div><div class="kpi-change neutral">건</div></div>
+      <div class="kpi-card"><div class="kpi-label">매출(계약기준)</div><div class="kpi-value">${_analysisKrw(sumRevenue)}</div><div class="kpi-change neutral">합계</div></div>
+      <div class="kpi-card"><div class="kpi-label">총비용</div><div class="kpi-value">${_analysisKrw(sumCost)}</div><div class="kpi-change neutral">직접인건비+직접비+간접비</div></div>
+      <div class="kpi-card"><div class="kpi-label">총이익 / 평균 이익율</div><div class="kpi-value">${_analysisKrw(sumProfit)}</div><div class="kpi-change ${avgMargin < 0 ? 'down' : 'up'}">${avgMargin.toFixed(1)}% · 적자 ${lossCount}건</div></div>
+    `;
+
+    if (!rows.length) {
+      body.innerHTML = '<tr><td colspan="11" class="table-empty"><i class="fas fa-inbox"></i><p>조건에 맞는 프로젝트가 없습니다.</p></td></tr>';
+      return;
+    }
+    body.innerHTML = rows.map((r, i) => `
+      <tr>
+        <td style="text-align:center">${i + 1}</td>
+        <td>${Utils.escHtml(r.statusLabel)}</td>
+        <td>${Utils.escHtml(r.code)}</td>
+        <td title="${Utils.escHtml(r.name)}">${Utils.escHtml(r.name)}</td>
+        <td style="text-align:right">${_analysisKrw(r.revenue)}</td>
+        <td style="text-align:right">${_analysisKrw(r.directLabor)}</td>
+        <td style="text-align:right">${_analysisKrw(r.directExpense)}</td>
+        <td style="text-align:right">${_analysisKrw(r.indirect)}</td>
+        <td style="text-align:right">${_analysisKrw(r.totalCost)}</td>
+        <td style="text-align:right;color:${r.profit < 0 ? '#b91c1c' : '#0f766e'}">${_analysisKrw(r.profit)}</td>
+        <td style="text-align:right;font-weight:700;color:${r.margin < 0 ? '#b91c1c' : '#0f766e'}">${Number(r.margin || 0).toFixed(1)}%</td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    console.error('loadProjectProfitAnalysis 오류:', err);
+    kpi.innerHTML = '';
+    body.innerHTML = '<tr><td colspan="11" class="table-empty"><i class="fas fa-exclamation-triangle"></i><p>프로젝트 수익성 분석 실패</p></td></tr>';
+  }
+}
+
+function resetProjectProfitFilter() {
+  const ids = [
+    'filter-project-profit-date-from',
+    'filter-project-profit-date-to',
+    'filter-project-profit-dept',
+    'filter-project-profit-hq',
+    'filter-project-profit-csteam',
+  ];
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  const statusEl = document.getElementById('filter-project-profit-status');
+  if (statusEl) statusEl.value = 'closed';
+  loadProjectProfitAnalysis();
 }
 
 // ══════════════════════════════════════════════

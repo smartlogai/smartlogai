@@ -109,12 +109,30 @@ window.addEventListener('DOMContentLoaded', async () => {
   // 알림 센터 초기화 (30초 폴링 시작)
   if (typeof initNotify === 'function') initNotify();
 
-  // ── 역할별 초기 진입 페이지 결정 ──────────────────────────
+  // ── 역할별 초기 진입 페이지 결정 (권한 라우팅 우선) ───────────
   // 승인자 미지정 staff → 자문 자료실로 바로 이동
   if (Auth.isStaff(_session) && !Auth.hasApprover(_session)) {
     navigateTo('archive');
   } else {
-    await init_dashboard();
+    const initialCandidates = [
+      'dashboard',
+      'project-dashboard',
+      'archive',
+      'project-deliverables',
+      'my-entries-hourly',
+      'my-entries-daily',
+      'entry-new-hourly',
+      'entry-new-daily',
+    ];
+    let moved = null;
+    for (const p of initialCandidates) {
+      moved = navigateTo(p);
+      if (moved) break;
+    }
+    if (!moved) {
+      // 예외 상황 fallback: 최소 접근 가능한 화면으로 archive 시도
+      navigateTo('archive');
+    }
   }
 });
 
@@ -428,15 +446,16 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
 // 페이지 타이틀 업데이트
 // ─────────────────────────────────────────────
 const PAGE_TITLES = {
-  dashboard: 'Dashboard',
-  'project-dashboard': '프로젝트 대시보드',
+  dashboard: 'Timelog dashboard',
+  'project-dashboard': 'Project dashboard',
   'entry-new': 'New Entry',
   'entry-new-hourly': '업무 등록 (시간제)',
   'entry-new-daily': 'Time Entry',
-  'my-entries': 'My Time Sheet',
+  'my-entries': '컨설턴트 업무 기록',
   'my-entries-hourly': 'My Time Sheet',
   'my-entries-daily': 'My Time Sheet',
   'project-deliverables': 'Project Outputs',
+  'helpdesk': 'Help Desk',
   approval: 'Approval',
   analysis: 'Analysis',
   archive: 'Advisory Library',
@@ -448,6 +467,7 @@ const PAGE_TITLES = {
   'master-departments': '사업부 관리',
   'master-csteams': '고객지원팀 관리',
   users: 'Staff 관리',
+  'permission-management': '권한정책 관리',
   'project-register': '프로젝트 등록',
   'project-management': 'Project Management',
 };
@@ -463,6 +483,7 @@ const PAGE_INIT_MAP = {
   'my-entries-hourly': 'init_my_entries',
   'my-entries-daily': 'init_my_entries',
   'project-deliverables': 'init_project_deliverables',
+  'helpdesk': 'init_helpdesk',
   'approval': 'init_approval',
   'analysis': 'init_analysis',
   'archive': 'init_archive',
@@ -474,6 +495,7 @@ const PAGE_INIT_MAP = {
   'master-departments': 'init_master_departments',
   'master-csteams': 'init_master_csteams',
   'users': 'init_users',
+  'permission-management': 'init_permission_management',
   'project-register': 'init_project_register',
   'project-management': 'init_project_register',
 };
@@ -491,8 +513,10 @@ const _LAZY_SCRIPTS = {
   'master-departments': 'js/master.js?v=20260419clientApproverRouting1',
   'master-csteams'    : 'js/master.js?v=20260419clientApproverRouting1',
   'users'             : 'js/users.js?v=20260416tsopt1',
-  'project-register'  : 'js/project-register.js?v=20260419projectMgmtAllIn4',
-  'project-management': 'js/project-register.js?v=20260419projectMgmtAllIn4',
+  'permission-management': 'js/permission-management.js?v=20260501permSystemAdminAll1',
+  'project-register'  : 'js/project-register.js?v=20260420projRegFlowRole1',
+  'project-management': 'js/project-register.js?v=20260420projRegFlowRole1',
+  'helpdesk'          : 'js/helpdesk.js?v=20260420helpdesk7',
 };
 const _lazyLoaded = {};  // 이미 로드된 파일 추적
 
@@ -541,22 +565,23 @@ let _lastNavigatedPage = '';
 let _lastNavigatedAt   = 0;
 window.navigateTo = function(page) {
   if (page === 'approval-1st' || page === 'approval-2nd') page = 'my-entries';
-  _baseNavigateTo(page);
+  const navigatedPage = _baseNavigateTo(page);
+  if (!navigatedPage) return;
   // 타이틀 업데이트
-  const title = PAGE_TITLES[page] || page;
+  const title = PAGE_TITLES[navigatedPage] || navigatedPage;
   document.getElementById('pageTitle').textContent = title;
   document.getElementById('headerActions').innerHTML = '';
   try { if (typeof window.renderEnvBadge === 'function') window.renderEnvBadge(); } catch (_) {}
 
   // ★ 동일 페이지 1초 내 재진입은 init 재실행 생략 (사이드바 클릭 연타 방지)
   const now = Date.now();
-  if (page === _lastNavigatedPage && now - _lastNavigatedAt < 1000) return;
-  _lastNavigatedPage = page;
+  if (navigatedPage === _lastNavigatedPage && now - _lastNavigatedAt < 1000) return;
+  _lastNavigatedPage = navigatedPage;
   _lastNavigatedAt   = now;
 
   // ★ Lazy 로드 필요 페이지: 스크립트 로드 후 init 호출
-  const lazySrc = _LAZY_SCRIPTS[page];
-  const initFnName = PAGE_INIT_MAP[page];
+  const lazySrc = _LAZY_SCRIPTS[navigatedPage];
+  const initFnName = PAGE_INIT_MAP[navigatedPage];
   if (lazySrc) {
     _lazyLoadScript(lazySrc).then(() => {
       if (initFnName && window[initFnName]) window[initFnName]();
@@ -568,6 +593,7 @@ window.navigateTo = function(page) {
 
   // 일반 페이지 init 호출
   if (initFnName && window[initFnName]) window[initFnName]();
+  return navigatedPage;
 };
 
 // ─────────────────────────────────────────────

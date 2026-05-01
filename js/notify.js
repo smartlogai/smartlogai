@@ -10,6 +10,15 @@
 // ── 상수 ────────────────────────────────────────────────────
 const NOTIFY_POLL_MS  = 30_000;   // 폴링 간격 30초
 const NOTIFY_MAX_LIST = 30;       // 드롭다운 최대 표시 건수
+const NOTIFY_EMAIL_FUNCTION = 'send_notification_email';
+const NOTIFY_EMAIL_TYPES = new Set([
+  'project_registered_final_approved', // 5
+  'project_output_publish_request',     // 9
+  'project_output_access_request',      // 10
+  'project_output_bulk_access_alert',   // 12
+  'project_clearance_notice',           // 13
+  'helpdesk_new_ticket',                // 14
+]);
 
 // ── 상태 ────────────────────────────────────────────────────
 let _notifyTimer    = null;   // setInterval 핸들
@@ -23,6 +32,17 @@ const NOTIFY_META = {
   approved:     { icon: '🎉', label: '최종 승인',   color: '#15803d', bg: '#f0fdf4', target: 'my-entries'  },
   rejected:     { icon: '❌', label: '반려',        color: '#dc2626', bg: '#fef2f2', target: 'my-entries'  },
   invoice_due_remind: { icon: '🧾', label: '발행 리마인드', color: '#7c3aed', bg: '#f5f3ff', target: 'project-management:invoice' },
+  invoice_overdue_remind: { icon: '💰', label: '입금 지연', color: '#b91c1c', bg: '#fee2e2', target: 'project-management:invoice' },
+  invoice_short_paid_alert: { icon: '⚠️', label: '부분입금 확인', color: '#b45309', bg: '#fffbeb', target: 'project-management:invoice' },
+  project_clearance_notice: { icon: '📌', label: '통관 유의사항', color: '#b45309', bg: '#fffbeb', target: 'project-deliverables' },
+  project_output_publish_request: { icon: '📣', label: '결과보고서 게시요청', color: '#1d4ed8', bg: '#dbeafe', target: 'project-management:progress' },
+  project_output_access_request: { icon: '📝', label: '결과물 접근신청', color: '#1d4ed8', bg: '#dbeafe', target: 'project-deliverables' },
+  project_output_access_decision: { icon: '✅', label: '결과물 신청결과', color: '#166534', bg: '#dcfce7', target: 'project-deliverables' },
+  project_output_bulk_access_alert: { icon: '🚨', label: '대량 접근 알림', color: '#b91c1c', bg: '#fee2e2', target: 'project-deliverables' },
+  project_registered_final_approved: { icon: '📁', label: '프로젝트 최종승인', color: '#1d4ed8', bg: '#dbeafe', target: 'project-register' },
+  helpdesk_new_ticket: { icon: '🎧', label: 'Help Desk 접수', color: '#1d4ed8', bg: '#dbeafe', target: 'helpdesk' },
+  helpdesk_status_updated: { icon: '🛠️', label: 'Help Desk 업데이트', color: '#0f766e', bg: '#ccfbf1', target: 'helpdesk' },
+  helpdesk_comment: { icon: '💬', label: 'Help Desk 코멘트', color: '#7c3aed', bg: '#f3e8ff', target: 'helpdesk' },
 };
 
 // ════════════════════════════════════════════════════════════
@@ -234,6 +254,26 @@ async function _onNotifyClick(notifyId, targetMenu, entryId) {
   if (targetMenu && typeof navigateTo === 'function') {
     const raw = String(targetMenu || '').trim();
     const [page, subtab] = raw.includes(':') ? raw.split(':', 2) : [raw, ''];
+    if ((page === 'project-management' || page === 'project-register') && subtab === 'invoice' && String(entryId || '').startsWith('INV_DUE|')) {
+      const parts = String(entryId || '').split('|');
+      const projectCode = String(parts[1] || '').trim();
+      const dueDate = String(parts[2] || '').trim();
+      const mode = String(parts[3] || 'edit_due').trim();
+      if (projectCode && /^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+        window.__PM_INVOICE_ALERT__ = { projectCode, dueDate, mode };
+      }
+    }
+    if (page === 'project-management' && String(entryId || '').startsWith('PM_OUT_PUBLISH|')) {
+      const parts = String(entryId || '').split('|');
+      const projectCode = String(parts[1] || '').trim();
+      const outputId = String(parts[2] || '').trim();
+      if (projectCode && outputId) {
+        window.__PM_OUTPUT_ALERT__ = { projectCode, outputId };
+      }
+    }
+    if (page === 'helpdesk' && entryId) {
+      window.__HD_OPEN_TICKET_ID__ = String(entryId || '').trim();
+    }
     navigateTo(page);
     if (page === 'approval') {
       const tab = (subtab === 'project' || subtab === 'timesheet') ? subtab : 'timesheet';
@@ -242,6 +282,9 @@ async function _onNotifyClick(notifyId, targetMenu, entryId) {
       }, 0);
     } else if (page === 'project-register' || page === 'project-management') {
       const tab = ['progress', 'invoice', 'cost', 'timecharge', 'contract'].includes(subtab) ? subtab : 'progress';
+      if (page === 'project-management') {
+        window.__PM_PENDING_TAB__ = tab;
+      }
       setTimeout(() => {
         if (typeof switchProjectMgmtTab === 'function') switchProjectMgmtTab(tab);
       }, 0);
@@ -279,7 +322,7 @@ async function createNotification({
   if (!toUserId || !type) return;
   try {
     // Supabase REST API로 알림 생성
-    await API.create('notifications', {
+    const created = await API.create('notifications', {
       to_user_id:    toUserId,
       to_user_name:  toUserName   || '',
       from_user_id:  fromUserId   || '',
@@ -291,9 +334,43 @@ async function createNotification({
       is_read:       false,
       target_menu:   targetMenu   || (NOTIFY_META[type]?.target || 'my-entries'),
     });
+    // 중요 알림 타입만 메일 동시 발송 (실패해도 인앱 알림에는 영향 없음)
+    _notifySendEmailForSelectedTypes({
+      createdId: String((created && created.id) || ''),
+      toUserId,
+      toUserName,
+      fromUserId,
+      fromUserName,
+      type,
+      entryId,
+      entrySummary,
+      message,
+      targetMenu: targetMenu || (NOTIFY_META[type]?.target || 'my-entries'),
+    });
   } catch (e) {
     console.warn('알림 생성 실패:', e);
   }
+}
+
+function _notifySendEmailForSelectedTypes(payload) {
+  const type = String(payload?.type || '').trim();
+  if (!NOTIFY_EMAIL_TYPES.has(type)) return;
+  if (!API || typeof API.invokeFunction !== 'function') return;
+  API.invokeFunction(NOTIFY_EMAIL_FUNCTION, {
+    notification_id: String(payload?.createdId || ''),
+    to_user_id: String(payload?.toUserId || ''),
+    to_user_name: String(payload?.toUserName || ''),
+    from_user_id: String(payload?.fromUserId || ''),
+    from_user_name: String(payload?.fromUserName || ''),
+    type,
+    entry_id: String(payload?.entryId || ''),
+    entry_summary: String(payload?.entrySummary || ''),
+    message: String(payload?.message || ''),
+    target_menu: String(payload?.targetMenu || ''),
+    channel: 'email',
+  }).catch((err) => {
+    console.warn(`[notify-email] ${type} 메일 발송 실패:`, err?.message || err);
+  });
 }
 
 // ════════════════════════════════════════════════════════════
