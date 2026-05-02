@@ -15,6 +15,7 @@ with expected_tables as (
   select * from (values
     ('public','registered_projects'),
     ('public','project_code_types'),
+    ('public','standard_rate_master'),
     ('public','project_outputs'),
     ('public','project_output_actions'),
     ('public','project_output_access_requests'),
@@ -50,6 +51,12 @@ with expected_columns as (
     ('public','registered_projects','registration_status'),
     -- project_code_types
     ('public','project_code_types','requires_clearance_note'),
+    -- standard_rate_master
+    ('public','standard_rate_master','rate_key'),
+    ('public','standard_rate_master','role_key'),
+    ('public','standard_rate_master','user_name'),
+    ('public','standard_rate_master','unit_rate'),
+    ('public','standard_rate_master','is_active'),
     -- project_outputs
     ('public','project_outputs','project_code'),
     ('public','project_outputs','output_type'),
@@ -122,7 +129,8 @@ with expected_rls as (
     ('public','project_output_actions'),
     ('public','project_output_access_requests'),
     ('public','project_output_access_logs'),
-    ('public','project_output_ai_queue')
+    ('public','project_output_ai_queue'),
+    ('public','standard_rate_master')
   ) as t(schema_name, table_name)
 )
 select
@@ -145,6 +153,7 @@ with missing_tables as (
     select * from (values
       ('public','registered_projects'),
       ('public','project_code_types'),
+      ('public','standard_rate_master'),
       ('public','project_outputs'),
       ('public','project_output_actions'),
       ('public','project_output_access_requests'),
@@ -173,6 +182,11 @@ missing_columns as (
       ('public','registered_projects','billing_schedule'),
       ('public','registered_projects','registration_status'),
       ('public','project_code_types','requires_clearance_note'),
+      ('public','standard_rate_master','rate_key'),
+      ('public','standard_rate_master','role_key'),
+      ('public','standard_rate_master','user_name'),
+      ('public','standard_rate_master','unit_rate'),
+      ('public','standard_rate_master','is_active'),
       ('public','project_outputs','project_code'),
       ('public','project_outputs','output_type'),
       ('public','project_outputs','output_title'),

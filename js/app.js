@@ -126,7 +126,7 @@ const ROLE_LABEL_FULL = {
   director: '본부장',
   top_mgr:  'Top Mgr',
   manager:  '팀장',
-  staff:    '담당(선임/전임/책임)',
+  staff:    '담당(전임/선임/책임)',
 };
 const JOB_TITLE_LABEL = {
   senior: '선임',

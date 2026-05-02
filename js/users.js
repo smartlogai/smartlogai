@@ -716,7 +716,7 @@ async function saveUser() {
   if (!name)  { showErr('이름을 입력하세요.'); return; }
   if (!email) { showErr('이메일을 입력하세요.'); return; }
   if (isStaffLike && isTimesheetTarget && !jobTitle) {
-    showErr('타임시트 대상자는 직책(선임/전임/책임/팀장/본부장/사업부장/대표)을 지정해야 합니다.');
+    showErr('타임시트 대상자는 직책(전임/선임/책임/팀장/본부장/사업부장/대표)을 지정해야 합니다.');
     return;
   }
   if (!id && !pw) { showErr('비밀번호를 입력하세요.'); return; }

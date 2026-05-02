@@ -3867,12 +3867,12 @@
               </div>
               <div style="display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:8px">
                 <div class="form-group" style="margin:0">
-                  <label class="form-label">선임</label>
-                  <input type="text" id="user-std-rate-senior" class="form-control" inputmode="numeric" placeholder="0" />
-                </div>
-                <div class="form-group" style="margin:0">
                   <label class="form-label">전임</label>
                   <input type="text" id="user-std-rate-associate" class="form-control" inputmode="numeric" placeholder="0" />
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">선임</label>
+                  <input type="text" id="user-std-rate-senior" class="form-control" inputmode="numeric" placeholder="0" />
                 </div>
                 <div class="form-group" style="margin:0">
                   <label class="form-label">책임</label>
@@ -5374,8 +5374,8 @@
           <label class="form-label">직책 <span class="required">*</span></label>
           <select class="form-control" id="user-job-title-input" onchange="_onUserJobTitleChange()">
             <option value="">(미지정)</option>
-            <option value="senior">선임</option>
             <option value="associate">전임</option>
+            <option value="senior">선임</option>
             <option value="principal">책임</option>
             <option value="team_lead">팀장</option>
             <option value="division_head">본부장</option>

@@ -14,7 +14,7 @@
 
   const POLICY_TARGET_OPTIONS = {
     dept_job: [
-      { value: 'staff_consultant', label: '담당(선임/전임/책임 통합)' },
+      { value: 'staff_consultant', label: '담당(전임/선임/책임 통합)' },
       { value: 'team_lead', label: '팀장' },
       { value: 'division_head', label: '본부장' },
       { value: 'bu_head', label: '사업부장' },

@@ -64,7 +64,7 @@ const PM_INVOICE_EMAIL_FUNCTION = 'send_notification_email';
 const PM_ASSISTANT_PROJECT_ROLE_OPTIONS = Object.freeze([
   { value: '실무 책임자', labelKo: '실무 책임자', labelBi: '실무 책임자 (Project Manager)' },
   { value: '핵심 실무자', labelKo: '핵심 실무자', labelBi: '핵심 실무자 (In-charge / Senior Consultant)' },
-  { value: '지원 실무자', labelKo: '지원 실무자', labelBi: '지원 실무자 (선임/전임/책임)' },
+  { value: '지원 실무자', labelKo: '지원 실무자', labelBi: '지원 실무자 (전임/선임/책임)' },
   { value: '전문 자문역', labelKo: '전문 자문역', labelBi: '전문 자문역 (Advisor)' },
   { value: '기타', labelKo: '기타', labelBi: '기타' },
 ]);
@@ -2866,7 +2866,7 @@ function _pmProjectLabel(p) {
 
 function _pmRoleLabel(role) {
   const r = String(role || '').trim().toLowerCase();
-  if (r === 'staff') return '담당(선임/전임/책임)';
+  if (r === 'staff') return '담당(전임/선임/책임)';
   if (r === 'manager') return '팀장';
   if (r === 'director') return '본부장';
   if (r === 'top_mgr') return '사업부장';
@@ -5393,7 +5393,7 @@ function _pmNormalizeTimeChargeTitleKey(raw, userName = '') {
 function _pmPickBestUserForTimeCharge(users, userName = '') {
   const list = Array.isArray(users) ? users.filter(Boolean) : [];
   if (!list.length) return null;
-  const titleRank = { senior: 1, associate: 2, principal: 3, team_lead: 4, division_head: 5, bu_head: 6, ceo: 7 };
+  const titleRank = { associate: 1, senior: 2, principal: 3, team_lead: 4, division_head: 5, bu_head: 6, ceo: 7 };
   return list.slice().sort((a, b) => {
     const aActive = (a?.deleted !== true && a?.is_active !== false) ? 1 : 0;
     const bActive = (b?.deleted !== true && b?.is_active !== false) ? 1 : 0;

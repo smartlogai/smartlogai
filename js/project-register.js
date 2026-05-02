@@ -1050,7 +1050,7 @@ async function init_project_register() {
 
 function _projRegProposalRoleLabel(roleKey) {
   const map = {
-    staff: '담당(선임/전임/책임)',
+    staff: '담당(전임/선임/책임)',
     manager: '팀장',
     director: '본부장',
     top_mgr: '사업부장',
@@ -1287,12 +1287,19 @@ async function projRegSaveContractRates() {
     Toast.warning('권한이 없습니다.');
     return;
   }
-  const row = _projRegOutCurrentRow();
-  const projectCode = _projRegRateProjectCode(row);
-  const projectId = _projRegRateProjectId(row);
+  let row = _projRegOutCurrentRow();
+  let projectCode = _projRegRateProjectCode(row);
+  let projectId = _projRegRateProjectId(row);
   if (!projectId) {
-    Toast.warning('먼저 임시저장 후 계약단가를 저장하세요.');
-    return;
+    const saved = await projRegSaveDraft({ silentSuccess: true, skipRatePersist: true });
+    if (!saved) return;
+    row = _projRegOutCurrentRow();
+    projectCode = _projRegRateProjectCode(row);
+    projectId = _projRegRateProjectId(row);
+    if (!projectId) {
+      Toast.warning('임시저장 후에도 프로젝트 식별자를 확인할 수 없어 계약단가를 저장하지 못했습니다.');
+      return;
+    }
   }
   try {
     await _projRegPersistProjectContractRates(projectCode, projectId, session);
@@ -3253,11 +3260,13 @@ async function _projRegApplyRouteEvidenceToPayload(basePayload, routeEvidenceFil
   }
 }
 
-async function projRegSaveDraft() {
+async function projRegSaveDraft(opts = {}) {
+  const silentSuccess = !!opts.silentSuccess;
+  const skipRatePersist = !!opts.skipRatePersist;
   const session = getSession();
   if (!Auth.canManageProjectRegister(session)) {
     Toast.warning('권한이 없습니다.');
-    return;
+    return false;
   }
   const editId = document.getElementById('proj-reg-edit-id').value;
   const f = _projRegReadFormCore(session);
@@ -3282,24 +3291,26 @@ async function projRegSaveDraft() {
       const canEditFromApproval = !!(_projRegOpenedFromApprovalDetail && prev && _projRegCanApproveRow(session, prev));
       if (!prev || (!_projRegIsOwner(session, prev) && !canEditFromApproval)) {
         Toast.warning('임시저장할 권한이 없습니다.');
-        return;
+        return false;
       }
       const st = _projRegNormStatus(prev);
       if (st === 'pending' && !canEditFromApproval) {
         Toast.warning('승인 대기 중에는 수정할 수 없습니다.');
-        return;
+        return false;
       }
       if (st === 'approved') {
         Toast.warning('승인 완료 건은 하단 「저장」으로 수정하세요.');
-        return;
+        return false;
       }
       await _projRegApplyContractToPayload(basePayload, f.file, f.removeContractMeta, prev);
       await _projRegApplyEvidenceToPayload(basePayload, f.evidenceFile, f.removeEvidenceMeta, prev);
       await _projRegApplyRouteEvidenceToPayload(basePayload, f.routeEvidenceFile, f.removeRouteEvidenceMeta, prev);
       basePayload.contract_exception_reason = f.contractExceptionReason || '';
       await API.patch('registered_projects', editId, basePayload);
-      await _projRegPersistProjectContractRates(String((prev && prev.project_code) || ''), editId, session);
-      Toast.success('임시저장되었습니다.');
+      if (!skipRatePersist) {
+        await _projRegPersistProjectContractRates(String((prev && prev.project_code) || ''), editId, session);
+      }
+      if (!silentSuccess) Toast.success('임시저장되었습니다.');
     } else {
       await _projRegApplyContractToPayload(basePayload, f.file, f.removeContractMeta, null);
       await _projRegApplyEvidenceToPayload(basePayload, f.evidenceFile, f.removeEvidenceMeta, null);
@@ -3324,16 +3335,20 @@ async function projRegSaveDraft() {
         document.getElementById('proj-reg-edit-id').value = row.id;
         const rs = document.getElementById('proj-reg-row-status');
         if (rs) rs.value = 'draft';
-        await _projRegPersistProjectContractRates(String((row && row.project_code) || ''), row.id, session);
+        if (!skipRatePersist) {
+          await _projRegPersistProjectContractRates(String((row && row.project_code) || ''), row.id, session);
+        }
       }
-      Toast.success('임시저장되었습니다.');
+      if (!silentSuccess) Toast.success('임시저장되었습니다.');
     }
     await projRegLoadList();
     const eid = document.getElementById('proj-reg-edit-id').value;
     if (eid) projRegUpdateFormFooter(session, eid, _projRegRows.find((x) => x.id === eid));
     projRegRefreshProgress();
+    return true;
   } catch (e) {
     Toast.error('임시저장 실패: ' + (e.message || e));
+    return false;
   }
 }
 
@@ -3404,7 +3419,7 @@ async function projRegSubmitForApproval() {
 
   // 역할별 승인자 구성 검증
   if (isStaffRegistrant && (!has1 || !has2 || !has3)) {
-    Toast.warning('승인 요청할 수 없습니다. 담당(선임/전임/책임)은 1차/2차 승인자와 사업부장 최종 승인자가 모두 지정되어야 합니다.');
+    Toast.warning('승인 요청할 수 없습니다. 담당(전임/선임/책임)은 1차/2차 승인자와 사업부장 최종 승인자가 모두 지정되어야 합니다.');
     return;
   }
   if (isManagerRegistrant && (!has1 || !has2)) {
