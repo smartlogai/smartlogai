@@ -868,6 +868,8 @@ function _projRegTryParseContribJson(text) {
 function _projRegContribParse(raw) {
   const txt = String(raw || '').trim();
   if (!txt) return [];
+  // 수행상세 투입인력(JSON::) 포맷은 수주참여자 카운트/표시에 포함하지 않는다.
+  if (txt.startsWith('JSON::')) return [];
   const parsedRows = _projRegTryParseContribJson(txt);
   if (Array.isArray(parsedRows)) return _projRegContribNormalize(parsedRows);
   // 하위호환: "이름(역할,40%)" 콤마 나열 텍스트

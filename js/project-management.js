@@ -4605,7 +4605,14 @@ async function pmProgressDetailSaveOps() {
     }
     const assistants = _pmProgressSerializeAssistants(PM_STATE.progressAssistantRows || []);
     const prevRaw = String((row && row.order_contributors_text) || '').trim();
-    const nextContributors = assistants || (prevRaw.startsWith('JSON::') ? '' : prevRaw);
+    // 수주참여자(등록 단계 데이터)가 이미 있으면 수행상세 저장으로 덮어쓰지 않는다.
+    // 과거에 수행상세를 same field(JSON::)로 저장한 데이터만 해당 포맷으로 갱신한다.
+    let nextContributors = prevRaw;
+    if (prevRaw.startsWith('JSON::')) {
+      nextContributors = assistants || '';
+    } else if (!prevRaw && assistants) {
+      nextContributors = assistants;
+    }
     const startDate = String(document.getElementById('pm-detail-start-date')?.value || '').trim();
     const patch = {
       cpm_user_id: cpmId || '',
