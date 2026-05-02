@@ -2884,6 +2884,16 @@ function _pmResolveCpmName(project, userMap = null) {
   return String((map[uid] && map[uid].name) || '').trim();
 }
 
+function _pmLifecycleStatusForCpmPolicy(row) {
+  const r = row || {};
+  const override = String(r.lifecycle_status_override || '').trim();
+  if (override && PM_LIFECYCLE[override]) return override;
+  if (Number(r.settled_at || 0) > 0) return 'settled_done';
+  if (Number(r.work_closed_at || 0) > 0) return 'work_closed';
+  if (Number(r.execution_started_at || 0) > 0) return 'in_progress';
+  return 'contract_completed';
+}
+
 function _pmIsCpmEligible(u) {
   const r = String((u && u.role) || '').trim().toLowerCase();
   return r === 'manager' || r === 'director' || r === 'top_mgr' || r === 'admin';
@@ -4575,11 +4585,17 @@ async function pmProgressDetailSaveOps() {
   try {
     const cpmSel = document.getElementById('pm-detail-cpm');
     const cpmId = String(cpmSel?.value || '').trim();
+    const currentCpmId = String(row?.cpm_user_id || '').trim();
     const cpmNameFromOption = String(cpmSel?.selectedOptions?.[0]?.dataset?.name || '').trim();
     const cpmNameFromMap = String(((PM_STATE.usersById || {})[cpmId] || {}).name || '').trim();
     const cpmNameFromText = String(cpmSel?.selectedOptions?.[0]?.textContent || '').split('(')[0].trim();
     const cpmName = cpmNameFromOption || cpmNameFromMap || cpmNameFromText;
     if (!cpmId) return Toast.warning('총괄 프로젝트 매니저(CPM)는 필수입니다.');
+    const lifecycleCode = _pmLifecycleStatusForCpmPolicy(row);
+    const isAdmin = !!(Auth && typeof Auth.isAdmin === 'function' && Auth.isAdmin(session));
+    if (lifecycleCode === 'settled_done' && !isAdmin && cpmId !== currentCpmId) {
+      return Toast.warning('정산완료 상태에서는 관리자만 CPM을 변경할 수 있습니다.');
+    }
     _pmProgressDetailSyncAssistantRowsFromDom();
     const validationMsg = _pmProgressValidateAssistantRows(PM_STATE.progressAssistantRows || []);
     if (validationMsg) return Toast.warning(validationMsg);
