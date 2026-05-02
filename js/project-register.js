@@ -178,6 +178,14 @@ function _projRegIsOwner(session, r) {
   return myIds.has(creatorId);
 }
 
+function _projRegIsCcbRegistrant(userRow, session) {
+  const deptName = String((userRow && userRow.dept_name) || session?.dept_name || session?.department_name || '').trim();
+  const hqName = String((userRow && userRow.hq_name) || session?.hq_name || '').trim();
+  const csTeamName = String((userRow && userRow.cs_team_name) || session?.cs_team_name || '').trim();
+  const src = `${deptName} ${hqName} ${csTeamName}`.toLowerCase();
+  return src.includes('ccb');
+}
+
 async function _projRegRegistrantSnapshot(session) {
   let u = null;
   let users = [];
@@ -235,11 +243,13 @@ async function _projRegRegistrantSnapshot(session) {
   };
 
   const topMgr = pickTopMgr();
+  const isCcbRegistrant = _projRegIsCcbRegistrant(u, session);
 
   // 승인체계
   // - staff   : 1차(pa1) -> 2차(pa2) -> 최종(top_mgr)
-  // - manager : 1차(pa1) -> 최종(top_mgr)
-  // - director: 최종(top_mgr) 1단계
+  // - manager : 1차(pa1) -> 2차(pa2) -> 최종(top_mgr)
+  // - director(CCB): 사용자등록 지정 승인자(pa1/pa2) -> 최종(top_mgr)
+  // - director(기타): 기존과 동일(최종 top_mgr 1단계)
   if (myRole === 'staff') {
     return {
       pa1Id,
@@ -254,13 +264,23 @@ async function _projRegRegistrantSnapshot(session) {
     return {
       pa1Id,
       pa1Name,
-      pa2Id: topMgr.id,
-      pa2Name: topMgr.name,
-      pa3Id: '',
-      pa3Name: '',
+      pa2Id,
+      pa2Name,
+      pa3Id: topMgr.id,
+      pa3Name: topMgr.name,
     };
   }
   if (myRole === 'director') {
+    if (isCcbRegistrant) {
+      return {
+        pa1Id,
+        pa1Name,
+        pa2Id,
+        pa2Name,
+        pa3Id: topMgr.id,
+        pa3Name: topMgr.name,
+      };
+    }
     return {
       pa1Id: topMgr.id,
       pa1Name: topMgr.name,
@@ -3451,11 +3471,15 @@ async function projRegSubmitForApproval() {
     Toast.warning('승인 요청할 수 없습니다. 담당(전임/선임/책임)은 1차/2차 승인자와 사업부장 최종 승인자가 모두 지정되어야 합니다.');
     return;
   }
-  if (isManagerRegistrant && (!has1 || !has2)) {
-    Toast.warning('승인 요청할 수 없습니다. 팀장은 1차 승인자와 사업부장(2차) 승인자가 모두 지정되어야 합니다.');
+  if (isManagerRegistrant && (!has1 || !has2 || !has3)) {
+    Toast.warning('승인 요청할 수 없습니다. 팀장은 1차/2차 승인자와 사업부장 최종 승인자가 모두 지정되어야 합니다.');
     return;
   }
-  if (isDirectorRegistrant && !has1) {
+  if (isDirectorRegistrant && _projRegIsCcbRegistrant(session, session) && ((!has1 && !has2) || !has3)) {
+    Toast.warning('승인 요청할 수 없습니다. CCB 본부장은 사용자등록 승인자(1차/2차 중 1개 이상)와 사업부장 최종 승인자가 지정되어야 합니다.');
+    return;
+  }
+  if (isDirectorRegistrant && !_projRegIsCcbRegistrant(session, session) && !has1) {
     Toast.warning('승인 요청할 수 없습니다. 본부장은 사업부장 최종 승인자가 지정되어야 합니다.');
     return;
   }
