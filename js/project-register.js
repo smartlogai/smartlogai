@@ -1884,12 +1884,12 @@ async function projRegOutUpload() {
 
 function _projRegRenderDetailTab() {
   const row = _projRegOutCurrentRow();
-  const canOutputTab = !!(row && row.project_code);
-  if (_projRegDetailTab === 'output' && !canOutputTab) _projRegDetailTab = 'ops';
+  const canOutputTab = false;
+  _projRegDetailTab = 'ops';
   const ops = document.getElementById('proj-reg-detail-panel-ops');
   const out = document.getElementById('proj-reg-detail-panel-output');
-  if (ops) ops.style.display = _projRegDetailTab === 'ops' ? '' : 'none';
-  if (out) out.style.display = _projRegDetailTab === 'output' ? '' : 'none';
+  if (ops) ops.style.display = '';
+  if (out) out.style.display = 'none';
   document.querySelectorAll('[data-proj-detail-tab]').forEach((btn) => {
     const tab = btn.getAttribute('data-proj-detail-tab');
     const on = tab === _projRegDetailTab;
@@ -1897,12 +1897,10 @@ function _projRegRenderDetailTab() {
     if (tab === 'output') btn.disabled = !canOutputTab;
   });
   _projRegOutRefreshContext(row);
-  if (_projRegDetailTab === 'output' && canOutputTab) projRegOutLoadList();
 }
 
 function projRegSwitchDetailTab(tab) {
-  const next = tab === 'output' ? 'output' : 'ops';
-  _projRegDetailTab = next;
+  _projRegDetailTab = 'ops';
   _projRegRenderDetailTab();
 }
 
