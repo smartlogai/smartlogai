@@ -2480,7 +2480,7 @@ function _pmBuildProgressFilters(rows) {
   // 고객사는 텍스트 검색(input) 방식이므로 값만 유지
   if (clientEl) clientEl.value = prev.client;
   if (pmEl) {
-    pmEl.innerHTML = '<option value="">PM 전체</option>' + pms.map((v) => `<option value="${_pmEsc(v)}">${_pmEsc(v)}</option>`).join('');
+    pmEl.innerHTML = '<option value="">CPM 전체</option>' + pms.map((v) => `<option value="${_pmEsc(v)}">${_pmEsc(v)}</option>`).join('');
     if (prev.pm && [...pmEl.options].some((o) => o.value === prev.pm)) pmEl.value = prev.pm;
   }
 }
