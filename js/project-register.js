@@ -3854,6 +3854,11 @@ async function projRegApprove(id) {
         await window.loadApprovalProjectList();
       } catch (_) {}
     }
+    if (typeof updateApprovalBadge === 'function') {
+      try {
+        await updateApprovalBadge(session, true);
+      } catch (_) {}
+    }
     const curFormId = document.getElementById('proj-reg-edit-id')?.value;
     if (curFormId === id) {
       const r2 = _projRegRows.find((x) => x.id === id);
@@ -3901,6 +3906,11 @@ async function projRegReject(id) {
     if (typeof window.loadApprovalProjectList === 'function') {
       try {
         await window.loadApprovalProjectList();
+      } catch (_) {}
+    }
+    if (typeof updateApprovalBadge === 'function') {
+      try {
+        await updateApprovalBadge(session, true);
       } catch (_) {}
     }
     const curFormId = document.getElementById('proj-reg-edit-id')?.value;
