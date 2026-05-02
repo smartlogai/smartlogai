@@ -390,7 +390,8 @@ async function loadApprovalProjectList() {
     }
     return String(a?.id || '').localeCompare(String(b?.id || ''));
   });
-  _approvalSetTabCountPartial('project', rows.length);
+  const projectPendingCount = rows.filter((r) => P.normStatus(r) === 'pending').length;
+  _approvalSetTabCountPartial('project', projectPendingCount);
   if (!rows.length) {
     tbody.innerHTML = '<tr><td colspan="9" class="table-empty"><i class="fas fa-check-circle" style="color:var(--success)"></i><p>표시할 프로젝트 승인 내역이 없습니다.</p></td></tr>';
     return;

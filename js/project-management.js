@@ -4118,6 +4118,15 @@ function _pmApplyProjectRoleSelectLabels(selectEl, openList = false) {
   });
 }
 
+function _pmAssistantTitleLabel(title) {
+  const raw = String(title || '').trim();
+  if (!raw) return '';
+  if (typeof Utils !== 'undefined' && Utils && typeof Utils.jobTitleLabel === 'function') {
+    return Utils.jobTitleLabel(raw);
+  }
+  return raw;
+}
+
 function _pmNormalizeAssistantFromObject(obj) {
   const titleRoles = new Set(['Staff', 'Manager', 'Director', '선임', '전임', '책임', '팀장', '본부장', '사업부장', 'Admin']);
   const userId = String(obj?.user_id || obj?.userId || '').trim();
@@ -4135,6 +4144,7 @@ function _pmNormalizeAssistantFromObject(obj) {
   if (!title && legacyRole && titleRoles.has(legacyRole)) title = legacyRole;
   if (!projectRole && legacyRole && !titleRoles.has(legacyRole)) projectRole = legacyRole;
   projectRole = _pmNormalizeProjectRoleValue(projectRole);
+  title = _pmAssistantTitleLabel(title);
   if (allocationType !== 'partial' && allocationType !== 'full') {
     allocationType = (Number.isFinite(allocationPct) && allocationPct > 0 && allocationPct < 100) ? 'partial' : 'full';
   }
@@ -4218,7 +4228,7 @@ function _pmProgressAssistantNameKey(v) {
 
 function _pmProgressDetailAssistantTitleForUser(user) {
   const jobTitle = String(user?.job_title || '').trim();
-  if (jobTitle) return jobTitle;
+  if (jobTitle) return _pmAssistantTitleLabel(jobTitle);
   const fallback = _pmRoleLabel(user?.role || '');
   return fallback === '-' ? '' : fallback;
 }
