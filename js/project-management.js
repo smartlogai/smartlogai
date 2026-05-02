@@ -2464,7 +2464,7 @@ function _pmBuildProgressFilters(rows) {
   const csStillValid = !prev.cs || css.includes(prev.cs);
   const safeCs = csStillValid ? prev.cs : '';
 
-  const pms = uniq(rows.map((r) => r.cpm_user_name));
+  const pms = uniq(rows.map((r) => _pmResolveCpmName(r)));
   if (deptEl) {
     deptEl.innerHTML = '<option value="">사업부 전체</option>' + depts.map((v) => `<option value="${_pmEsc(v)}">${_pmEsc(v)}</option>`).join('');
     if (prev.dept && [...deptEl.options].some((o) => o.value === prev.dept)) deptEl.value = prev.dept;
@@ -2872,6 +2872,16 @@ function _pmRoleLabel(role) {
   if (r === 'top_mgr') return '사업부장';
   if (r === 'admin') return 'Admin';
   return r || '-';
+}
+
+function _pmResolveCpmName(project, userMap = null) {
+  const p = project || {};
+  const byName = String(p.cpm_user_name || '').trim();
+  if (byName) return byName;
+  const uid = String(p.cpm_user_id || '').trim();
+  if (!uid) return '';
+  const map = userMap || PM_STATE.usersById || {};
+  return String((map[uid] && map[uid].name) || '').trim();
 }
 
 function _pmIsCpmEligible(u) {
@@ -3980,7 +3990,7 @@ async function loadProjectMgmtProgress() {
         const clientName = String(r.client_name || '').toLowerCase();
         if (!clientName.includes(fClient.toLowerCase())) return false;
       }
-      if (fPm && String(r.cpm_user_name || '') !== fPm) return false;
+      if (fPm && _pmResolveCpmName(r, userMap) !== fPm) return false;
       if (fStatus && String(x.life.code || '') !== fStatus) return false;
       return true;
     }).sort((a, b) => {
@@ -4024,7 +4034,7 @@ async function loadProjectMgmtProgress() {
         <td class="pm-progress-col-code">${_pmEsc(r.project_code || '')}</td>
         <td class="pm-progress-col-name" title="${_pmEsc(r.project_name || '')}">${_pmEsc(r.project_name || '-')}</td>
         <td class="pm-progress-col-status"><span class="pm-progress-status-wrap">${_pmLifecycleBadge(stepCode)}${overrideMark}</span></td>
-        <td class="pm-progress-col-pm">${_pmEsc(r.cpm_user_name || '-')}</td>
+        <td class="pm-progress-col-pm">${_pmEsc(_pmResolveCpmName(r, userMap) || '-')}</td>
         <td style="text-align:center">
           <button type="button" class="btn btn-sm pm-progress-detail-btn" onclick="pmOpenProgressDetail('${_pmEsc(r.id)}')" title="수행상세 열기">
             <i class="fas fa-arrow-up-right-from-square"></i> 열기
@@ -4565,7 +4575,10 @@ async function pmProgressDetailSaveOps() {
   try {
     const cpmSel = document.getElementById('pm-detail-cpm');
     const cpmId = String(cpmSel?.value || '').trim();
-    const cpmName = String(cpmSel?.selectedOptions?.[0]?.dataset?.name || '').trim();
+    const cpmNameFromOption = String(cpmSel?.selectedOptions?.[0]?.dataset?.name || '').trim();
+    const cpmNameFromMap = String(((PM_STATE.usersById || {})[cpmId] || {}).name || '').trim();
+    const cpmNameFromText = String(cpmSel?.selectedOptions?.[0]?.textContent || '').split('(')[0].trim();
+    const cpmName = cpmNameFromOption || cpmNameFromMap || cpmNameFromText;
     if (!cpmId) return Toast.warning('총괄 프로젝트 매니저(CPM)는 필수입니다.');
     _pmProgressDetailSyncAssistantRowsFromDom();
     const validationMsg = _pmProgressValidateAssistantRows(PM_STATE.progressAssistantRows || []);
@@ -4588,7 +4601,17 @@ async function pmProgressDetailSaveOps() {
     };
     if (startDate) patch.execution_started_at = new Date(`${startDate}T00:00:00`).getTime();
     await API.patch('registered_projects', row.id, patch);
-    PM_STATE.progressDetailProject = { ...row, ...patch };
+    const latest = await API.get('registered_projects', row.id).catch(() => null);
+    if (latest && typeof latest === 'object') {
+      const hasCpmCols = Object.prototype.hasOwnProperty.call(latest, 'cpm_user_id')
+        || Object.prototype.hasOwnProperty.call(latest, 'cpm_user_name');
+      if (hasCpmCols && String(latest.cpm_user_id || '').trim() !== cpmId) {
+        Toast.warning('CPM 저장값이 즉시 반영되지 않았습니다. 권한/DB 컬럼 상태를 확인하세요.');
+      } else if (!hasCpmCols) {
+        Toast.warning('운영 DB에 CPM 컬럼이 없어 저장 반영이 제한됩니다. SQL 스키마 적용이 필요합니다.');
+      }
+    }
+    PM_STATE.progressDetailProject = { ...row, ...patch, ...(latest || {}) };
     PM_STATE.progressRowById[String(row.id)] = PM_STATE.progressDetailProject;
     Toast.success('업무수행 상세를 저장했습니다.');
     await loadProjectMgmtProgress();
