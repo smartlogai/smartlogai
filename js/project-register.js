@@ -49,7 +49,7 @@ let _projRegContractRateInputBound = false;
 let _projRegContractRateRowsByRole = {};
 
 const _PROJ_REG_ROLE_KEYS = ['staff', 'manager', 'director', 'top_mgr'];
-const _PROJ_REG_TC_TITLE_KEYS = ['senior', 'associate', 'principal', 'team_lead', 'division_head', 'bu_head', 'ceo'];
+const _PROJ_REG_TC_TITLE_KEYS = ['associate', 'senior', 'principal', 'team_lead', 'division_head', 'bu_head', 'ceo'];
 const _PROJ_REG_TC_DEFAULT_RATE = {
   senior: 200000,
   associate: 300000,
@@ -1103,7 +1103,7 @@ async function projRegOpenContractRateInput() {
   if (wrap) {
     try { wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (_) {}
   }
-  const firstInput = document.getElementById('proj-reg-contract-rate-senior');
+  const firstInput = document.getElementById('proj-reg-contract-rate-associate');
   if (firstInput) firstInput.focus();
 }
 
@@ -1111,6 +1111,12 @@ function _projRegRateProjectCode(row) {
   const rowCode = String((row && row.project_code) || '').trim();
   if (rowCode) return rowCode;
   return String(document.getElementById('proj-reg-existing-code')?.value || '').trim();
+}
+
+function _projRegRateProjectId(row) {
+  const rowId = String((row && row.id) || '').trim();
+  if (rowId) return rowId;
+  return String(document.getElementById('proj-reg-edit-id')?.value || '').trim();
 }
 
 function _projRegSetContractBaseRate(roleKey, rate) {
@@ -1131,6 +1137,7 @@ function _projRegSetContractRateInputs(roleKey, row) {
 async function _projRegLoadContractRatePanel(row) {
   projRegToggleTimeChargeRatePanel();
   const projectCode = _projRegRateProjectCode(row);
+  const projectId = _projRegRateProjectId(row);
   const defaultBaseMap = { ..._PROJ_REG_TC_DEFAULT_RATE };
   _PROJ_REG_TC_TITLE_KEYS.forEach((role) => {
     _projRegSetContractBaseRate(role, Number(defaultBaseMap[role] || 0));
@@ -1154,14 +1161,33 @@ async function _projRegLoadContractRatePanel(row) {
       const n = Number(stdMap[role] || defaultBaseMap[role] || 0);
       _projRegSetContractBaseRate(role, n);
     });
-    if (!projectCode) return;
-    const contractRows = await API.listAllPages('project_rate_cards', {
-      filter: `project_code=eq.${encodeURIComponent(projectCode)}&is_active=eq.true`,
-      limit: 200,
-      maxPages: 5,
-      sort: 'updated_at',
-    }).catch(() => []);
-    const sorted = (contractRows || [])
+    if (!projectCode && !projectId) return;
+    let contractRowsByCode = [];
+    let contractRowsByProject = [];
+    if (projectCode) {
+      contractRowsByCode = await API.listAllPages('project_rate_cards', {
+        filter: `project_code=eq.${encodeURIComponent(projectCode)}&is_active=eq.true`,
+        limit: 200,
+        maxPages: 5,
+        sort: 'updated_at',
+      }).catch(() => []);
+    }
+    if (projectId) {
+      contractRowsByProject = await API.listAllPages('project_rate_cards', {
+        filter: `project_id=eq.${encodeURIComponent(projectId)}&is_active=eq.true`,
+        limit: 200,
+        maxPages: 5,
+        sort: 'updated_at',
+      }).catch(() => []);
+    }
+    const mergedRows = [...(contractRowsByCode || []), ...(contractRowsByProject || [])];
+    const uniqById = {};
+    mergedRows.forEach((r) => {
+      const rid = String(r && r.id || '').trim();
+      if (!rid || uniqById[rid]) return;
+      uniqById[rid] = r;
+    });
+    const sorted = Object.values(uniqById)
       .slice()
       .sort((a, b) => Number(b.updated_at || b.created_at || 0) - Number(a.updated_at || a.created_at || 0));
     const byRole = {};
@@ -1181,15 +1207,35 @@ async function _projRegLoadContractRatePanel(row) {
 
 async function _projRegPersistProjectContractRates(projectCode, projectId, session) {
   const code = String(projectCode || '').trim();
-  if (!code) return;
+  const pid = String(projectId || '').trim();
+  if (!code && !pid) return;
   const enabled = _projRegIsTimeChargeEnabled();
   if (!enabled) {
-    const exists = await API.listAllPages('project_rate_cards', {
-      filter: `project_code=eq.${encodeURIComponent(code)}&is_active=eq.true`,
-      limit: 300,
-      maxPages: 5,
-      sort: 'updated_at',
-    }).catch(() => []);
+    let existsByCode = [];
+    let existsByProject = [];
+    if (code) {
+      existsByCode = await API.listAllPages('project_rate_cards', {
+        filter: `project_code=eq.${encodeURIComponent(code)}&is_active=eq.true`,
+        limit: 300,
+        maxPages: 5,
+        sort: 'updated_at',
+      }).catch(() => []);
+    }
+    if (pid) {
+      existsByProject = await API.listAllPages('project_rate_cards', {
+        filter: `project_id=eq.${encodeURIComponent(pid)}&is_active=eq.true`,
+        limit: 300,
+        maxPages: 5,
+        sort: 'updated_at',
+      }).catch(() => []);
+    }
+    const uniqRows = {};
+    [...(existsByCode || []), ...(existsByProject || [])].forEach((r) => {
+      const rid = String(r && r.id || '').trim();
+      if (!rid || uniqRows[rid]) return;
+      uniqRows[rid] = r;
+    });
+    const exists = Object.values(uniqRows);
     for (const row of (exists || [])) {
       if (!row || !row.id) continue;
       await API.patch('project_rate_cards', row.id, {
@@ -1206,7 +1252,7 @@ async function _projRegPersistProjectContractRates(projectCode, projectId, sessi
     const hit = _projRegContractRateRowsByRole[role] || null;
     if (unitRate > 0) {
       const payload = {
-        project_id: String(projectId || ''),
+        project_id: pid,
         project_code: code,
         user_id: '',
         role_key: role,
@@ -1243,12 +1289,13 @@ async function projRegSaveContractRates() {
   }
   const row = _projRegOutCurrentRow();
   const projectCode = _projRegRateProjectCode(row);
-  if (!projectCode) {
-    Toast.warning('프로젝트 코드 생성 후 저장하세요. (승인요청 시 코드 자동채번)');
+  const projectId = _projRegRateProjectId(row);
+  if (!projectId) {
+    Toast.warning('먼저 임시저장 후 계약단가를 저장하세요.');
     return;
   }
   try {
-    await _projRegPersistProjectContractRates(projectCode, String((row && row.id) || ''), session);
+    await _projRegPersistProjectContractRates(projectCode, projectId, session);
     await _projRegLoadContractRatePanel(row);
     Toast.success('프로젝트 계약단가를 저장했습니다.');
   } catch (e) {
