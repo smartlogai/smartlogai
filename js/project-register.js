@@ -2824,6 +2824,15 @@ function _projRegCollectBilling() {
   };
 }
 
+function _projRegBillingHasAnyAmount(billing) {
+  if (!billing || typeof billing !== 'object') return false;
+  const keys = ['down', 'interim', 'final', 'additional', 'success'];
+  return keys.some((k) => {
+    const n = Number(billing?.[k]?.amount || 0);
+    return Number.isFinite(n) && n > 0;
+  });
+}
+
 async function projRegShowForm(editId, opts) {
   _projRegOpenedFromApprovalDetail = !!(opts && opts.fromApproval);
   const session = getSession();
@@ -3307,6 +3316,10 @@ async function projRegSubmitForApproval() {
   }
   if (!f.route) {
     Toast.warning('수주경로를 선택하세요.');
+    return;
+  }
+  if (!_projRegBillingHasAnyAmount(f.billing)) {
+    Toast.warning('보수조건 금액(착수금/중도금/잔금/Time Charge/성공보수) 중 최소 1개를 입력하세요.');
     return;
   }
   const contribValid = _projRegValidateContributorsForApproval();

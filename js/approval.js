@@ -916,8 +916,16 @@ async function init_approval() {
     await updateApprovalBadge(session, true);
   } catch (_) {}
   _approvalApplyTabCountLabels();
-  _approvalSetMainTabVisual('timesheet');
-  await loadApprovalList();
+  const split = window.__approvalBadgeSplit || { timesheet: 0, project: 0 };
+  const projectOnlyPending = (Number(split.project) || 0) > 0 && (Number(split.timesheet) || 0) === 0;
+  const projectTabVisible = pjTabBtn && pjTabBtn.style.display !== 'none';
+  if (projectOnlyPending && projectTabVisible) {
+    _approvalSetMainTabVisual('project');
+    await loadApprovalProjectList();
+  } else {
+    _approvalSetMainTabVisual('timesheet');
+    await loadApprovalList();
+  }
 }
 
 async function loadApprovalList() {
