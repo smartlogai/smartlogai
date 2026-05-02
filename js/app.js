@@ -2602,11 +2602,13 @@ function _projRegCanApproveForBadge(session, row) {
   return !!target && sid === target;
 }
 
-async function _countProjectApprovalBadge(session) {
+async function _countProjectApprovalBadge(session, force = false) {
   if (!session || !session.id) return 0;
   let rows = [];
+  const cacheKey = 'registered_projects_badge_pending_' + session.id;
   try {
-    rows = await Cache.get('registered_projects_badge_pending_' + session.id, async () => (
+    if (force) Cache.invalidate(cacheKey);
+    rows = await Cache.get(cacheKey, async () => (
       API.listAllPages('registered_projects', {
         filter: 'registration_status=eq.pending',
         limit: 300,
@@ -2729,7 +2731,7 @@ async function updateApprovalBadge(session, force = false) {
       } else {
         tsCount = 0;
       }
-      const pjCount = await _countProjectApprovalBadge(session);
+      const pjCount = await _countProjectApprovalBadge(session, force);
       const count = tsCount + pjCount;
       window.__approvalBadgeSplit = { timesheet: tsCount, project: pjCount, total: count };
       const badge = document.getElementById('approval-badge');
