@@ -3362,7 +3362,11 @@ async function processApprovalWithArchive() {
         closeModal('approvalModal');
         if (typeof loadApprovalList === 'function') loadApprovalList();
         const _s = Session.get();
-        if (typeof updateApprovalBadge === 'function' && _s) updateApprovalBadge(_s);
+        if (typeof updateApprovalBadge === 'function' && _s) {
+          try {
+            await updateApprovalBadge(_s, true);
+          } catch (_) {}
+        }
         return;
       }
     }
@@ -3493,7 +3497,11 @@ async function processApprovalWithArchive() {
     // 승인 목록 새로고침
     if (typeof loadApprovalList === 'function') loadApprovalList();
     const _sess = Session.get();
-    if (typeof updateApprovalBadge === 'function' && _sess) updateApprovalBadge(_sess, true);
+    if (typeof updateApprovalBadge === 'function' && _sess) {
+      try {
+        await updateApprovalBadge(_sess, true);
+      } catch (_) {}
+    }
 
     // ★ [문제3 수정] 자료실 탭 활성 여부와 관계없이 항상 갱신 플래그 세팅
     // 자료실이 열려있으면 즉시 갱신, 닫혀있으면 다음 진입 시 자동 갱신됨
