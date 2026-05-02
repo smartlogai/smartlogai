@@ -2822,9 +2822,17 @@ function _projRegClearBilling() {
 
 function _projRegFillBilling(bs) {
   _projRegClearBilling();
-  if (!bs || typeof bs !== 'object') return;
+  let data = bs;
+  if (typeof data === 'string') {
+    try {
+      data = JSON.parse(data);
+    } catch (_) {
+      data = null;
+    }
+  }
+  if (!data || typeof data !== 'object') return;
   const tcEl = document.getElementById('proj-reg-timecharge-enabled-input');
-  if (tcEl) tcEl.checked = bs.timecharge_enabled === true;
+  if (tcEl) tcEl.checked = data.timecharge_enabled === true;
   projRegToggleTimeChargeRatePanel();
   const setAmt = (id, amt) => {
     const ael = document.getElementById(id);
@@ -2844,7 +2852,7 @@ function _projRegFillBilling(bs) {
     const aid = row[1];
     const did = row[2];
     const nid = row[3];
-    const b = bs[key];
+    const b = data[key];
     if (!b) return;
     setAmt(aid, b.amount);
     const del = document.getElementById(did);
