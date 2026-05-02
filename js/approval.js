@@ -197,13 +197,16 @@ function _approvalProjCompSummary(row) {
   const interim = Number(bs?.interim?.amount || 0) || 0;
   const finalAmt = Number(bs?.final?.amount || 0) || 0;
   const fixed = down + interim + finalAmt;
+  const timechargeEnabled = !!bs?.timecharge_enabled;
   const addAmt = Number(bs?.additional?.amount || 0) || 0;
   const addNote = String(bs?.additional?.terms_note || '').trim();
   const sucAmt = Number(bs?.success?.amount || 0) || 0;
   const sucNote = String(bs?.success?.terms_note || '').trim();
   const parts = [];
   if (fixed > 0) parts.push(`고정 ${_approvalProjFmtWon(fixed)}`);
-  if (addAmt > 0 || addNote) {
+  if (timechargeEnabled) {
+    parts.push(addAmt > 0 ? `Time charge Max ${_approvalProjFmtWon(addAmt)}` : 'Time charge Max 없음');
+  } else if (addAmt > 0 || addNote) {
     const txt = addAmt > 0 ? _approvalProjFmtWon(addAmt) : _approvalProjShortText(addNote);
     parts.push(`추가 ${txt}`);
   }
