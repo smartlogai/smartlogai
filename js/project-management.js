@@ -101,6 +101,51 @@ function _pmFormatPaidAmountInput(v) {
   return n.toLocaleString('ko-KR');
 }
 
+function _pmBillingScheduleObject(raw) {
+  let src = raw;
+  if (typeof src === 'string') {
+    try { src = JSON.parse(src); } catch (_) { src = null; }
+  }
+  return (src && typeof src === 'object') ? src : null;
+}
+
+function _pmProjectHasContractOrEvidence(row) {
+  if (!row || typeof row !== 'object') return false;
+  const contractName = String(row.contract_file_name || '').trim();
+  const contractUrl = String(row.contract_file_url || '').trim();
+  const evidenceName = String(row.contract_evidence_file_name || '').trim();
+  const evidenceUrl = String(row.contract_evidence_file_url || '').trim();
+  return !!(contractName || contractUrl || evidenceName || evidenceUrl);
+}
+
+function _pmMissingBillingDueDateLabels(rawBilling) {
+  const billing = _pmBillingScheduleObject(rawBilling);
+  if (!billing) return [];
+  const plan = [
+    { key: 'down', label: '착수금' },
+    { key: 'interim', label: '중도금' },
+    { key: 'final', label: '잔금' },
+    { key: 'additional', label: '추가청구' },
+    { key: 'success', label: '성과보수' },
+  ];
+  const missing = [];
+  plan.forEach(({ key, label }) => {
+    const value = billing[key];
+    const entries = Array.isArray(value) ? value : [value];
+    let needDue = false;
+    let hasDue = false;
+    entries.forEach((entry) => {
+      if (!entry || typeof entry !== 'object') return;
+      const amount = Number(entry.amount || entry.invoice_amount || 0);
+      const due = String(entry.due_date || entry.expected_date || '').trim();
+      if (Number.isFinite(amount) && amount > 0) needDue = true;
+      if (due) hasDue = true;
+    });
+    if (needDue && !hasDue) missing.push(label);
+  });
+  return missing;
+}
+
 function _pmInvoiceTaxAmounts(supplyAmount, vatRate = 0.1) {
   const supply = Math.max(0, Math.round(Number(supplyAmount || 0)));
   const rate = Number.isFinite(Number(vatRate)) ? Math.max(0, Number(vatRate)) : 0.1;
@@ -3953,7 +3998,10 @@ async function loadProjectMgmtProgress() {
     const lifecycle = (r) => {
       const code = String(r.project_code || '').trim();
       const inv = invByCode[code] || { outstanding: 0, hasInvoice: false };
-      const contractAtAuto = r.contract_file_name ? Number(r.contract_uploaded_at || r.final_approved_at || r.created_at || 0) : 0;
+      const hasContractProof = _pmProjectHasContractOrEvidence(r);
+      const contractAtAuto = hasContractProof
+        ? Number(r.contract_uploaded_at || r.contract_evidence_uploaded_at || r.final_approved_at || r.created_at || 0)
+        : 0;
       const pmOutputs = (outputRowsByCode[code] || []).filter((o) => String(o.uploaded_by || '') === String(r.cpm_user_id || ''));
       const closedAtAuto = pmOutputs.reduce((mx, o) => Math.max(mx, Number(o.uploaded_at || o.created_at || o.updated_at || 0)), 0);
       const settledAtAuto = (inv.hasInvoice && Number(inv.outstanding || 0) <= 0) ? Number((invoices || [])
@@ -4614,6 +4662,16 @@ async function pmProgressDetailSaveOps() {
       nextContributors = assistants;
     }
     const startDate = String(document.getElementById('pm-detail-start-date')?.value || '').trim();
+    const hadStarted = Number(row.execution_started_at || 0) > 0;
+    if (startDate && !hadStarted) {
+      if (!_pmProjectHasContractOrEvidence(row)) {
+        return Toast.warning('수행중 전환 전 계약서 또는 고객 합의 근거(증빙) 파일을 먼저 등록하세요.');
+      }
+      const missingDue = _pmMissingBillingDueDateLabels(row.billing_schedule);
+      if (missingDue.length) {
+        return Toast.warning(`용역시작일 저장 전 청구예정일을 입력하세요: ${missingDue.join(', ')}`);
+      }
+    }
     const patch = {
       cpm_user_id: cpmId || '',
       cpm_user_name: cpmName || '',
@@ -5292,6 +5350,23 @@ async function pmAdjustLifecycleStatus(projectId, currentCode) {
     if (!PM_LIFECYCLE[val]) {
       Toast.warning('유효하지 않은 상태 코드입니다.');
       return;
+    }
+    const targetRow = PM_STATE.progressRowById[String(projectId || '')]
+      || await API.get('registered_projects', projectId).catch(() => null);
+    if (val === 'contract_completed' && !_pmProjectHasContractOrEvidence(targetRow)) {
+      Toast.warning('계약완료로 보정하려면 계약서 또는 고객 합의 근거(증빙) 파일이 필요합니다.');
+      return;
+    }
+    if (val === 'in_progress') {
+      if (!_pmProjectHasContractOrEvidence(targetRow)) {
+        Toast.warning('수행중으로 보정하려면 계약서 또는 고객 합의 근거(증빙) 파일이 필요합니다.');
+        return;
+      }
+      const missingDue = _pmMissingBillingDueDateLabels(targetRow && targetRow.billing_schedule);
+      if (missingDue.length) {
+        Toast.warning(`수행중으로 보정하려면 청구예정일을 먼저 입력하세요: ${missingDue.join(', ')}`);
+        return;
+      }
     }
     patch.lifecycle_status_override = val;
     if (val === 'contract_completed') patch.contract_completed_at = now;
@@ -8970,7 +9045,7 @@ async function loadProjectMgmtContracts() {
       const evidenceUrl = String(r.contract_evidence_file_url || '').trim();
       const routeName = String(r.order_evidence_file_name || '').trim();
       const routeUrl = String(r.order_evidence_file_url || '').trim();
-      const isMissing = !contractName;
+      const isMissing = !contractName && !contractUrl && !evidenceName && !evidenceUrl;
       if (isMissing) missingCount += 1;
       const statusTxt = isMissing ? '누락' : '정상';
       const statusColor = isMissing ? '#b45309' : '#047857';
