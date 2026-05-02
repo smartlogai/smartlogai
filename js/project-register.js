@@ -186,13 +186,32 @@ async function _projRegRegistrantSnapshot(session) {
     u = users.find((x) => String(x.id) === String(session.id)) || null;
   } catch (_) {}
   const myRole = String((u && u.role) || session.role || '').trim().toLowerCase();
-  const pa1Id = String((u && u.approver_id) || session.approver_id || '').trim();
-  const pa1Name = String((u && u.approver_name) || session.approver_name || '').trim();
-  const pa2Id = String((u && u.reviewer2_id) || session.reviewer2_id || '').trim();
-  const pa2Name = String((u && u.reviewer2_name) || session.reviewer2_name || '').trim();
+  const activeUsers = (Array.isArray(users) ? users : []).filter((x) => x && x.deleted !== true && x.is_active !== false);
+  const normName = (v) => String(v || '').toLowerCase().replace(/\s+/g, '').trim();
+  const resolveApprover = (rawId, rawName) => {
+    const id = String(rawId || '').trim();
+    const name = String(rawName || '').trim();
+    let hit = null;
+    if (id) hit = activeUsers.find((x) => String(x.id || '').trim() === id) || null;
+    if (!hit && name) {
+      const key = normName(name);
+      const matched = activeUsers.filter((x) => normName(x.name) === key);
+      if (matched.length === 1) hit = matched[0];
+    }
+    return {
+      id: String((hit && hit.id) || '').trim(),
+      name: String((hit && hit.name) || name || '').trim(),
+    };
+  };
+  const pa1Resolved = resolveApprover((u && u.approver_id) || session.approver_id, (u && u.approver_name) || session.approver_name);
+  const pa2Resolved = resolveApprover((u && u.reviewer2_id) || session.reviewer2_id, (u && u.reviewer2_name) || session.reviewer2_name);
+  const pa1Id = pa1Resolved.id;
+  const pa1Name = pa1Resolved.name;
+  const pa2Id = pa2Resolved.id;
+  const pa2Name = pa2Resolved.name;
 
   const pickTopMgr = () => {
-    if (!Array.isArray(users) || !users.length) return { id: '', name: '' };
+    if (!activeUsers.length) return { id: '', name: '' };
     const pickScore = (cand) => {
       if (!cand || String(cand.role || '').toLowerCase() !== 'top_mgr') return -1;
       let s = 0;
@@ -201,7 +220,7 @@ async function _projRegRegistrantSnapshot(session) {
       if (u && u.cs_team_id && cand.cs_team_id && String(u.cs_team_id) === String(cand.cs_team_id)) s += 20;
       return s;
     };
-    const sorted = users
+    const sorted = activeUsers
       .filter((x) => String((x && x.role) || '').toLowerCase() === 'top_mgr')
       .map((x) => ({ x, score: pickScore(x) }))
       .sort((a, b) => {
