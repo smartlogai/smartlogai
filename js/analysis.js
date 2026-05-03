@@ -74,6 +74,22 @@ function _renderRankList(containerId, rows, opts = {}) {
   }).join('');
 }
 
+function _analysisAdvisoryEntry(e) {
+  const cat = String(e?.work_category_name || '').replace(/\s+/g, '');
+  return cat === '일반자문업무';
+}
+
+function _analysisInternalEntry(e) {
+  const cat = String(e?.work_category_name || '').replace(/\s+/g, '');
+  return cat === '회사내부업무';
+}
+
+function _analysisCustomsEntry(e) {
+  const cat = String(e?.work_category_name || '').replace(/\s+/g, '');
+  return cat === '일반통관업무';
+}
+
+
 function _getVisibleUserIdSetForAnalysis(session, allUsers) {
   const s = session || {};
   const users = Array.isArray(allUsers) ? allUsers : [];
@@ -615,66 +631,41 @@ async function loadAnalysis() {
       kpiCard('fa-building',  '', '', '내부업무 투입', (internalMin/60).toFixed(1), 'h',  `비율 ${100-clientRatio}%`, '', '#4a7fc4') +
       kpiCard('fa-users',     '', '', '집계 인원',     uniqueUsers,                 '명', `${entries.length}건 기록`, '', '#6b95ce');
 
-    // 1) 소분류(업무유형)별 투입비율
-    const subMap = {};
-    entries.forEach(e => {
-      const key = e.work_subcategory_name || '미분류';
-      subMap[key] = (subMap[key]||0) + (e.duration_minutes||0);
-    });
-    renderAnalysisDonut('analysis-chart-category', _topNWithEtc(subMap, 8));
+    const advisoryEntries = entries.filter((e) => _analysisAdvisoryEntry(e));
+    const customsEntries = entries.filter((e) => _analysisCustomsEntry(e));
+    const internalEntries = entries.filter((e) => _analysisInternalEntry(e));
 
-    // 2) 고객사별 투입비율 (고객업무만)
-    const cliMap = {};
-    entries.filter(e => e.time_category === 'client' && e.client_id).forEach(e => {
-      const key = e.client_name || '미지정';
-      cliMap[key] = (cliMap[key]||0) + (e.duration_minutes||0);
+    // 1) 업무유형별 투입비율 (대분류)
+    const categoryMap = {};
+    entries.forEach((e) => {
+      const key = String(e.work_category_name || '').trim() || '미분류';
+      categoryMap[key] = (categoryMap[key] || 0) + (Number(e.duration_minutes) || 0);
     });
-    renderAnalysisBar('analysis-chart-client', _topNWithEtc(cliMap, 8));
+    renderAnalysisDonut('analysis-chart-category', _topNWithEtc(categoryMap, 8));
 
-    // 3) 소분류별 평균 소요시간(분)
-    const subAgg = {}; // key -> {sum,count}
-    entries.forEach(e => {
-      const key = e.work_subcategory_name || '미분류';
-      const min = Number(e.duration_minutes) || 0;
-      if (!subAgg[key]) subAgg[key] = { sum: 0, count: 0 };
-      subAgg[key].sum += min;
-      subAgg[key].count += 1;
+    // 2) 자문업무유형별 투입비율 (대분류=일반자문업무의 소분류)
+    const advisoryTypeMap = {};
+    advisoryEntries.forEach((e) => {
+      const key = String(e.work_subcategory_name || '').trim() || '미분류';
+      advisoryTypeMap[key] = (advisoryTypeMap[key] || 0) + (Number(e.duration_minutes) || 0);
     });
-    const subAvgRows = Object.entries(subAgg)
-      .filter(([, v]) => (v.count || 0) > 0)
-      .map(([k, v]) => ({ label: k, value: v.sum / v.count, count: v.count }))
-      .sort((a, b) => (b.value || 0) - (a.value || 0));
-    _renderRankList('analysis-subcategory-avg', subAvgRows, {
-      unit: '분',
-      maxRows: 10,
-      valueFormatter: (v) => (Number(v) || 0).toFixed(1),
-      secondaryFormatter: (r) => `${r.count}건`,
-      emptyText: '해당 조건의 소분류 데이터가 없습니다.',
-    });
+    renderAnalysisBar('analysis-chart-advisory', _topNWithEtc(advisoryTypeMap, 8));
 
-    // 4) 담당자별 자문건수(고객업무) + 투입시간
-    const staffAgg = {}; // userId -> {name,totalMin,clientMin,clientCount}
-    entries.forEach(e => {
-      const uid = String(e.user_id || '');
-      if (!uid) return;
-      if (!staffAgg[uid]) staffAgg[uid] = { name: e.user_name || uid, totalMin: 0, clientMin: 0, clientCount: 0 };
-      const min = Number(e.duration_minutes) || 0;
-      staffAgg[uid].totalMin += min;
-      if (e.time_category === 'client') {
-        staffAgg[uid].clientMin += min;
-        staffAgg[uid].clientCount += 1;
-      }
+    // 3) 통관업무유형별 투입비율 (대분류=일반통관업무의 소분류)
+    const customsTypeMap = {};
+    customsEntries.forEach((e) => {
+      const key = String(e.work_subcategory_name || '').trim() || '미분류';
+      customsTypeMap[key] = (customsTypeMap[key] || 0) + (Number(e.duration_minutes) || 0);
     });
-    const staffRows = Object.entries(staffAgg)
-      .map(([uid, v]) => ({ label: v.name || uid, value: v.totalMin, clientCount: v.clientCount, clientMin: v.clientMin }))
-      .sort((a, b) => (b.value || 0) - (a.value || 0));
-    _renderRankList('analysis-staff-advisory', staffRows, {
-      unit: 'h',
-      maxRows: 10,
-      valueFormatter: (mins) => ((Number(mins) || 0) / 60).toFixed(1),
-      secondaryFormatter: (r) => `자문 ${r.clientCount}건`,
-      emptyText: '해당 조건의 담당자 데이터가 없습니다.',
+    renderAnalysisBar('analysis-chart-customs', _topNWithEtc(customsTypeMap, 8));
+
+    // 4) 회사내부업무유형별 투입비율 (내부업무 소분류)
+    const internalTypeMap = {};
+    internalEntries.forEach((e) => {
+      const key = String(e.work_subcategory_name || e.work_category_name || '').trim() || '미분류';
+      internalTypeMap[key] = (internalTypeMap[key] || 0) + (Number(e.duration_minutes) || 0);
     });
+    renderAnalysisBar('analysis-chart-internal', _topNWithEtc(internalTypeMap, 8));
 
   } catch (err) {
     console.error(err);
@@ -3374,11 +3365,12 @@ function _renderAnalysisBarChart(canvasId, dataMap, maxLabelLen = 99) {
   const wrapper = canvas.parentElement;
   if (!wrapper) return;
   canvas.style.display = 'none';
-  const existing = wrapper.querySelector('.custom-bar-chart');
-  if (existing) existing.remove();
+  wrapper.querySelectorAll('.custom-bar-chart,.analysis-chart-empty').forEach((el) => el.remove());
+  wrapper.scrollTop = 0;
   const sorted = Object.entries(dataMap).sort((a,b)=>b[1]-a[1]);
   if (!sorted.length) {
     const empty = document.createElement('div');
+    empty.className = 'analysis-chart-empty';
     empty.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#9aa4b2;font-size:12px;';
     empty.textContent = '데이터가 없습니다.';
     wrapper.appendChild(empty);

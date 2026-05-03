@@ -1565,11 +1565,11 @@
             </div>
             <div class="card">
               <div class="card-header" style="padding:12px 16px 11px">
-                <h2><i class="fas fa-building" style="color:var(--primary)"></i>&nbsp; 고객사별 투입 비율</h2>
+                <h2><i class="fas fa-sitemap" style="color:var(--primary)"></i>&nbsp; 자문업무유형별 투입 비율</h2>
                 <div class="card-actions"><span style="font-size:11px;color:var(--text-muted)">상위 8+기타</span></div>
               </div>
               <div class="card-body" style="height:220px;position:relative;padding:10px 12px;overflow:auto">
-                <canvas id="analysis-chart-client"></canvas>
+                <canvas id="analysis-chart-advisory"></canvas>
               </div>
             </div>
           </div>
@@ -1577,20 +1577,20 @@
           <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-bottom:14px;">
             <div class="card">
               <div class="card-header" style="padding:12px 16px 11px">
-                <h2><i class="fas fa-hourglass-half" style="color:var(--primary)"></i>&nbsp; 업무유형별 평균 소요시간</h2>
-                <div class="card-actions"><span style="font-size:11px;color:var(--text-muted)">상위 10 · 평균(분)</span></div>
+                <h2><i class="fas fa-shield-alt" style="color:var(--primary)"></i>&nbsp; 통관업무유형별 투입 비율</h2>
+                <div class="card-actions"><span style="font-size:11px;color:var(--text-muted)">상위 8+기타</span></div>
               </div>
-              <div class="card-body" style="height:260px;position:relative;padding:10px 12px;overflow:auto">
-                <div id="analysis-subcategory-avg"></div>
+              <div class="card-body" style="height:220px;position:relative;padding:10px 12px;overflow:auto">
+                <canvas id="analysis-chart-customs"></canvas>
               </div>
             </div>
             <div class="card">
               <div class="card-header" style="padding:12px 16px 11px">
-                <h2><i class="fas fa-user-clock" style="color:var(--primary)"></i>&nbsp; 담당자별 자문건수·투입시간</h2>
-                <div class="card-actions"><span style="font-size:11px;color:var(--text-muted)">고객업무 건수 기준</span></div>
+                <h2><i class="fas fa-building" style="color:var(--primary)"></i>&nbsp; 회사내부업무유형별 투입 비율</h2>
+                <div class="card-actions"><span style="font-size:11px;color:var(--text-muted)">상위 8+기타</span></div>
               </div>
-              <div class="card-body" style="height:260px;position:relative;padding:10px 12px;overflow:auto">
-                <div id="analysis-staff-advisory"></div>
+              <div class="card-body" style="height:220px;position:relative;padding:10px 12px;overflow:auto">
+                <canvas id="analysis-chart-internal"></canvas>
               </div>
             </div>
           </div>
