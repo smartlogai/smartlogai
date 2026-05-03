@@ -174,6 +174,17 @@ let _editMode       = false;   // ★ 수정 모드 플래그 (navigateTo 자동
 let _deletedAttIds  = [];      // ★ 수정 모드에서 삭제 예정인 기존 첨부파일 ID 목록
 let _entriesPage  = 1;
 const ENTRIES_PER_PAGE = 20;
+let _entryRecordViewMode = 'all'; // all | consultant
+let _entryLastFilteredEntries = [];
+let _entryStaffFilterUsers = [];
+let _entryStaffUserById = {};
+let _entryStaffFilterSelectedId = '';
+let _entryStaffSuggestBound = false;
+let _entryOrgFilterRows = [];
+let _entryOrgFilterLock = 'none'; // none | dept | hq | team
+let _entryOrgFilterFixed = { dept: '', hq: '', team: '' };
+let _entryStaffInputTimer = null;
+let _entryLoadRequestSeq = 0;
 
 // ─────────────────────────────────────────────
 // 문서번호(IDYYMMDD####) 생성
@@ -3594,12 +3605,557 @@ function _entryProjectSubcategoryLabel(entry) {
   return projSub || legacySub;
 }
 
+function _entryParseWorkStartTs(entry) {
+  if (!entry || entry.work_start_at == null) return 0;
+  const raw = entry.work_start_at;
+  const num = Number(raw);
+  let ts;
+  if (!isNaN(num) && num > 1000000000000) ts = num;
+  else if (!isNaN(num) && num > 1000000000) ts = num * 1000;
+  else ts = new Date(raw).getTime();
+  return isNaN(ts) ? 0 : ts;
+}
+
+function _entryPerformanceTypeLabel(v) {
+  const key = String(v || '').trim();
+  if (key === 'independent') return '독립수행';
+  if (key === 'guided') return '지도수행';
+  if (key === 'supervised') return '감독수행';
+  return key || '미평가';
+}
+
+function _entryQualityLabel(v) {
+  const key = String(v || '').trim();
+  if (key === 'very_satisfied') return '매우우수';
+  if (key === 'satisfied') return '우수';
+  if (key === 'normal') return '참고';
+  if (key === 'unsatisfied') return '미흡';
+  if (key === 'very_unsatisfied') return '매우미흡';
+  return key || '미평가';
+}
+
+function _entryQualityStars(entry) {
+  const n = Number(entry && entry.quality_stars);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function _entryOrgLabelByUser(userMeta, fallbackTeamName = '') {
+  const dept = String(userMeta?.deptName || '').trim();
+  const hq = String(userMeta?.hqName || '').trim();
+  const org = dept || hq;
+  const rawTeam = String(userMeta?.teamName || '').trim() || String(fallbackTeamName || '').trim();
+  let team = rawTeam;
+  if (team && org && team.startsWith(org) && team.length > org.length) {
+    team = team.slice(org.length).replace(/^[\s/_-]+/, '').trim();
+  }
+  if (team && dept && team.startsWith(dept) && team.length > dept.length) {
+    team = team.slice(dept.length).replace(/^[\s/_-]+/, '').trim();
+  }
+  if (!team && rawTeam) team = rawTeam;
+  if (org && team) return `${org}/${team}`;
+  return org || team || '—';
+}
+
+function _entryOrgNorm(v) {
+  return String(v || '').trim();
+}
+
+function _entryResolveSessionOrgScope(session, users) {
+  const sid = String(session?.id || session?.user_id || '').trim();
+  const me = (users || []).find((u) => String(u.id || '').trim() === sid) || {};
+  const dept = _entryOrgNorm(session?.dept_name || session?.department_name || me?.dept_name || me?.department_name);
+  const hq = _entryOrgNorm(session?.hq_name || me?.hq_name);
+  const team = _entryOrgNorm(session?.cs_team_name || session?.team_name || me?.cs_team_name || me?.team_name);
+  return { dept, hq, team };
+}
+
+function _entryResolveOrgFilterLock(session, scope) {
+  if (!session || Auth.canViewAll(session)) return 'none';
+  if (Auth.isManager(session) && scope.dept && scope.hq && scope.team) return 'team';
+  if (Auth.isDirector(session) && scope.dept && scope.hq) return 'hq';
+  if (Auth.isTopMgr(session) && scope.dept) return 'dept';
+  return 'none';
+}
+
+function _entryCurrentOrgSelection() {
+  return {
+    dept: _entryOrgNorm(document.getElementById('filter-entry-dept')?.value),
+    hq: _entryOrgNorm(document.getElementById('filter-entry-hq')?.value),
+    team: _entryOrgNorm(document.getElementById('filter-entry-team')?.value),
+  };
+}
+
+function _entryMatchOrgFilter(userLike, orgSel) {
+  const dept = _entryOrgNorm(userLike?.deptName || userLike?.dept_name || userLike?.department_name);
+  const hq = _entryOrgNorm(userLike?.hqName || userLike?.hq_name);
+  const team = _entryOrgNorm(userLike?.teamName || userLike?.cs_team_name || userLike?.team_name);
+  if (_entryOrgNorm(orgSel?.dept) && _entryOrgNorm(orgSel.dept) !== dept) return false;
+  if (_entryOrgNorm(orgSel?.hq) && _entryOrgNorm(orgSel.hq) !== hq) return false;
+  if (_entryOrgNorm(orgSel?.team) && _entryOrgNorm(orgSel.team) !== team) return false;
+  return true;
+}
+
+function _entryRenderOrgFilterOptions() {
+  const deptEl = document.getElementById('filter-entry-dept');
+  const hqEl = document.getElementById('filter-entry-hq');
+  const teamEl = document.getElementById('filter-entry-team');
+  if (!deptEl || !hqEl || !teamEl) return;
+
+  const prev = _entryCurrentOrgSelection();
+  const fixed = _entryOrgFilterFixed || {};
+  const lock = _entryOrgFilterLock || 'none';
+  const rows = Array.isArray(_entryOrgFilterRows) ? _entryOrgFilterRows : [];
+
+  const deptBase = lock !== 'none' ? _entryOrgNorm(fixed.dept) : prev.dept;
+  const hqBase = lock === 'team' ? _entryOrgNorm(fixed.hq) : (lock === 'hq' ? _entryOrgNorm(fixed.hq) : prev.hq);
+  const teamBase = lock === 'team' ? _entryOrgNorm(fixed.team) : prev.team;
+
+  const deptVals = [...new Set(rows.map((r) => _entryOrgNorm(r.deptName)).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko'));
+  if (lock !== 'none' && fixed.dept && !deptVals.includes(fixed.dept)) deptVals.push(fixed.dept);
+  deptVals.sort((a, b) => a.localeCompare(b, 'ko'));
+  deptEl.innerHTML = '<option value="">전체</option>' + deptVals.map((v) => `<option value="${Utils.escHtml(v)}">${Utils.escHtml(v)}</option>`).join('');
+
+  const deptVal = (deptBase && deptVals.includes(deptBase)) ? deptBase : '';
+  deptEl.value = deptVal;
+  const byDept = deptVal ? rows.filter((r) => _entryOrgNorm(r.deptName) === deptVal) : rows;
+
+  const hqVals = [...new Set(byDept.map((r) => _entryOrgNorm(r.hqName)).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko'));
+  if ((lock === 'hq' || lock === 'team') && fixed.hq && !hqVals.includes(fixed.hq)) hqVals.push(fixed.hq);
+  hqVals.sort((a, b) => a.localeCompare(b, 'ko'));
+  hqEl.innerHTML = '<option value="">전체</option>' + hqVals.map((v) => `<option value="${Utils.escHtml(v)}">${Utils.escHtml(v)}</option>`).join('');
+  const hqVal = (hqBase && hqVals.includes(hqBase)) ? hqBase : '';
+  hqEl.value = hqVal;
+  const byHq = hqVal ? byDept.filter((r) => _entryOrgNorm(r.hqName) === hqVal) : byDept;
+
+  const teamVals = [...new Set(byHq.map((r) => _entryOrgNorm(r.teamName)).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko'));
+  if (lock === 'team' && fixed.team && !teamVals.includes(fixed.team)) teamVals.push(fixed.team);
+  teamVals.sort((a, b) => a.localeCompare(b, 'ko'));
+  teamEl.innerHTML = '<option value="">전체</option>' + teamVals.map((v) => `<option value="${Utils.escHtml(v)}">${Utils.escHtml(v)}</option>`).join('');
+  const teamVal = (teamBase && teamVals.includes(teamBase)) ? teamBase : '';
+  teamEl.value = teamVal;
+
+  deptEl.disabled = lock !== 'none';
+  hqEl.disabled = lock === 'team' || lock === 'hq';
+  teamEl.disabled = lock === 'team';
+}
+
+function _entryResetOrgFilterToDefault() {
+  const deptEl = document.getElementById('filter-entry-dept');
+  const hqEl = document.getElementById('filter-entry-hq');
+  const teamEl = document.getElementById('filter-entry-team');
+  if (!deptEl || !hqEl || !teamEl) return;
+  if (_entryOrgFilterLock === 'none') {
+    deptEl.value = '';
+    hqEl.value = '';
+    teamEl.value = '';
+  } else {
+    _entryRenderOrgFilterOptions();
+  }
+}
+
+function _entryApplyConsultantViewGate(entries, canViewStaffRecords) {
+  if (!canViewStaffRecords || _entryRecordViewMode !== 'consultant') return Array.isArray(entries) ? entries : [];
+  return (entries || []).filter((e) => (
+    String(e.status || '').trim() === 'approved'
+    && String(e.work_category_name || '').trim() === '일반자문업무'
+  ));
+}
+
+function _entryNormalizedName(v) {
+  return String(v || '').trim().toLowerCase();
+}
+
+function _entryResolveStaffFilterId(rawName) {
+  const q = _entryNormalizedName(rawName);
+  const orgSel = _entryCurrentOrgSelection();
+  if (!q) return '';
+  if (_entryStaffFilterSelectedId) {
+    const hit = (_entryStaffFilterUsers || []).find((u) => String(u.id || '').trim() === String(_entryStaffFilterSelectedId).trim());
+    if (hit && _entryNormalizedName(hit.name) === q) {
+      const meta = _entryStaffUserById[String(hit.id || '').trim()] || {};
+      if (_entryMatchOrgFilter(meta, orgSel)) return String(hit.id || '').trim();
+    }
+  }
+  const hits = (_entryStaffFilterUsers || []).filter((u) => {
+    if (_entryNormalizedName(u.name) !== q) return false;
+    const meta = _entryStaffUserById[String(u.id || '').trim()] || {};
+    return _entryMatchOrgFilter(meta, orgSel);
+  });
+  if (hits.length === 1) return String(hits[0].id || '').trim();
+  return '';
+}
+
+function _entryHideStaffSuggest() {
+  const list = document.getElementById('filter-entry-staff-suggest');
+  if (list) {
+    list.hidden = true;
+    list.innerHTML = '';
+  }
+}
+
+function _entryPositionStaffSuggest() {
+  const input = document.getElementById('filter-entry-staff');
+  const list = document.getElementById('filter-entry-staff-suggest');
+  if (!input || !list) return;
+  const rect = input.getBoundingClientRect();
+  const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
+  const maxW = Math.min(240, Math.max(160, viewportW - 24));
+  const wantW = Math.min(maxW, Math.max(Math.round(rect.width), 180));
+  // 기본은 입력창 우측에 맞춰 붙이고(화면 밖 방지), 공간이 충분하면 좌측 정렬
+  const wouldOverflowRight = rect.left + wantW > (viewportW - 8);
+  if (wouldOverflowRight) {
+    list.style.left = 'auto';
+    list.style.right = '0';
+  } else {
+    list.style.left = '0';
+    list.style.right = 'auto';
+  }
+  list.style.width = `${wantW}px`;
+  list.style.maxWidth = `${maxW}px`;
+}
+
+function _entryRenderStaffSuggest(rawKeyword) {
+  const list = document.getElementById('filter-entry-staff-suggest');
+  if (!list) return;
+  const q = _entryNormalizedName(rawKeyword);
+  const orgSel = _entryCurrentOrgSelection();
+  if (!q) {
+    _entryHideStaffSuggest();
+    return;
+  }
+  const matches = (_entryStaffFilterUsers || [])
+    .filter((u) => {
+      const meta = _entryStaffUserById[String(u.id || '').trim()] || {};
+      return _entryMatchOrgFilter(meta, orgSel);
+    })
+    .filter((u) => _entryNormalizedName(u.name).includes(q))
+    .slice(0, 20);
+  if (!matches.length) {
+    _entryHideStaffSuggest();
+    return;
+  }
+  list.innerHTML = matches.map((u) => {
+    const rawName = String(u.name || '');
+    const escName = Utils.escHtml(rawName);
+    const jsSafeId = String(u.id || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const jsSafeName = rawName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    return `<li role="option" style="padding:8px 10px;cursor:pointer;font-size:12.5px" onmousedown="entrySelectStaffFilter('${jsSafeId}','${jsSafeName}')">${escName}</li>`;
+  }).join('');
+  _entryPositionStaffSuggest();
+  list.hidden = false;
+}
+
+function onEntryOrgFilterChange(level) {
+  const lv = String(level || '');
+  if (lv === 'dept') {
+    const hqEl = document.getElementById('filter-entry-hq');
+    const teamEl = document.getElementById('filter-entry-team');
+    if (hqEl && _entryOrgFilterLock === 'none') hqEl.value = '';
+    if (teamEl && _entryOrgFilterLock === 'none') teamEl.value = '';
+  } else if (lv === 'hq') {
+    const teamEl = document.getElementById('filter-entry-team');
+    if (teamEl && _entryOrgFilterLock !== 'team') teamEl.value = '';
+  }
+  _entryRenderOrgFilterOptions();
+  const staffEl = document.getElementById('filter-entry-staff');
+  if (staffEl) staffEl.value = '';
+  _entryStaffFilterSelectedId = '';
+  _entryHideStaffSuggest();
+  _entriesPage = 1;
+  loadMyEntries();
+}
+
+function _entryBindStaffSuggestOnce() {
+  if (_entryStaffSuggestBound) return;
+  const input = document.getElementById('filter-entry-staff');
+  if (!input) return;
+  input.addEventListener('blur', () => {
+    setTimeout(() => _entryHideStaffSuggest(), 120);
+  });
+  document.addEventListener('click', (e) => {
+    const target = e.target;
+    const wrap = document.getElementById('filter-entry-staff-group');
+    if (!wrap || !target) return;
+    if (!wrap.contains(target)) _entryHideStaffSuggest();
+  });
+  _entryStaffSuggestBound = true;
+}
+
+function onEntryStaffFilterInput() {
+  const input = document.getElementById('filter-entry-staff');
+  const raw = String(input?.value || '').trim();
+  const selected = (_entryStaffFilterUsers || []).find((u) => String(u.id || '').trim() === String(_entryStaffFilterSelectedId || '').trim());
+  if (!selected || _entryNormalizedName(selected.name) !== _entryNormalizedName(raw)) {
+    _entryStaffFilterSelectedId = '';
+  }
+  _entryRenderStaffSuggest(raw);
+  _entriesPage = 1;
+  if (_entryStaffInputTimer) clearTimeout(_entryStaffInputTimer);
+  _entryStaffInputTimer = setTimeout(() => {
+    _entryStaffInputTimer = null;
+    loadMyEntries();
+  }, 180);
+}
+
+function entrySelectStaffFilter(id, name) {
+  const input = document.getElementById('filter-entry-staff');
+  if (input) input.value = String(name || '').trim();
+  _entryStaffFilterSelectedId = String(id || '').trim();
+  if (_entryStaffInputTimer) {
+    clearTimeout(_entryStaffInputTimer);
+    _entryStaffInputTimer = null;
+  }
+  _entryHideStaffSuggest();
+  _entriesPage = 1;
+  loadMyEntries();
+}
+
+async function _entryPopulateStaffFilterOptions(session, canViewStaffRecords) {
+  const input = document.getElementById('filter-entry-staff');
+  _entryStaffFilterUsers = [];
+  _entryStaffUserById = {};
+  _entryOrgFilterRows = [];
+  _entryOrgFilterLock = 'none';
+  _entryOrgFilterFixed = { dept: '', hq: '', team: '' };
+  _entryStaffFilterSelectedId = '';
+  if (!input || !canViewStaffRecords) {
+    _entryHideStaffSuggest();
+    return;
+  }
+  let users = [];
+  try {
+    users = await Master.users();
+  } catch (_) {
+    users = [];
+  }
+  const myId = String((session && (session.id || session.user_id)) || '').trim();
+  const scoped = (users || []).filter((u) => {
+    if (u.deleted === true || u.is_active === false) return false;
+    if (Auth.canViewAll(session)) return true;
+    const uid = String(u.id || '').trim();
+    if (myId && uid === myId) return true;
+    return Auth.scopeMatch(session, u);
+  }).map((u) => ({
+    id: String(u.id || '').trim(),
+    name: String(u.name || '').trim(),
+  })).filter((u) => u.id && u.name);
+  const dedupe = new Map();
+  scoped.forEach((u) => {
+    const key = `${u.id}|${u.name}`;
+    if (!dedupe.has(key)) dedupe.set(key, u);
+  });
+  _entryStaffFilterUsers = [...dedupe.values()].sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+  _entryStaffFilterUsers.forEach((u) => {
+    const id = String(u.id || '').trim();
+    if (!id) return;
+    const src = (users || []).find((x) => String(x.id || '').trim() === id) || {};
+    const meta = {
+      hqName: String(src.hq_name || '').trim(),
+      teamName: String(src.cs_team_name || src.team_name || '').trim(),
+      deptName: String(src.dept_name || src.department_name || '').trim(),
+    };
+    _entryStaffUserById[id] = meta;
+    _entryOrgFilterRows.push({ ...meta, userId: id, userName: String(u.name || '').trim() });
+  });
+  const scope = _entryResolveSessionOrgScope(session, users || []);
+  const lock = _entryResolveOrgFilterLock(session, scope);
+  _entryOrgFilterLock = lock;
+  _entryOrgFilterFixed = {
+    dept: lock !== 'none' ? scope.dept : '',
+    hq: (lock === 'hq' || lock === 'team') ? scope.hq : '',
+    team: lock === 'team' ? scope.team : '',
+  };
+  _entryRenderOrgFilterOptions();
+  _entryBindStaffSuggestOnce();
+  _entryHideStaffSuggest();
+}
+
+function _entrySyncConsultantColumns(canViewStaffRecords) {
+  const show = !!(canViewStaffRecords && _entryRecordViewMode === 'consultant');
+  const thDuration = document.querySelector('.th-duration');
+  const thAction = document.querySelector('.th-action');
+  if (thDuration) thDuration.textContent = show ? '소요시간' : '업무시간';
+  if (thAction) thAction.textContent = show ? '상세보기' : '관리';
+  document.querySelectorAll('.my-entries-col-perf,.my-entries-col-quality').forEach((el) => {
+    el.style.display = show ? '' : 'none';
+  });
+  document.querySelectorAll('.my-entries-col-start,.th-start,.td-start,.my-entries-col-end,.th-end,.td-end,.my-entries-col-status,.th-status,.td-status').forEach((el) => {
+    el.style.display = show ? 'none' : '';
+  });
+  document.querySelectorAll('.my-entries-col-action,.th-action,.td-action').forEach((el) => {
+    el.style.display = '';
+  });
+  document.querySelectorAll('.my-entries-col-duration,.th-duration,.td-duration').forEach((el) => {
+    el.style.display = '';
+  });
+}
+
+function _entryApplyRecordViewUi(canViewStaffRecords) {
+  const tabs = document.getElementById('entry-record-view-tabs');
+  const panel = document.getElementById('entry-consultant-panel');
+  const staffGroup = document.getElementById('filter-entry-staff-group');
+  const deptGroup = document.getElementById('filter-entry-dept-group');
+  const hqGroup = document.getElementById('filter-entry-hq-group');
+  const teamGroup = document.getElementById('filter-entry-team-group');
+  const clientGroup = document.getElementById('filter-entry-client-group');
+  const categoryGroup = document.getElementById('filter-entry-category-group');
+  const subcategoryGroup = document.getElementById('filter-entry-subcategory-group');
+  const statusGroup = document.getElementById('filter-entry-status-group');
+  const note = document.getElementById('entry-view-mode-note');
+  if (tabs) tabs.style.display = canViewStaffRecords ? '' : 'none';
+  const useConsultant = canViewStaffRecords && _entryRecordViewMode === 'consultant';
+  if (staffGroup) staffGroup.style.display = canViewStaffRecords ? '' : 'none';
+  if (deptGroup) deptGroup.style.display = useConsultant ? '' : 'none';
+  if (hqGroup) hqGroup.style.display = useConsultant ? '' : 'none';
+  if (teamGroup) teamGroup.style.display = useConsultant ? '' : 'none';
+  if (clientGroup) clientGroup.style.display = useConsultant ? 'none' : '';
+  if (categoryGroup) categoryGroup.style.display = useConsultant ? 'none' : '';
+  if (subcategoryGroup) subcategoryGroup.style.display = useConsultant ? 'none' : '';
+  if (statusGroup) statusGroup.style.display = useConsultant ? 'none' : '';
+  if (panel) panel.style.display = useConsultant ? '' : 'none';
+  if (note) note.style.display = useConsultant ? '' : 'none';
+  document.querySelectorAll('[data-entry-view-mode]').forEach((btn) => {
+    const mode = String(btn.getAttribute('data-entry-view-mode') || 'all');
+    btn.classList.toggle('is-active', mode === _entryRecordViewMode);
+  });
+  if (useConsultant) _entryRenderOrgFilterOptions();
+  _entrySyncConsultantColumns(canViewStaffRecords);
+}
+
+function _entryRenderConsultantSummary(entries, canViewStaffRecords) {
+  const panel = document.getElementById('entry-consultant-panel');
+  const body = document.getElementById('entry-consultant-summary-body');
+  const badge = document.getElementById('entry-consultant-summary-badge');
+  const kpiConsultant = document.getElementById('entry-kpi-consultant-count');
+  const kpiRecord = document.getElementById('entry-kpi-record-count');
+  const kpiQuality = document.getElementById('entry-kpi-quality-avg');
+  const kpiIndependent = document.getElementById('entry-kpi-independent-rate');
+  if (!panel || !body || !badge) return;
+  const useConsultant = canViewStaffRecords && _entryRecordViewMode === 'consultant';
+  panel.style.display = useConsultant ? '' : 'none';
+  if (!useConsultant) return;
+  const list = Array.isArray(entries) ? entries : [];
+  const groups = new Map();
+  list.forEach((e) => {
+    const name = String(e.user_name || '').trim() || '(이름없음)';
+    const uid = String(e.user_id || '').trim();
+    const key = uid ? `id:${uid}` : `name:${name}`;
+    if (!groups.has(key)) {
+      const userMeta = (uid && _entryStaffUserById[String(uid)]) || null;
+      groups.set(key, {
+        name,
+        orgLabel: _entryOrgLabelByUser(userMeta, String(e.team_name || '').trim()),
+        total: 0,
+        independent: 0,
+        qualityStarsTotal: 0,
+        qualityEvalCount: 0,
+        latestTs: 0,
+      });
+    }
+    const g = groups.get(key);
+    g.total += 1;
+    const perf = String(e.performance_type || '').trim() || '미평가';
+    if (perf === 'independent') g.independent += 1;
+    const qStars = _entryQualityStars(e);
+    if (qStars > 0) {
+      g.qualityStarsTotal += qStars;
+      g.qualityEvalCount += 1;
+    }
+    const ts = _entryParseWorkStartTs(e);
+    if (ts > g.latestTs) g.latestTs = ts;
+  });
+  const rows = [...groups.values()].sort((a, b) => {
+    const aQuality = Number(a.qualityEvalCount || 0) > 0
+      ? ((Number(a.qualityStarsTotal || 0) / Number(a.qualityEvalCount || 1)) / 3) * 100
+      : -1;
+    const bQuality = Number(b.qualityEvalCount || 0) > 0
+      ? ((Number(b.qualityStarsTotal || 0) / Number(b.qualityEvalCount || 1)) / 3) * 100
+      : -1;
+    if (bQuality !== aQuality) return bQuality - aQuality;
+    if (b.total !== a.total) return b.total - a.total;
+    return Number(b.latestTs || 0) - Number(a.latestTs || 0);
+  });
+  const totalRecords = rows.reduce((sum, r) => sum + Number(r.total || 0), 0);
+  const totalIndependent = rows.reduce((sum, r) => sum + Number(r.independent || 0), 0);
+  const totalQualityStars = rows.reduce((sum, r) => sum + Number(r.qualityStarsTotal || 0), 0);
+  const totalQualityEval = rows.reduce((sum, r) => sum + Number(r.qualityEvalCount || 0), 0);
+  const avgQualityPct = totalQualityEval > 0 ? (((totalQualityStars / totalQualityEval) / 3) * 100).toFixed(1) : '-';
+  const indepRate = totalRecords > 0 ? ((totalIndependent / totalRecords) * 100).toFixed(1) : '0.0';
+  badge.textContent = `${rows.length}명`;
+  if (kpiConsultant) kpiConsultant.textContent = `${rows.length}명`;
+  if (kpiRecord) kpiRecord.textContent = `${totalRecords}건`;
+  if (kpiQuality) kpiQuality.textContent = avgQualityPct === '-' ? '-' : `${avgQualityPct}%`;
+  if (kpiIndependent) kpiIndependent.textContent = `${indepRate}%`;
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="8" class="table-empty"><i class="fas fa-inbox"></i><p>직원별 요약 데이터가 없습니다.</p></td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map((r, idx) => {
+    const latest = r.latestTs ? Utils.formatDate(r.latestTs) : '-';
+    const orgLabel = r.orgLabel || '—';
+    const indepRateRow = r.total > 0 ? ((Number(r.independent || 0) / Number(r.total || 1)) * 100).toFixed(1) : '0.0';
+    const avgQualityPct = r.qualityEvalCount > 0 ? (((r.qualityStarsTotal / r.qualityEvalCount) / 3) * 100).toFixed(1) : '-';
+    const rawName = String(r.name || '');
+    const escName = Utils.escHtml(rawName);
+    const escOrg = Utils.escHtml(orgLabel);
+    const jsSafeName = rawName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    return `<tr>
+      <td style="text-align:center">${idx + 1}</td>
+      <td title="${escName}">${escName}</td>
+      <td title="${escOrg}">${escOrg}</td>
+      <td style="text-align:center;font-weight:700">${r.total}</td>
+      <td style="text-align:center">${indepRateRow}%</td>
+      <td style="text-align:center">${avgQualityPct === '-' ? '-' : `${avgQualityPct}%`}</td>
+      <td style="text-align:center">${latest}</td>
+      <td style="text-align:center">
+        <button type="button" class="btn btn-sm btn-outline" onclick="entryApplyConsultantFilter('${jsSafeName}')">기록보기</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function switchEntryRecordView(mode) {
+  const session = getSession ? getSession() : null;
+  const canViewStaffRecords = !!(session && (Auth.canViewAll(session) || Auth.canViewDeptScope(session) || Auth.canReadMenu(session, 'my-entries', false)));
+  const next = String(mode || '').trim() === 'consultant' ? 'consultant' : 'all';
+  _entryRecordViewMode = canViewStaffRecords ? next : 'all';
+  _entriesPage = 1;
+  _entryApplyRecordViewUi(canViewStaffRecords);
+  _entryRenderConsultantSummary(_entryLastFilteredEntries, canViewStaffRecords);
+  loadMyEntries();
+}
+
+function entryApplyConsultantFilter(name) {
+  const input = document.getElementById('filter-entry-staff');
+  const raw = String(name || '').trim();
+  if (input) input.value = raw;
+  _entryStaffFilterSelectedId = _entryResolveStaffFilterId(raw);
+  _entriesPage = 1;
+  loadMyEntries();
+}
+
+function entryClearConsultantDrilldown() {
+  const input = document.getElementById('filter-entry-staff');
+  if (input) input.value = '';
+  if (_entryStaffInputTimer) {
+    clearTimeout(_entryStaffInputTimer);
+    _entryStaffInputTimer = null;
+  }
+  _entryStaffFilterSelectedId = '';
+  _entryHideStaffSuggest();
+  _entriesPage = 1;
+  loadMyEntries();
+}
+
 async function init_my_entries() {
   const session = getSession();
   const isAdminAll = Auth.canViewAll(session);
   const canViewStaffRecords = isAdminAll || Auth.canViewDeptScope(session) || Auth.canReadMenu(session, 'my-entries', false);
   const pageSection = document.getElementById('page-my-entries');
   if (pageSection) pageSection.classList.toggle('admin-all-entries', canViewStaffRecords);
+  if (!canViewStaffRecords) _entryRecordViewMode = 'all';
+  _entryApplyRecordViewUi(canViewStaffRecords);
+  await _entryPopulateStaffFilterOptions(session, canViewStaffRecords);
   if (canViewStaffRecords && document.getElementById('pageTitle')) {
     document.getElementById('pageTitle').textContent = '컨설턴트 업무 기록';
   }
@@ -3724,10 +4280,12 @@ async function _scopeEntriesForStaffRecords(entries, session) {
 }
 
 async function loadMyEntries() {
+  const requestSeq = ++_entryLoadRequestSeq;
   _entrySyncRangeButtonState();
   const session      = getSession();
   const isAdminAll   = Auth.canViewAll(session);
   const canViewStaffRecords = isAdminAll || Auth.canViewDeptScope(session) || Auth.canReadMenu(session, 'my-entries', false);
+  const useConsultantMode = canViewStaffRecords && _entryRecordViewMode === 'consultant';
   const dateFrom     = document.getElementById('filter-entry-date-from').value;  // 'YYYY-MM-DD'
   const dateTo       = document.getElementById('filter-entry-date-to').value;
   const clientId     = (typeof ClientSearchSelect !== 'undefined')
@@ -3736,13 +4294,18 @@ async function loadMyEntries() {
   const categoryId   = document.getElementById('filter-entry-category').value;
   const subcategoryId= document.getElementById('filter-entry-subcategory').value;
   const status       = document.getElementById('filter-entry-status').value;
+  const orgSel       = _entryCurrentOrgSelection();
+  const staffRaw     = String(document.getElementById('filter-entry-staff')?.value || '').trim();
+  const staffKw      = staffRaw.toLowerCase();
+  const staffId      = _entryResolveStaffFilterId(staffRaw);
 
   // From/To → 밀리초 범위
   const tsFrom = dateFrom ? new Date(dateFrom + 'T00:00:00').getTime() : null;
   const tsTo   = dateTo   ? new Date(dateTo   + 'T23:59:59').getTime() : null;
 
   try {
-    let entries = await _loadTimeEntriesForMyList(session, isAdminAll, status);
+    const queryStatus = useConsultantMode ? '' : status;
+    let entries = await _loadTimeEntriesForMyList(session, isAdminAll, queryStatus);
     entries = await _scopeEntriesForStaffRecords(entries, session);
 
     // 기간 From~To 필터 — ms숫자/숫자문자열/ISO문자열 모두 안전 처리
@@ -3762,9 +4325,9 @@ async function loadMyEntries() {
       });
     }
 
-    if (clientId)      entries = entries.filter(e => e.client_id === clientId);
-    if (categoryId)    entries = entries.filter(e => e.work_category_id === categoryId);
-    if (subcategoryId) {
+    if (!useConsultantMode && clientId) entries = entries.filter(e => e.client_id === clientId);
+    if (!useConsultantMode && categoryId) entries = entries.filter(e => e.work_category_id === categoryId);
+    if (!useConsultantMode && subcategoryId) {
       if (_entryFilterIsProjectMainValue(subcategoryId)) {
         await _entryEnsureProjectCodeTypes();
         _entryAttachProjectMainFields(entries);
@@ -3777,7 +4340,24 @@ async function loadMyEntries() {
         entries = entries.filter(e => e.work_subcategory_id === subcategoryId);
       }
     }
-    if (status)        entries = entries.filter(e => String(e.status) === String(status));
+    if (!useConsultantMode && status) entries = entries.filter(e => String(e.status) === String(status));
+    if (useConsultantMode && (orgSel.dept || orgSel.hq || orgSel.team)) {
+      entries = entries.filter((e) => {
+        const uid = String(e.user_id || '').trim();
+        const meta = (uid && _entryStaffUserById[uid]) || {
+          deptName: String(e.dept_name || e.department_name || '').trim(),
+          hqName: String(e.hq_name || '').trim(),
+          teamName: String(e.cs_team_name || e.team_name || '').trim(),
+        };
+        return _entryMatchOrgFilter(meta, orgSel);
+      });
+    }
+    if (canViewStaffRecords && (staffKw || staffId)) {
+      entries = entries.filter((e) => {
+        if (staffId) return String(e.user_id || '').trim() === staffId;
+        return String(e.user_name || '').toLowerCase().includes(staffKw);
+      });
+    }
 
     const hasProjectRows = entries.some((e) =>
       String(e.work_category_name || '').trim() === '프로젝트업무' && String(e.project_code || '').trim()
@@ -3787,8 +4367,29 @@ async function loadMyEntries() {
       _entryAttachProjectMainFields(entries);
     }
 
+    if (requestSeq !== _entryLoadRequestSeq) return;
+
     const sheetF = myEntriesSheetFilter(session);
     if (sheetF) entries = entries.filter(e => _rowSheetType(e) === sheetF);
+    entries = _entryApplyConsultantViewGate(entries, canViewStaffRecords);
+    _entryLastFilteredEntries = entries.slice();
+    _entryRenderConsultantSummary(_entryLastFilteredEntries, canViewStaffRecords);
+
+    const detailPanel = document.getElementById('entry-detail-panel');
+    const detailTitle = document.getElementById('entry-detail-title');
+    const detailBackBtn = document.getElementById('entry-detail-back-btn');
+    const drilldownActive = !useConsultantMode || !!(staffId || staffKw);
+    if (detailPanel) detailPanel.style.display = drilldownActive ? '' : 'none';
+    if (detailBackBtn) detailBackBtn.style.display = (useConsultantMode && drilldownActive) ? '' : 'none';
+    if (detailTitle) {
+      if (useConsultantMode && drilldownActive) {
+        const picked = String(staffRaw || '').trim();
+        detailTitle.textContent = picked ? `${picked} 상세 기록` : '상세 기록';
+      } else {
+        detailTitle.textContent = 'Time Log';
+      }
+    }
+    if (useConsultantMode && !drilldownActive) return;
 
     // My Time Sheet 정렬: (1)반려 (2)임시저장 (3)1차검토 (4)2차검토 (5)최종승인 (6)기타
     // 동일 그룹 내: 반려·임시·1차·2차는 과거→최근, 최종승인(approved)만 최신→과거
@@ -3836,9 +4437,14 @@ async function loadMyEntries() {
     const attMap = await loadAttachmentsMap(paged.map(e => e.id));
 
     const tbody = document.getElementById('my-entries-body');
-    const emptyCols = canViewStaffRecords ? 12 : 11;
+    const emptyCols = (canViewStaffRecords && _entryRecordViewMode === 'consultant')
+      ? 11
+      : (canViewStaffRecords ? 12 : 11);
     if (paged.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="${emptyCols}" class="table-empty"><i class="fas fa-inbox"></i><p>조회된 데이터가 없습니다.</p></td></tr>`;
+      const emptyMsg = (canViewStaffRecords && _entryRecordViewMode === 'consultant')
+        ? '자문업무 상세보기 조건(최종승인 · 일반자문업무)에 맞는 데이터가 없습니다.'
+        : '조회된 데이터가 없습니다.';
+      tbody.innerHTML = `<tr><td colspan="${emptyCols}" class="table-empty"><i class="fas fa-inbox"></i><p>${emptyMsg}</p></td></tr>`;
     } else {
       // ── 날짜·시간 포맷 헬퍼 ─────────────────────────────
       const fmtDate = (ms) => {
@@ -3933,6 +4539,10 @@ async function loadMyEntries() {
         const authorCell = canViewStaffRecords
           ? `<td class="my-entries-col-author" style="font-size:11.5px;padding:0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary)" title="${Utils.escHtml(e.user_name || '')}">${Utils.escHtml(e.user_name || '—')}</td>`
           : `<td class="my-entries-col-author" style="display:none"></td>`;
+        const perfLabel = _entryPerformanceTypeLabel(e.performance_type);
+        const qualityLabel = _entryQualityLabel(e.quality_rating);
+        const perfCell = `<td class="my-entries-col-perf" style="text-align:center;padding:0 6px;display:none">${Utils.escHtml(perfLabel)}</td>`;
+        const qualityCell = `<td class="my-entries-col-quality" style="text-align:center;padding:0 6px;display:none" title="${Utils.escHtml(qualityLabel)}">${Utils.escHtml(qualityLabel || '미평가')}</td>`;
 
         return `<tr>
           <td class="td-no" style="text-align:center;color:var(--text-muted);font-size:12px;font-variant-numeric:tabular-nums">${rowNo}</td>
@@ -3944,6 +4554,8 @@ async function loadMyEntries() {
           <td class="td-subcat" style="padding:0 10px">${subHtml}</td>
           <td class="td-start" style="text-align:center;padding:0 6px">${fmtDatetime(e.work_start_at)}</td>
           <td class="td-end" style="text-align:center;padding:0 6px">${fmtDatetime(e.work_end_at)}</td>
+          ${perfCell}
+          ${qualityCell}
           <td class="td-duration" style="text-align:center;color:var(--text-secondary);font-size:12.5px;font-weight:600">${Utils.formatDuration(e.duration_minutes)}</td>
           <td class="td-status" style="text-align:center">${Utils.statusBadge(e.status)}</td>
           <td class="td-action" style="text-align:center;padding:0 4px">
@@ -3952,6 +4564,10 @@ async function loadMyEntries() {
         </tr>`;
       }).join('');
     }
+
+    // tbody 재렌더 직후 신규 셀에 표시 규칙을 다시 적용해야
+    // 직원별 보기에서 컬럼 헤더/데이터 매핑이 어긋나지 않는다.
+    _entrySyncConsultantColumns(canViewStaffRecords);
 
     document.getElementById('entry-pagination').innerHTML =
       Utils.paginationHTML(_entriesPage, entries.length, ENTRIES_PER_PAGE);
@@ -4904,6 +5520,11 @@ function resetEntryFilter() {
   document.getElementById('filter-entry-category').value     = '';
   document.getElementById('filter-entry-subcategory').value  = '';
   document.getElementById('filter-entry-status').value       = '';
+  _entryResetOrgFilterToDefault();
+  const staffEl = document.getElementById('filter-entry-staff');
+  if (staffEl) staffEl.value = '';
+  _entryStaffFilterSelectedId = '';
+  _entryHideStaffSuggest();
   _entrySyncRangeButtonState();
 
   _entryRestoreNormalSubcategoryFilterOptions('');
@@ -5390,8 +6011,10 @@ async function exportEntriesToExcel() {
     console.log('[Excel] step1: fetching time_entries...');
     const isAdminAll = Auth.canViewAll(session);
     const canViewStaffRecords = isAdminAll || Auth.canViewDeptScope(session) || Auth.canReadMenu(session, 'my-entries', false);
+    const useConsultantMode = canViewStaffRecords && _entryRecordViewMode === 'consultant';
     const statusVal = (document.getElementById('filter-entry-status') || {}).value || '';
-    let entries = await _loadTimeEntriesForMyList(session, isAdminAll, statusVal);
+    const queryStatus = useConsultantMode ? '' : statusVal;
+    let entries = await _loadTimeEntriesForMyList(session, isAdminAll, queryStatus);
     entries = await _scopeEntriesForStaffRecords(entries, session);
     console.log('[Excel] step1 result count:', entries.length);
 
@@ -5424,9 +6047,13 @@ async function exportEntriesToExcel() {
       : '';
     const categoryId = (document.getElementById('filter-entry-category') || {}).value || '';
     const subcategoryId = (document.getElementById('filter-entry-subcategory') || {}).value || '';
-    if (clientId)      entries = entries.filter(e => e.client_id === clientId);
-    if (categoryId)    entries = entries.filter(e => e.work_category_id === categoryId);
-    if (subcategoryId) {
+    const orgSel = _entryCurrentOrgSelection();
+    const staffRaw = String((document.getElementById('filter-entry-staff') || {}).value || '').trim();
+    const staffKw = staffRaw.toLowerCase();
+    const staffId = _entryResolveStaffFilterId(staffRaw);
+    if (!useConsultantMode && clientId) entries = entries.filter(e => e.client_id === clientId);
+    if (!useConsultantMode && categoryId) entries = entries.filter(e => e.work_category_id === categoryId);
+    if (!useConsultantMode && subcategoryId) {
       if (_entryFilterIsProjectMainValue(subcategoryId)) {
         await _entryEnsureProjectCodeTypes();
         _entryAttachProjectMainFields(entries);
@@ -5439,10 +6066,28 @@ async function exportEntriesToExcel() {
         entries = entries.filter(e => e.work_subcategory_id === subcategoryId);
       }
     }
-    if (statusVal)     entries = entries.filter(e => String(e.status) === String(statusVal));
+    if (!useConsultantMode && statusVal) entries = entries.filter(e => String(e.status) === String(statusVal));
+    if (useConsultantMode && (orgSel.dept || orgSel.hq || orgSel.team)) {
+      entries = entries.filter((e) => {
+        const uid = String(e.user_id || '').trim();
+        const meta = (uid && _entryStaffUserById[uid]) || {
+          deptName: String(e.dept_name || e.department_name || '').trim(),
+          hqName: String(e.hq_name || '').trim(),
+          teamName: String(e.cs_team_name || e.team_name || '').trim(),
+        };
+        return _entryMatchOrgFilter(meta, orgSel);
+      });
+    }
+    if (canViewStaffRecords && (staffKw || staffId)) {
+      entries = entries.filter((e) => {
+        if (staffId) return String(e.user_id || '').trim() === staffId;
+        return String(e.user_name || '').toLowerCase().includes(staffKw);
+      });
+    }
 
     const sheetF = myEntriesSheetFilter(session);
     if (sheetF) entries = entries.filter(e => _rowSheetType(e) === sheetF);
+    entries = _entryApplyConsultantViewGate(entries, canViewStaffRecords);
 
     const hasProjExcel = entries.some((e) =>
       String(e.work_category_name || '').trim() === '프로젝트업무' && String(e.project_code || '').trim()

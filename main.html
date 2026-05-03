@@ -1103,23 +1103,23 @@
               <button type="button" class="entry-quick-range-btn" data-entry-range="month">1개월</button>
             </div>
           </div>
-          <div class="filter-group filter-group-modern-client">
+          <div class="filter-group filter-group-modern-client" id="filter-entry-client-group">
             <span class="filter-label">고객사</span>
             <div id="filter-entry-client-wrap" class="cs-wrap" style="min-height:30px;width:220px"></div>
           </div>
-          <div class="filter-group filter-group-modern-compact">
+          <div class="filter-group filter-group-modern-compact" id="filter-entry-category-group">
             <span class="filter-label">대분류</span>
             <select class="filter-control" id="filter-entry-category" style="width:110px" onchange="onEntryFilterCategoryChange()">
               <option value="">전체</option>
             </select>
           </div>
-          <div class="filter-group filter-group-modern-compact">
+          <div class="filter-group filter-group-modern-compact" id="filter-entry-subcategory-group">
             <span class="filter-label">소분류</span>
             <select class="filter-control" id="filter-entry-subcategory" style="width:130px">
               <option value="">전체</option>
             </select>
           </div>
-          <div class="filter-group filter-group-modern-compact">
+          <div class="filter-group filter-group-modern-compact" id="filter-entry-status-group">
             <span class="filter-label">상태</span>
             <select class="filter-control" id="filter-entry-status" style="width:100px" onchange="loadMyEntries()">
               <option value="">전체</option>
@@ -1130,16 +1130,98 @@
               <option value="rejected">반려</option>
             </select>
           </div>
+          <div class="filter-group filter-group-modern-compact" id="filter-entry-dept-group" style="display:none">
+            <span class="filter-label">사업부</span>
+            <select class="filter-control" id="filter-entry-dept" style="width:120px" onchange="onEntryOrgFilterChange('dept')">
+              <option value="">전체</option>
+            </select>
+          </div>
+          <div class="filter-group filter-group-modern-compact" id="filter-entry-hq-group" style="display:none">
+            <span class="filter-label">본부</span>
+            <select class="filter-control" id="filter-entry-hq" style="width:120px" onchange="onEntryOrgFilterChange('hq')">
+              <option value="">전체</option>
+            </select>
+          </div>
+          <div class="filter-group filter-group-modern-compact" id="filter-entry-team-group" style="display:none">
+            <span class="filter-label">팀</span>
+            <select class="filter-control" id="filter-entry-team" style="width:130px" onchange="onEntryOrgFilterChange('team')">
+              <option value="">전체</option>
+            </select>
+          </div>
+          <div class="filter-group filter-group-modern-compact" id="filter-entry-staff-group" style="display:none">
+            <span class="filter-label">이름</span>
+            <div style="position:relative">
+              <input type="search" class="filter-control" id="filter-entry-staff" autocomplete="off" placeholder="이름 검색" style="width:140px" oninput="onEntryStaffFilterInput()" />
+              <ul id="filter-entry-staff-suggest" class="proj-reg-suggest-list" role="listbox" hidden></ul>
+            </div>
+          </div>
           <div class="filter-actions">
             <button class="btn btn-primary btn-sm" onclick="loadMyEntries()"><i class="fas fa-search"></i> 조회</button>
             <button class="btn btn-ghost btn-sm" onclick="resetEntryFilter()" title="초기화"><i class="fas fa-redo"></i></button>
           </div>
         </div>
 
-        <div class="card">
+        <div id="entry-record-view-tabs" class="approval-main-tabs entry-record-tabs" style="display:none;margin-bottom:8px" role="tablist" aria-label="업무기록 보기">
+          <button type="button" class="approval-main-tab is-active" data-entry-view-mode="all" onclick="switchEntryRecordView('all')">전체 기록</button>
+          <button type="button" class="approval-main-tab" data-entry-view-mode="consultant" onclick="switchEntryRecordView('consultant')">자문업무 상세보기</button>
+        </div>
+        <div id="entry-view-mode-note" style="display:none;margin-bottom:12px;padding:8px 12px;border-radius:8px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;font-size:12px;font-weight:600">
+          최종승인된 일반자문업무기록만 표시됩니다.
+        </div>
+
+        <div id="entry-consultant-panel" class="card" style="display:none;margin-bottom:12px">
           <div class="card-header">
-            <h2>Time Log</h2>
+            <h2><i class="fas fa-users" style="color:var(--primary)"></i> 직원별 기록 요약</h2>
             <div class="card-actions">
+              <span id="entry-consultant-summary-badge" style="font-size:12px;color:var(--text-muted);font-weight:500">0명</span>
+            </div>
+          </div>
+          <div class="card-body" style="padding:10px 12px 0">
+            <div id="entry-consultant-kpis" style="display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:8px;margin-bottom:10px">
+              <div class="entry-consultant-kpi"><div class="entry-consultant-kpi-label">직원수</div><div class="entry-consultant-kpi-value" id="entry-kpi-consultant-count">0명</div></div>
+              <div class="entry-consultant-kpi"><div class="entry-consultant-kpi-label">기록건수</div><div class="entry-consultant-kpi-value" id="entry-kpi-record-count">0건</div></div>
+              <div class="entry-consultant-kpi"><div class="entry-consultant-kpi-label">평균 품질</div><div class="entry-consultant-kpi-value" id="entry-kpi-quality-avg">-</div></div>
+              <div class="entry-consultant-kpi"><div class="entry-consultant-kpi-label">독립수행율</div><div class="entry-consultant-kpi-value" id="entry-kpi-independent-rate">0%</div></div>
+            </div>
+          </div>
+          <div class="card-body" style="padding:0">
+            <div class="table-wrapper" style="border:none;border-radius:0;overflow-x:auto">
+              <table class="data-table" style="width:100%;table-layout:fixed">
+                <colgroup>
+                  <col style="width:42px">
+                  <col style="width:120px">
+                  <col style="width:140px">
+                  <col style="width:70px">
+                  <col style="width:92px">
+                  <col style="width:96px">
+                  <col style="width:92px">
+                  <col style="width:88px">
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th style="text-align:center">No</th>
+                    <th>컨설턴트</th>
+                    <th>소속(본부/팀)</th>
+                    <th style="text-align:center">총건수</th>
+                    <th style="text-align:center">독립수행율</th>
+                    <th style="text-align:center">품질평균점수</th>
+                    <th style="text-align:center">최근기록일</th>
+                    <th style="text-align:center">조회</th>
+                  </tr>
+                </thead>
+                <tbody id="entry-consultant-summary-body">
+                  <tr><td colspan="8" class="table-empty"><i class="fas fa-inbox"></i><p>직원별 요약 데이터가 없습니다.</p></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" id="entry-detail-panel">
+          <div class="card-header">
+            <h2 id="entry-detail-title">Time Log</h2>
+            <div class="card-actions">
+              <button id="entry-detail-back-btn" class="btn btn-sm btn-outline" style="display:none" onclick="entryClearConsultantDrilldown()"><i class="fas fa-list"></i> 전체로 돌아가기</button>
               <span id="entry-total-badge" style="font-size:12px;color:var(--text-muted);font-weight:500">전체 0건</span>
               <span style="color:var(--border);font-size:11px">|</span>
               <span id="entry-total-hours" style="font-size:12px;color:var(--text-secondary);font-weight:600">총 0시간</span>
@@ -1157,11 +1239,13 @@
                   <col class="my-entries-col-team" style="width:84px">  <!-- 업무팀 -->
                   <col style="width:90px">   <!-- 대분류 -->
                   <col style="width:100px">  <!-- 소분류 -->
-                  <col style="width:82px">   <!-- 시작일시 -->
-                  <col style="width:82px">   <!-- 종료일시 -->
-                  <col style="width:56px">   <!-- 업무시간 -->
-                  <col style="width:56px">   <!-- 상태 -->
-                  <col style="width:64px">   <!-- 관리 -->
+                  <col class="my-entries-col-start" style="width:82px">   <!-- 시작일시 -->
+                  <col class="my-entries-col-end" style="width:82px">   <!-- 종료일시 -->
+                  <col class="my-entries-col-perf" style="width:82px;display:none">   <!-- 수행방식 -->
+                  <col class="my-entries-col-quality" style="width:70px;display:none">   <!-- 품질평가 -->
+                  <col class="my-entries-col-duration" style="width:72px">   <!-- 소요시간 -->
+                  <col class="my-entries-col-status" style="width:56px">   <!-- 상태 -->
+                  <col class="my-entries-col-action" style="width:72px">   <!-- 관리 -->
                 </colgroup>
                 <thead>
                   <tr>
@@ -1172,11 +1256,13 @@
                     <th class="my-entries-col-team th-team">소속(본부)</th>
                     <th class="th-category">대분류</th>
                     <th class="th-subcat">소분류</th>
-                    <th class="th-start" style="text-align:center">시작일시</th>
-                    <th class="th-end" style="text-align:center">종료일시</th>
-                    <th class="th-duration" style="text-align:center">업무시간</th>
+                    <th class="th-start">시작일시</th>
+                    <th class="th-end">종료일시</th>
+                    <th class="my-entries-col-perf th-perf" style="text-align:center;display:none">수행방식</th>
+                    <th class="my-entries-col-quality th-quality" style="text-align:center;display:none">품질평가</th>
+                    <th class="th-duration" style="text-align:center">소요시간</th>
                     <th class="th-status" style="text-align:center">상태</th>
-                    <th class="th-action" style="text-align:center">관리</th>
+                    <th class="th-action" style="text-align:center">상세보기</th>
                   </tr>
                 </thead>
                 <tbody id="my-entries-body">

@@ -2213,6 +2213,49 @@ textarea.form-control {
   background: #f8fafc;
 }
 
+/* 컨설턴트 업무기록 - 보기모드 탭/요약 KPI */
+.entry-record-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #dbe3f2;
+  border-radius: 10px;
+  background: #f8fbff;
+}
+.entry-record-tabs .approval-main-tab {
+  border: none;
+  background: transparent;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 8px;
+  padding: 6px 12px;
+  min-height: 30px;
+}
+.entry-record-tabs .approval-main-tab.is-active {
+  background: #1d4ed8;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(29, 78, 216, 0.25);
+}
+.entry-consultant-kpi {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 10px;
+}
+.entry-consultant-kpi-label {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 600;
+}
+.entry-consultant-kpi-value {
+  margin-top: 2px;
+  font-size: 15px;
+  color: #0f172a;
+  font-weight: 800;
+}
+
 /* 프로젝트 등록: 수주경로·CPM 라벨 줄 높이 맞춤 */
 .proj-reg-label-sub {
   display: block;
