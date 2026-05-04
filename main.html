@@ -1699,7 +1699,12 @@
           <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-bottom:12px;">
             <div class="card">
               <div class="card-header" style="padding:12px 16px 11px">
-                <h2><i class="fas fa-headset" style="color:var(--primary)"></i>&nbsp; 자문시간 순위(전체)</h2>
+                <h2><i class="fas fa-clock" style="color:var(--primary)"></i>&nbsp; 근무시간 대비 타임시트 기록률</h2>
+                <div class="card-actions" style="display:flex;align-items:center;gap:6px">
+                  <button type="button" class="btn btn-ghost btn-sm" id="staff-worklog-scope-dept" onclick="setStaffWorklogScope('dept')">사업부</button>
+                  <button type="button" class="btn btn-ghost btn-sm" id="staff-worklog-scope-team" onclick="setStaffWorklogScope('team')">팀</button>
+                  <button type="button" class="btn btn-ghost btn-sm" id="staff-worklog-scope-user" onclick="setStaffWorklogScope('user')">개인</button>
+                </div>
               </div>
               <div class="card-body" style="height:220px;position:relative;padding:10px 12px;overflow:auto" id="staff-rank-advisory-time">
                 <div style="text-align:center;padding:18px;color:var(--text-muted);font-size:13px">분석 실행 후 표시됩니다.</div>

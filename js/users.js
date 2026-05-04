@@ -177,7 +177,8 @@ function _onUserRoleChange(roleValue) {
   const isStaff       = role === 'staff';
   const isManager     = role === 'manager';
   const isDirector    = role === 'director';
-  const isStaffLike   = isStaff || isManager || isDirector; // 타임시트 작성 가능 역할
+  const isStaffLike   = isStaff || isManager || isDirector; // 조직/승인 필드 표시 기준
+  const isTimesheetRole = isStaffLike || role === 'top_mgr'; // 타임시트 대상 표기 기준(본부장 이상 포함)
 
   // 1차 승인자 드롭다운: staff/director (CCB director 타임시트 승인 라인 지정)
   const approverWrap = document.getElementById('approver-select-wrap');
@@ -193,8 +194,8 @@ function _onUserRoleChange(roleValue) {
 
   const tsTargetWrap = document.getElementById('timesheet-target-wrap');
   const tsTargetEl = document.getElementById('user-timesheet-target-input');
-  if (tsTargetWrap) tsTargetWrap.style.display = isStaffLike ? '' : 'none';
-  if (!isStaffLike) {
+  if (tsTargetWrap) tsTargetWrap.style.display = isTimesheetRole ? '' : 'none';
+  if (!isTimesheetRole) {
     if (tsTargetEl) tsTargetEl.checked = false;
   }
 
@@ -380,7 +381,41 @@ async function loadUsers() {
     return;
   }
 
-  tbody.innerHTML = users.map((u, i) => {
+  const titleRank = (u) => {
+    const t = String(u?.job_title || '').trim().toLowerCase();
+    const r = String(u?.role || '').trim().toLowerCase();
+    // 전임(associate) → 선임(senior) → 책임(principal) → 팀장 → 본부장 → 사업부장 → 대표이사
+    if (t === 'associate' || t === 'staff') return 1;
+    if (t === 'senior') return 2;
+    if (t === 'principal') return 3;
+    if (t === 'team_lead' || t === 'manager') return 4;
+    if (t === 'division_head' || t === 'director') return 5;
+    if (t === 'bu_head' || t === 'top_mgr') return 6;
+    if (t === 'ceo') return 7;
+    // job_title 누락 시 role로 보정
+    if (r === 'staff') return 1;
+    if (r === 'manager') return 4;
+    if (r === 'director') return 5;
+    if (r === 'top_mgr') return 6;
+    if (r === 'admin') return 98;
+    return 99;
+  };
+
+  const sortedUsers = [...users].sort((a, b) => {
+    const deptA = String(a?.dept_name || a?.department || '').trim();
+    const deptB = String(b?.dept_name || b?.department || '').trim();
+    const deptCmp = deptA.localeCompare(deptB, 'ko');
+    if (deptCmp !== 0) return deptCmp;
+
+    const rankCmp = titleRank(b) - titleRank(a);
+    if (rankCmp !== 0) return rankCmp;
+
+    const nameA = String(a?.name || '').trim();
+    const nameB = String(b?.name || '').trim();
+    return nameA.localeCompare(nameB, 'ko');
+  });
+
+  tbody.innerHTML = sortedUsers.map((u, i) => {
     // ── 역할 배지 ──────────────────────────────────────────
     const roleBadge = Utils.roleBadge(u.role, u.job_title);
 
@@ -434,10 +469,10 @@ async function loadUsers() {
 
     // ── 타임시트 대상 배지 ────────────────────────────────
     // is_timesheet_target: true/'true' → 대상, false/'false' → 비대상, undefined/null → 대상(기본)
-    const isStaffLike = u.role === 'staff' || u.role === 'manager';
+    const isTimesheetRole = u.role === 'staff' || u.role === 'manager' || u.role === 'director' || u.role === 'top_mgr';
     const rawTs       = u.is_timesheet_target;
     const isTs        = rawTs !== false && rawTs !== 'false';
-    const tsBadge = isStaffLike
+    const tsBadge = isTimesheetRole
       ? (isTs
           ? `<span style="display:inline-flex;align-items:center;gap:3px;
                           background:#f0fdf4;color:#16a34a;
@@ -1142,15 +1177,15 @@ async function exportUsersToExcel() {
     ];
     const body = rows.map((u) => {
       const role = String(u.role || '');
-      const isStaffLike = role === 'staff' || role === 'manager';
+      const isTimesheetRole = role === 'staff' || role === 'manager' || role === 'director' || role === 'top_mgr';
       const isActive = u.is_active === false ? 'N' : 'Y';
-      const tsTarget = isStaffLike
+      const tsTarget = isTimesheetRole
         ? ((u.is_timesheet_target === false || u.is_timesheet_target === 'false') ? '비대상' : '대상')
         : '해당없음';
-      const tsHourly = isStaffLike
+      const tsHourly = isTimesheetRole
         ? ((u.timesheet_hourly === false || u.timesheet_hourly === 'false') ? 'N' : 'Y')
         : '';
-      const tsDaily = isStaffLike
+      const tsDaily = isTimesheetRole
         ? ((u.timesheet_daily === true || u.timesheet_daily === 'true') ? 'Y' : 'N')
         : '';
       return [

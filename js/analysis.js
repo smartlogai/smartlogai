@@ -4,6 +4,7 @@
 
 let _analysisCharts = {};
 let _currentAnalysisTab = 'work'; // 'work' | 'staff' | 'labor' | 'project-profit'
+let _staffWorklogScope = 'dept'; // dept | team | user
 
 function _canAccessAnalysisPage(session) {
   if (!session) return false;
@@ -452,6 +453,13 @@ function onStaffCsTeamChange() {
   if (window._analysisInitStaffSearch) window._analysisInitStaffSearch('filter-staff-staff-wrap', dept, csTeam);
 }
 
+function setStaffWorklogScope(scope) {
+  const next = String(scope || '').trim();
+  if (!['dept', 'team', 'user'].includes(next)) return;
+  _staffWorklogScope = next;
+  loadStaffAnalysis();
+}
+
 // ── 인건비 탭: 본부·고객지원팀 필터 (users / cs_teams 마스터) ──
 function _fillLaborHqOptions(elId, deptValue, allUsers) {
   const el = document.getElementById(elId);
@@ -868,12 +876,28 @@ async function loadStaffAnalysis() {
     const safeUsers = Array.isArray(allUsers) ? allUsers : [];
     const safeArchives = Array.isArray(archiveItems) ? archiveItems : [];
 
+    const _isCcbUser = (u) => {
+      const txt = [
+        u?.department, u?.dept_name, u?.department_name,
+        u?.hq_name, u?.cs_team_name, u?.team_name,
+      ].map((v) => String(v || '').toUpperCase()).join(' ');
+      return txt.includes('CCB');
+    };
+    const ccbUserIds = new Set(
+      safeUsers
+        .filter((u) => _isCcbUser(u))
+        .map((u) => String(u.id || '').trim())
+        .filter(Boolean)
+    );
+
     // ── 전체 ID를 String으로 정규화 ─────────────────────────────────
     allEntries = allEntries.map(e => ({
       ...e,
       user_id:     String(e.user_id     || ''),
       approver_id: String(e.approver_id || ''),
     }));
+    // CCB 소속은 고과분석 대상에서 제외
+    allEntries = allEntries.filter((e) => !ccbUserIds.has(String(e.user_id || '').trim()));
     // ── 역할별 범위 제한 ──────────────────────────────────────────────
     if (session.role === 'staff') {
       allEntries = allEntries.filter(e => e.user_id === String(session.id));
@@ -954,6 +978,13 @@ async function loadStaffAnalysis() {
       }).join('');
     };
 
+    ['dept', 'team', 'user'].forEach((k) => {
+      const el = document.getElementById(`staff-worklog-scope-${k}`);
+      if (!el) return;
+      el.classList.toggle('btn-primary', k === _staffWorklogScope);
+      el.classList.toggle('btn-ghost', k !== _staffWorklogScope);
+    });
+
     const clientEntries = filteredEntries.filter(e => e.time_category === 'client');
 
     // ── 대상 직원 목록: 승인자 지정 + 타임시트 대상만 (staff + 타임시트 대상 manager 포함) ────────
@@ -961,6 +992,7 @@ async function loadStaffAnalysis() {
       .filter(u =>
         (u.role === 'staff' || u.role === 'manager') &&
         u.is_active !== false &&
+        !_isCcbUser(u) &&
         u.is_timesheet_target !== false &&
         (u.role === 'manager'
           ? true
@@ -972,6 +1004,88 @@ async function loadStaffAnalysis() {
     if (csTeamFilter)  targetUsers = targetUsers.filter(u => u.cs_team_name === csTeamFilter);
     if (staffFilter)  targetUsers = targetUsers.filter(u => String(u.id) === String(staffFilter));
 
+    // 근무시간 대비 타임시트 기록률 (사업부/팀/개인)
+    const dayKey = (ts) => {
+      const d = new Date(Number(ts) || 0);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${dd}`;
+    };
+    const fromDate = new Date(from);
+    const toDate = new Date(to);
+    const writersByWeekday = {};
+    (periodEntries || []).forEach((e) => {
+      const ts = _safe_ts(e.work_start_at);
+      if (!ts) return;
+      const d = new Date(ts);
+      const dow = d.getDay();
+      if (dow === 0 || dow === 6) return;
+      const key = dayKey(ts);
+      if (!writersByWeekday[key]) writersByWeekday[key] = new Set();
+      const uid = String(e.user_id || '').trim();
+      if (uid) writersByWeekday[key].add(uid);
+    });
+    let effectiveBizDays = 0;
+    for (let d = new Date(fromDate); d <= toDate; d.setDate(d.getDate() + 1)) {
+      const dow = d.getDay();
+      if (dow === 0 || dow === 6) continue;
+      const key = dayKey(d.getTime());
+      const writerCnt = (writersByWeekday[key] && writersByWeekday[key].size) || 0;
+      // 평일 작성자(고유 사용자) 3명 미만이면 공휴일/휴무일로 간주
+      if (writerCnt >= 3) effectiveBizDays += 1;
+    }
+
+    const userMetaById = new Map(targetUsers.map((u) => [String(u.id || ''), u]));
+    const grouped = {};
+    const scopeLabel = (u, uid, fallbackName = '') => {
+      if (_staffWorklogScope === 'dept') return String(u?.department || u?.dept_name || '').trim() || '미지정 사업부';
+      if (_staffWorklogScope === 'team') return String(u?.cs_team_name || u?.team_name || '').trim() || '미지정 팀';
+      return String(u?.name || fallbackName || uid || '').trim() || '미지정 담당자';
+    };
+
+    targetUsers.forEach((u) => {
+      const uid = String(u.id || '').trim();
+      if (!uid) return;
+      const label = scopeLabel(u, uid, String(u.name || '').trim());
+      if (!grouped[label]) grouped[label] = { label, userIds: new Set(), loggedMin: 0 };
+      grouped[label].userIds.add(uid);
+    });
+    (filteredEntries || []).forEach((e) => {
+      const uid = String(e.user_id || '').trim();
+      const u = userMetaById.get(uid) || null;
+      const label = scopeLabel(u, uid, String(e.user_name || '').trim());
+      if (!grouped[label]) grouped[label] = { label, userIds: new Set(), loggedMin: 0 };
+      if (uid) grouped[label].userIds.add(uid);
+      grouped[label].loggedMin += (Number(e.duration_minutes) || 0);
+    });
+
+    const worklogRows = Object.values(grouped)
+      .map((g) => {
+        const people = Math.max(1, Number(g.userIds?.size || 0));
+        const baseMin = effectiveBizDays * 8 * 60 * people;
+        const loggedMin = Number(g.loggedMin || 0);
+        const rate = baseMin > 0 ? (loggedMin / baseMin) * 100 : 0;
+        const gapMin = loggedMin - baseMin;
+        return { label: g.label, value: rate, loggedMin, baseMin, gapMin, people, bizDays: effectiveBizDays };
+      })
+      .sort((a, b) => {
+        if ((b.value || 0) !== (a.value || 0)) return (b.value || 0) - (a.value || 0);
+        return (b.loggedMin || 0) - (a.loggedMin || 0);
+      });
+    _rankRender('staff-rank-advisory-time', worklogRows, {
+      unit: '%',
+      valueFormatter: (v) => (Number(v) || 0).toFixed(1),
+      secondaryFormatter: (r) => {
+        const loggedH = ((Number(r.loggedMin || 0)) / 60).toFixed(1);
+        const baseH = ((Number(r.baseMin || 0)) / 60).toFixed(1);
+        const gap = Number(r.gapMin || 0);
+        const gapTxt = `${gap >= 0 ? '초과 +' : '미달 '}${(Math.abs(gap) / 60).toFixed(1)}h`;
+        return `기록 ${loggedH}h / 기준 ${baseH}h · ${gapTxt} · ${r.people}명`;
+      },
+      emptyText: '근무시간 대비 기록률 데이터가 없습니다.',
+    });
+
     // 자문시간/자문건수(직원)
     const advByUser = {};
     clientEntries.forEach(e => {
@@ -981,19 +1095,10 @@ async function loadStaffAnalysis() {
       advByUser[uid].advisoryMin += (Number(e.duration_minutes) || 0);
       advByUser[uid].advisoryCount += 1;
     });
-    const advTimeRank = Object.values(advByUser)
-      .map(v => ({ label: v.label, value: v.advisoryMin, advisoryCount: v.advisoryCount }))
-      .sort((a,b)=>(b.value||0)-(a.value||0));
     const advCountRank = Object.values(advByUser)
       .map(v => ({ label: v.label, value: v.advisoryCount, advisoryMin: v.advisoryMin }))
       .sort((a,b)=>(b.value||0)-(a.value||0));
 
-    _rankRender('staff-rank-advisory-time', advTimeRank, {
-      unit: 'h',
-      valueFormatter: (mins) => ((Number(mins)||0)/60).toFixed(1),
-      secondaryFormatter: (r) => `자문 ${r.advisoryCount||0}건`,
-      emptyText: '자문 데이터가 없습니다.',
-    });
     _rankRender('staff-rank-advisory-count', advCountRank, {
       unit: '건',
       valueFormatter: (n) => `${Number(n)||0}`,
