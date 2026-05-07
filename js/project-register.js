@@ -83,8 +83,17 @@ function _projRegSetDefaultMonth() {
 }
 
 function _projRegIsCpmEligible(u) {
-  const r = u && u.role;
+  const r = _projRegNormRole(u && u.role);
   return r === 'manager' || r === 'director' || r === 'top_mgr' || r === 'admin';
+}
+
+function _projRegNormRole(role) {
+  const raw = String(role || '').trim().toLowerCase();
+  if (!raw) return '';
+  if (typeof normalizeRoleName === 'function') return normalizeRoleName(raw);
+  if (raw === 'top_mgr' || raw === 'topmgr' || raw === 'top-manager' || raw === 'top manager' || raw === '경영') return 'top_mgr';
+  if (raw === 'administrator') return 'admin';
+  return raw;
 }
 
 function _projRegParseDigits(v) {
@@ -193,7 +202,7 @@ async function _projRegRegistrantSnapshot(session) {
     users = await Master.users();
     u = users.find((x) => String(x.id) === String(session.id)) || null;
   } catch (_) {}
-  const myRole = String((u && u.role) || session.role || '').trim().toLowerCase();
+  const myRole = _projRegNormRole((u && u.role) || session.role || '');
   const activeUsers = (Array.isArray(users) ? users : []).filter((x) => x && x.deleted !== true && x.is_active !== false);
   const normName = (v) => String(v || '').toLowerCase().replace(/\s+/g, '').trim();
   const resolveApprover = (rawId, rawName) => {
@@ -221,7 +230,7 @@ async function _projRegRegistrantSnapshot(session) {
   const pickTopMgr = () => {
     if (!activeUsers.length) return { id: '', name: '' };
     const pickScore = (cand) => {
-      if (!cand || String(cand.role || '').toLowerCase() !== 'top_mgr') return -1;
+      if (!cand || _projRegNormRole(cand.role) !== 'top_mgr') return -1;
       let s = 0;
       if (u && u.dept_id && cand.dept_id && String(u.dept_id) === String(cand.dept_id)) s += 100;
       if (u && u.hq_id && cand.hq_id && String(u.hq_id) === String(cand.hq_id)) s += 40;
@@ -229,7 +238,7 @@ async function _projRegRegistrantSnapshot(session) {
       return s;
     };
     const sorted = activeUsers
-      .filter((x) => String((x && x.role) || '').toLowerCase() === 'top_mgr')
+      .filter((x) => _projRegNormRole((x && x.role) || '') === 'top_mgr')
       .map((x) => ({ x, score: pickScore(x) }))
       .sort((a, b) => {
         if (a.score !== b.score) return b.score - a.score;
@@ -247,7 +256,7 @@ async function _projRegRegistrantSnapshot(session) {
 
   // 승인체계
   // - staff   : 1차(pa1) -> 2차(pa2) -> 최종(top_mgr)
-  // - manager : 1차(pa1) -> 2차(pa2) -> 최종(top_mgr)
+  // - manager : 1차(pa1=본부장) -> 최종(top_mgr) 2단계
   // - director(CCB): 사용자등록 지정 승인자(pa1/pa2) -> 최종(top_mgr)
   // - director(기타): 기존과 동일(최종 top_mgr 1단계)
   if (myRole === 'staff') {
@@ -264,8 +273,8 @@ async function _projRegRegistrantSnapshot(session) {
     return {
       pa1Id,
       pa1Name,
-      pa2Id,
-      pa2Name,
+      pa2Id: '',
+      pa2Name: '',
       pa3Id: topMgr.id,
       pa3Name: topMgr.name,
     };
@@ -3469,8 +3478,8 @@ async function projRegSubmitForApproval() {
     Toast.warning('승인 요청할 수 없습니다. 담당(전임/선임/책임)은 1차/2차 승인자와 사업부장 최종 승인자가 모두 지정되어야 합니다.');
     return;
   }
-  if (isManagerRegistrant && (!has1 || !has2 || !has3)) {
-    Toast.warning('승인 요청할 수 없습니다. 팀장은 1차/2차 승인자와 사업부장 최종 승인자가 모두 지정되어야 합니다.');
+  if (isManagerRegistrant && (!has1 || !has3)) {
+    Toast.warning('승인 요청할 수 없습니다. 팀장은 본부장 1차 승인자와 사업부장 최종 승인자가 모두 지정되어야 합니다.');
     return;
   }
   if (isDirectorRegistrant && _projRegIsCcbRegistrant(session, session) && ((!has1 && !has2) || !has3)) {
