@@ -889,6 +889,12 @@ async function loadStaffAnalysis() {
         .map((u) => String(u.id || '').trim())
         .filter(Boolean)
     );
+    const managerUserIds = new Set(
+      safeUsers
+        .filter((u) => String(u.role || '').trim() === 'manager')
+        .map((u) => String(u.id || '').trim())
+        .filter(Boolean)
+    );
 
     // ── 전체 ID를 String으로 정규화 ─────────────────────────────────
     allEntries = allEntries.map(e => ({
@@ -896,8 +902,11 @@ async function loadStaffAnalysis() {
       user_id:     String(e.user_id     || ''),
       approver_id: String(e.approver_id || ''),
     }));
-    // CCB 소속은 고과분석 대상에서 제외
-    allEntries = allEntries.filter((e) => !ccbUserIds.has(String(e.user_id || '').trim()));
+    // CCB 소속 + 팀장(manager)은 고과분석 대상에서 제외
+    allEntries = allEntries.filter((e) => {
+      const uid = String(e.user_id || '').trim();
+      return !ccbUserIds.has(uid) && !managerUserIds.has(uid);
+    });
     // ── 역할별 범위 제한 ──────────────────────────────────────────────
     if (session.role === 'staff') {
       allEntries = allEntries.filter(e => e.user_id === String(session.id));
@@ -922,16 +931,18 @@ async function loadStaffAnalysis() {
     const to   = dateTo
       ? new Date(dateTo + 'T23:59:59').getTime()
       : new Date().setHours(23,59,59,999); // To 미입력: 오늘까지 누적
-    const periodEntries = allEntries.filter(e => {
-      if (e.status !== 'approved' || !e.work_start_at) return false;
+    const periodEntriesAll = allEntries.filter(e => {
+      if (!e.work_start_at) return false;
       const ts = _safe_ts(e.work_start_at);
       return ts >= from && ts <= to;
     });
+    const periodEntries = periodEntriesAll.filter((e) => String(e.status || '') === 'approved');
 
     // ── 사업부 / 고객지원팀 / 담당자 필터 ───────────────────
     // 벤치마크(유형별 평균)는 "조직 범위" 기준으로 계산하기 위해 staffFilter는 제외하고 계산
     let benchmarkEntries = [...periodEntries];
     let filteredEntries = [...periodEntries];
+    let filteredAllEntries = [...periodEntriesAll];
 
     if (deptFilter || csTeamFilter) {
       const matchedUserIds = new Set(
@@ -942,8 +953,12 @@ async function loadStaffAnalysis() {
       );
       benchmarkEntries = benchmarkEntries.filter(e => matchedUserIds.has(e.user_id));
       filteredEntries = filteredEntries.filter(e => matchedUserIds.has(e.user_id));
+      filteredAllEntries = filteredAllEntries.filter(e => matchedUserIds.has(e.user_id));
     }
-    if (staffFilter) filteredEntries = filteredEntries.filter(e => e.user_id === String(staffFilter));
+    if (staffFilter) {
+      filteredEntries = filteredEntries.filter(e => e.user_id === String(staffFilter));
+      filteredAllEntries = filteredAllEntries.filter(e => e.user_id === String(staffFilter));
+    }
 
     // ── 순위 통계(기간필터 기준) ───────────────────────────
     const _rankRender = (containerId, rows, opts = {}) => {
@@ -990,13 +1005,11 @@ async function loadStaffAnalysis() {
     // ── 대상 직원 목록: 승인자 지정 + 타임시트 대상만 (staff + 타임시트 대상 manager 포함) ────────
     let targetUsers = safeUsers
       .filter(u =>
-        (u.role === 'staff' || u.role === 'manager') &&
+        u.role === 'staff' &&
         u.is_active !== false &&
         !_isCcbUser(u) &&
         u.is_timesheet_target !== false &&
-        (u.role === 'manager'
-          ? true
-          : (u.approver_id && String(u.approver_id).trim() !== ''))
+        (u.approver_id && String(u.approver_id).trim() !== '')
       )
       .map(u => ({ ...u, id: String(u.id || '') }));
 
@@ -1035,6 +1048,11 @@ async function loadStaffAnalysis() {
       // 평일 작성자(고유 사용자) 3명 미만이면 공휴일/휴무일로 간주
       if (writerCnt >= 3) effectiveBizDays += 1;
     }
+    const leaveMonths = Math.max(
+      1,
+      ((toDate.getFullYear() - fromDate.getFullYear()) * 12) + (toDate.getMonth() - fromDate.getMonth()) + 1
+    );
+    const adjustedBizDays = Math.max(0, effectiveBizDays - leaveMonths);
 
     const userMetaById = new Map(targetUsers.map((u) => [String(u.id || ''), u]));
     const grouped = {};
@@ -1063,11 +1081,11 @@ async function loadStaffAnalysis() {
     const worklogRows = Object.values(grouped)
       .map((g) => {
         const people = Math.max(1, Number(g.userIds?.size || 0));
-        const baseMin = effectiveBizDays * 8 * 60 * people;
+        const baseMin = adjustedBizDays * 8 * 60 * people;
         const loggedMin = Number(g.loggedMin || 0);
         const rate = baseMin > 0 ? (loggedMin / baseMin) * 100 : 0;
         const gapMin = loggedMin - baseMin;
-        return { label: g.label, value: rate, loggedMin, baseMin, gapMin, people, bizDays: effectiveBizDays };
+        return { label: g.label, value: rate, loggedMin, baseMin, gapMin, people, bizDays: adjustedBizDays, leaveDays: leaveMonths };
       })
       .sort((a, b) => {
         if ((b.value || 0) !== (a.value || 0)) return (b.value || 0) - (a.value || 0);
@@ -1081,51 +1099,12 @@ async function loadStaffAnalysis() {
         const baseH = ((Number(r.baseMin || 0)) / 60).toFixed(1);
         const gap = Number(r.gapMin || 0);
         const gapTxt = `${gap >= 0 ? '초과 +' : '미달 '}${(Math.abs(gap) / 60).toFixed(1)}h`;
-        return `기록 ${loggedH}h / 기준 ${baseH}h · ${gapTxt} · ${r.people}명`;
+        return `기록 ${loggedH}h / 기준 ${baseH}h · ${gapTxt} · 월차 ${r.leaveDays || 0}일 반영`;
       },
       emptyText: '근무시간 대비 기록률 데이터가 없습니다.',
     });
 
-    // 자문시간/자문건수(직원)
-    const advByUser = {};
-    clientEntries.forEach(e => {
-      const uid = String(e.user_id || '');
-      if (!uid) return;
-      if (!advByUser[uid]) advByUser[uid] = { label: e.user_name || uid, advisoryMin: 0, advisoryCount: 0 };
-      advByUser[uid].advisoryMin += (Number(e.duration_minutes) || 0);
-      advByUser[uid].advisoryCount += 1;
-    });
-    const advCountRank = Object.values(advByUser)
-      .map(v => ({ label: v.label, value: v.advisoryCount, advisoryMin: v.advisoryMin }))
-      .sort((a,b)=>(b.value||0)-(a.value||0));
-
-    _rankRender('staff-rank-advisory-count', advCountRank, {
-      unit: '건',
-      valueFormatter: (n) => `${Number(n)||0}`,
-      secondaryFormatter: (r) => `자문 ${(Number(r.advisoryMin)||0)/60 >= 0 ? ((Number(r.advisoryMin)||0)/60).toFixed(1) : '0.0'}h`,
-      emptyText: '자문 데이터가 없습니다.',
-    });
-
-    // 자문 업무유형(소분류) 평균소요(유형)
-    const subAgg = {};
-    clientEntries.forEach(e => {
-      const sub = (e.work_subcategory_name || '').trim();
-      const m = Number(e.duration_minutes) || 0;
-      if (!sub || m <= 0) return;
-      if (!subAgg[sub]) subAgg[sub] = { sum: 0, cnt: 0 };
-      subAgg[sub].sum += m; subAgg[sub].cnt += 1;
-    });
-    const MIN_SUB_SAMPLE = 5;
-    const worktypeAvgRank = Object.entries(subAgg)
-      .filter(([_,v]) => v.cnt >= MIN_SUB_SAMPLE)
-      .map(([sub,v]) => ({ label: sub, value: v.sum/v.cnt, cnt: v.cnt }))
-      .sort((a,b)=>(b.value||0)-(a.value||0));
-    _rankRender('staff-rank-advisory-worktype-avg', worktypeAvgRank, {
-      unit: '분',
-      valueFormatter: (v) => (Number(v)||0).toFixed(1),
-      secondaryFormatter: (r) => `표본 ${r.cnt||0}건`,
-      emptyText: `자문 소분류 평균은 표본 ${MIN_SUB_SAMPLE}건 이상부터 표시됩니다.`,
-    });
+    // 성과/효율 지수 카드는 직원별 집계(rows) 산출 이후 렌더링
 
     // 독립수행(직원) — 수행방식 표본 5건 이상
     const indepRank = [];
@@ -1199,11 +1178,18 @@ async function loadStaffAnalysis() {
     // ── 직원별 집계 ──────────────────────────────────────
     const rows = targetUsers.map(u => {
       const uEntries  = filteredEntries.filter(e => String(e.user_id) === String(u.id));
+      const uAllEntries = filteredAllEntries.filter(e => String(e.user_id) === String(u.id));
       const totalMin  = uEntries.reduce((s,e)=>s+(e.duration_minutes||0),0);
       const clientMin = uEntries.filter(e=>e.time_category==='client').reduce((s,e)=>s+(e.duration_minutes||0),0);
       const clientCount = uEntries.filter(e => e.time_category === 'client').length;
       const intMin    = totalMin - clientMin;
       const cliRatio  = totalMin > 0 ? Math.round(clientMin/totalMin*100) : 0;
+
+      const approvedCnt = uAllEntries.filter((e) => String(e.status || '') === 'approved').length;
+      const rejectedCnt = uAllEntries.filter((e) => String(e.status || '') === 'rejected').length;
+      const reviewDenom = approvedCnt + rejectedCnt;
+      const approvalStability = reviewDenom > 0 ? (approvedCnt / reviewDenom) : null;
+      const reworkRate = reviewDenom > 0 ? (rejectedCnt / reviewDenom) : null;
 
       // 품질 별점 집계 (archive_items) — 모두 String 비교
       const uArchives = safeArchives.filter(a => String(a.user_id) === u.id && parseInt(a.quality_stars) > 0);
@@ -1281,9 +1267,32 @@ async function loadStaffAnalysis() {
         effRaw = ratios.reduce((s,x)=>s+(x.r * x.w),0) / wsum;
       }
 
+      // 소분류 내 소요시간 변동성(CV): 낮을수록 효율적
+      const cvParts = [];
+      Object.entries(userSubAgg).forEach(([sub, v]) => {
+        if (v.cnt < MIN_USER_SUB_COUNT) return;
+        const samples = uEntries
+          .filter((e) => String(e.work_subcategory_name || '').trim() === sub)
+          .map((e) => Number(e.duration_minutes) || 0)
+          .filter((m) => m > 0);
+        if (samples.length < 2) return;
+        const mean = samples.reduce((s, x) => s + x, 0) / samples.length;
+        if (!mean) return;
+        const variance = samples.reduce((s, x) => s + ((x - mean) ** 2), 0) / samples.length;
+        const std = Math.sqrt(variance);
+        const cv = std / mean;
+        cvParts.push({ cv, w: samples.length });
+      });
+      let effVarRaw = null;
+      if (cvParts.length) {
+        const wsum = cvParts.reduce((s, x) => s + x.w, 0) || 1;
+        effVarRaw = cvParts.reduce((s, x) => s + (x.cv * x.w), 0) / wsum;
+      }
+
       return { u, totalMin, clientMin, clientCount, intMin, cliRatio, uArchives, star1, star2, star3, avgStars,
                compEntries, cStar1, cStar2, cStar3, avgCompStars, perfEntries, perfIndep, perfGuided, perfSuper,
-               indepRate, indepRatingAvg, indepRatingCount, ratingCombined, ratingCount, effRaw, effSupportCount };
+               indepRate, indepRatingAvg, indepRatingCount, ratingCombined, ratingCount, effRaw, effVarRaw, effSupportCount,
+               approvedCnt, rejectedCnt, approvalStability, reworkRate };
     });
 
     // 최다 투입자 기준
@@ -1314,6 +1323,67 @@ async function loadStaffAnalysis() {
         total: totalScore,
         time: sTime, advisory: sAdv, efficiency: sEff, independent: sInd, rating: sRat
       };
+    });
+
+    // ── Phase 1: 업무성과/효율성 지수(수동 난이도 미반영) ──────────
+    const perfQualityVals = rows.map((r) => r.ratingCombined).filter((v) => v !== null);
+    const perfApprovalVals = rows.map((r) => r.approvalStability).filter((v) => v !== null);
+    const perfIndepVals = rows.map((r) => r.indepRate).filter((v) => v !== null);
+    const perfReworkVals = rows.map((r) => r.reworkRate).filter((v) => v !== null);
+    const effSpeedVals = rows.map((r) => r.effRaw).filter((v) => v !== null);
+    const effVarVals = rows.map((r) => r.effVarRaw).filter((v) => v !== null);
+
+    rows.forEach((r) => {
+      const perfQuality = (r.ratingCombined === null) ? 0 : percentileScore(perfQualityVals, r.ratingCombined, true);
+      const perfApproval = (r.approvalStability === null) ? 50 : percentileScore(perfApprovalVals, r.approvalStability, true);
+      const perfIndep = (r.indepRate === null) ? 0 : percentileScore(perfIndepVals, r.indepRate, true);
+      const perfRework = (r.reworkRate === null) ? 50 : percentileScore(perfReworkVals, r.reworkRate, false);
+      const performanceIndex = (perfQuality * 0.45) + (perfApproval * 0.25) + (perfIndep * 0.20) + (perfRework * 0.10);
+
+      const effSpeed = (r.effRaw === null) ? 0 : percentileScore(effSpeedVals, r.effRaw, true);
+      const effVar = (r.effVarRaw === null) ? 50 : percentileScore(effVarVals, r.effVarRaw, false);
+      const effRework = (r.reworkRate === null) ? 50 : percentileScore(perfReworkVals, r.reworkRate, false);
+      const efficiencyIndex = (effSpeed * 0.60) + (effVar * 0.25) + (effRework * 0.15);
+
+      r.performanceIndex = performanceIndex;
+      r.efficiencyIndex = efficiencyIndex;
+      r._perfParts = { perfQuality, perfApproval, perfIndep, perfRework };
+      r._effParts = { effSpeed, effVar, effRework };
+    });
+
+    const performanceRankRows = rows
+      .slice()
+      .sort((a, b) => (b.performanceIndex || 0) - (a.performanceIndex || 0))
+      .map((r) => ({
+        label: r.u?.name || '-',
+        value: r.performanceIndex || 0,
+        quality: r._perfParts?.perfQuality || 0,
+        approval: r._perfParts?.perfApproval || 0,
+        indep: r._perfParts?.perfIndep || 0,
+        rework: r._perfParts?.perfRework || 0,
+      }));
+    _rankRender('staff-rank-advisory-count', performanceRankRows, {
+      unit: '점',
+      valueFormatter: (v) => (Number(v) || 0).toFixed(1),
+      secondaryFormatter: (r) => `품질 ${Math.round(r.quality || 0)} · 승인 ${Math.round(r.approval || 0)} · 독립 ${Math.round(r.indep || 0)} · 재작업 ${Math.round(r.rework || 0)}`,
+      emptyText: '업무성과 지수를 계산할 데이터가 없습니다.',
+    });
+
+    const efficiencyRankRows = rows
+      .slice()
+      .sort((a, b) => (b.efficiencyIndex || 0) - (a.efficiencyIndex || 0))
+      .map((r) => ({
+        label: r.u?.name || '-',
+        value: r.efficiencyIndex || 0,
+        speed: r._effParts?.effSpeed || 0,
+        variance: r._effParts?.effVar || 0,
+        rework: r._effParts?.effRework || 0,
+      }));
+    _rankRender('staff-rank-advisory-worktype-avg', efficiencyRankRows, {
+      unit: '점',
+      valueFormatter: (v) => (Number(v) || 0).toFixed(1),
+      secondaryFormatter: (r) => `속도 ${Math.round(r.speed || 0)} · 안정성 ${Math.round(r.variance || 0)} · 재작업 ${Math.round(r.rework || 0)}`,
+      emptyText: '효율성 지수를 계산할 데이터가 없습니다.',
     });
 
     // 내림차순 정렬 (기본: 종합점수)

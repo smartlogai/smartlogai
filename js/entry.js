@@ -1110,9 +1110,12 @@ function syncEntrySheetTimeRowUI() {
   const fromEl = document.getElementById('entry-daily-from');
   const toEl = document.getElementById('entry-daily-to');
   const wDay = document.getElementById('entry-daily-period-day-wrap');
+  const workDateEl = document.getElementById('entry-work-date');
+  const workDateWrap = document.getElementById('entry-work-date-wrap');
   if (hourlyRow) hourlyRow.style.display = (!daily || mode === 'by_hour') ? 'grid' : 'none';
   if (dailyRow) dailyRow.style.display = daily ? 'block' : 'none';
   if (wDay) wDay.style.display = (daily && mode === 'by_day_span') ? '' : 'none';
+  if (workDateWrap) workDateWrap.style.display = (!daily || mode === 'by_hour') ? '' : 'none';
   if (startEl) {
     if (!daily) startEl.setAttribute('required', 'required');
     else if (mode === 'by_hour') startEl.setAttribute('required', 'required');
@@ -1130,6 +1133,10 @@ function syncEntrySheetTimeRowUI() {
   if (toEl) {
     if (daily && mode === 'by_day_span') toEl.setAttribute('required', 'required');
     else toEl.removeAttribute('required');
+  }
+  if (workDateEl) {
+    if (!daily || mode === 'by_hour') workDateEl.setAttribute('required', 'required');
+    else workDateEl.removeAttribute('required');
   }
   _syncDailyPeriodModeToggleUI();
 }
@@ -1166,8 +1173,8 @@ function applyDailyPeriodFromInput() {
     syncActualDuration();
     return;
   }
-  startEl.value = `${d0}T00:00`;
-  endEl.value = `${d1}T23:59`;
+  startEl.value = `${d0} 00:00`;
+  endEl.value = `${d1} 23:59`;
   const days = _entryInclusiveCalendarDays(d0, d1);
   const mins = days > 0 ? days * 480 : 0;
   if (text) {
@@ -1200,6 +1207,92 @@ function applyDailyWorkDateFromInput() {
 
 function onDailyWorkDateChange() {
   onDailyPeriodChange();
+}
+
+function _entryUsesTimeOnlyInputs() {
+  return !(entryFormSheetType() === 'daily' && _entryDailyEffectivePeriodMode() !== 'by_hour');
+}
+
+function _entryNormTimeText(raw) {
+  const v = String(raw || '').trim().replace(/\s+/g, '');
+  if (!v) return '';
+  let h = null;
+  let m = null;
+  if (/^\d{1,2}$/.test(v)) {
+    h = parseInt(v, 10);
+    m = 0;
+  } else if (/^\d{3,4}$/.test(v)) {
+    const hh = v.length === 3 ? v.substring(0, 1) : v.substring(0, 2);
+    const mm = v.slice(-2);
+    h = parseInt(hh, 10);
+    m = parseInt(mm, 10);
+  } else if (/^\d{1,2}:\d{1,2}$/.test(v)) {
+    const [hh, mm] = v.split(':');
+    h = parseInt(hh, 10);
+    m = parseInt(mm, 10);
+  } else {
+    return '';
+  }
+  if (!Number.isInteger(h) || !Number.isInteger(m)) return '';
+  if (h < 0 || h > 23 || m < 0 || m > 59) return '';
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function _entryResolveWorkDate() {
+  const el = document.getElementById('entry-work-date');
+  const v = String(el && el.value || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  const now = new Date();
+  const ymd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  if (el) el.value = ymd;
+  return ymd;
+}
+
+function _entryParseDateTimeInput(raw) {
+  const v = String(raw || '').trim();
+  if (!v) return null;
+  const m = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{1,2})$/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const h = Number(m[4]);
+  const mi = Number(m[5]);
+  if (!Number.isInteger(y) || !Number.isInteger(mo) || !Number.isInteger(d) || !Number.isInteger(h) || !Number.isInteger(mi)) return null;
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || h < 0 || h > 23 || mi < 0 || mi > 59) return null;
+  const yy = String(y).padStart(4, '0');
+  const mm = String(mo).padStart(2, '0');
+  const dd = String(d).padStart(2, '0');
+  const hh = String(h).padStart(2, '0');
+  const mmi = String(mi).padStart(2, '0');
+  return {
+    display: `${yy}-${mm}-${dd} ${hh}:${mmi}`,
+    iso: `${yy}-${mm}-${dd}T${hh}:${mmi}`,
+  };
+}
+
+function _entryNormalizeDateTimeField(id) {
+  const el = document.getElementById(id);
+  if (!el) return '';
+  const raw = String(el.value || '').trim();
+  const parsed = _entryParseDateTimeInput(raw);
+  if (parsed) {
+    if (_entryUsesTimeOnlyInputs()) {
+      const datePart = parsed.iso.slice(0, 10);
+      const timePart = parsed.iso.slice(11, 16);
+      const wd = document.getElementById('entry-work-date');
+      if (wd) wd.value = datePart;
+      el.value = timePart;
+    } else {
+      el.value = parsed.display;
+    }
+    return parsed.iso;
+  }
+  const hm = _entryNormTimeText(raw);
+  if (!hm) return '';
+  el.value = hm;
+  const ymd = _entryResolveWorkDate();
+  return `${ymd}T${hm}`;
 }
 
 // ─────────────────────────────────────────────
@@ -1295,6 +1388,11 @@ async function init_entry_new() {
     if (dto) dto.value = ymd;
     onDailyPeriodModeChange();
   } else {
+    const wd = document.getElementById('entry-work-date');
+    if (wd && !wd.value) {
+      const t = new Date();
+      wd.value = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+    }
     document.getElementById('duration-text').textContent = '시작/종료 시간을 입력하면 자동 계산됩니다.';
     calcDuration();
   }
@@ -2195,8 +2293,8 @@ async function calcDuration() {
     applyDailyWorkDateFromInput();
     return;
   }
-  const start   = document.getElementById('entry-start').value;
-  const end     = document.getElementById('entry-end').value;
+  const start   = _entryNormalizeDateTimeField('entry-start');
+  const end     = _entryNormalizeDateTimeField('entry-end');
   const minutes = Utils.calcDurationMinutes(start, end);
   const display = document.getElementById('duration-display');
   const text    = document.getElementById('duration-text');
@@ -3003,8 +3101,8 @@ async function saveEntry(status) {
       return;
     }
   }
-  const startAt    = document.getElementById('entry-start').value;
-  const endAt      = document.getElementById('entry-end').value;
+  const startAt    = _entryNormalizeDateTimeField('entry-start');
+  const endAt      = _entryNormalizeDateTimeField('entry-end');
   const isSubmitSave = status === 'submitted';
   // ★ 실제 소요시간: 사용자 직접 입력(시간·분) 우선, 없으면 hidden(자동계산) 사용
   syncActualDuration(); // 저장 직전 한 번 더 동기화
@@ -3173,8 +3271,8 @@ async function _doSaveEntry(status, approverInfo, autoApprove = false) {
   const csVal      = ClientSearchSelect.getValue('entry-client-wrap');
   const clientId   = csVal.id || document.getElementById('entry-client').value || '';
   const clientName = csVal.name || '';
-  const startAt    = document.getElementById('entry-start').value;
-  const endAt      = document.getElementById('entry-end').value;
+  const startAt    = _entryNormalizeDateTimeField('entry-start');
+  const endAt      = _entryNormalizeDateTimeField('entry-end');
   syncActualDuration();
   const duration   = parseInt(document.getElementById('entry-duration').value) || 0;
 
@@ -5634,15 +5732,13 @@ async function editEntry(id) {
       } else {
         if (entry.work_start_at) {
           const startDate = new Date(Number(entry.work_start_at));
-          const localStart = new Date(startDate.getTime() - startDate.getTimezoneOffset() * 60000)
-            .toISOString().slice(0, 16);
-          document.getElementById('entry-start').value = localStart;
+          const wd = document.getElementById('entry-work-date');
+          if (wd) wd.value = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')}`;
+          document.getElementById('entry-start').value = `${String(startDate.getHours()).padStart(2,'0')}:${String(startDate.getMinutes()).padStart(2,'0')}`;
         }
         if (entry.work_end_at) {
           const endDate = new Date(Number(entry.work_end_at));
-          const localEnd = new Date(endDate.getTime() - endDate.getTimezoneOffset() * 60000)
-            .toISOString().slice(0, 16);
-          document.getElementById('entry-end').value = localEnd;
+          document.getElementById('entry-end').value = `${String(endDate.getHours()).padStart(2,'0')}:${String(endDate.getMinutes()).padStart(2,'0')}`;
         }
         await calcDuration();
       }
@@ -5671,15 +5767,13 @@ async function editEntry(id) {
     } else {
       if (entry.work_start_at) {
         const startDate = new Date(Number(entry.work_start_at));
-        const localStart = new Date(startDate.getTime() - startDate.getTimezoneOffset() * 60000)
-          .toISOString().slice(0, 16);
-        document.getElementById('entry-start').value = localStart;
+        const wd = document.getElementById('entry-work-date');
+        if (wd) wd.value = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')}`;
+        document.getElementById('entry-start').value = `${String(startDate.getHours()).padStart(2,'0')}:${String(startDate.getMinutes()).padStart(2,'0')}`;
       }
       if (entry.work_end_at) {
         const endDate = new Date(Number(entry.work_end_at));
-        const localEnd = new Date(endDate.getTime() - endDate.getTimezoneOffset() * 60000)
-          .toISOString().slice(0, 16);
-        document.getElementById('entry-end').value = localEnd;
+        document.getElementById('entry-end').value = `${String(endDate.getHours()).padStart(2,'0')}:${String(endDate.getMinutes()).padStart(2,'0')}`;
       }
       await calcDuration();
       if (String(entry.work_category_name || '').trim() === '프로젝트업무') {

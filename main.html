@@ -759,14 +759,18 @@
 
                   <!-- 시작·종료 일시: 시간제·일일(일 단위)는 mount-hourly / 일일(시간 단위)는 JS로 mount-daily(투입 단위 바로 아래)로 이동 -->
                   <div id="entry-hourly-mount-hourly">
-                    <div id="entry-row-hourly-datetime" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end">
-                      <div>
-                        <label class="ep-label">업무 시작일시 <span class="required">*</span></label>
-                        <input type="datetime-local" class="ep-ctrl" id="entry-start" onchange="calcDuration()" required />
+                    <div id="entry-row-hourly-datetime" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;align-items:end">
+                      <div id="entry-work-date-wrap">
+                        <label class="ep-label">업무일자 <span class="required">*</span></label>
+                        <input type="date" class="ep-ctrl" id="entry-work-date" onchange="calcDuration()" required />
                       </div>
                       <div>
-                        <label class="ep-label">업무 종료일시 <span class="required">*</span></label>
-                        <input type="datetime-local" class="ep-ctrl" id="entry-end" onchange="calcDuration()" required />
+                        <label class="ep-label">업무 시작시간 <span class="required">*</span></label>
+                        <input type="text" class="ep-ctrl" id="entry-start" placeholder="HH:mm" onchange="calcDuration()" onfocus="this.select()" required />
+                      </div>
+                      <div>
+                        <label class="ep-label">업무 종료시간 <span class="required">*</span></label>
+                        <input type="text" class="ep-ctrl" id="entry-end" placeholder="HH:mm" onchange="calcDuration()" onfocus="this.select()" required />
                       </div>
                     </div>
                   </div>
@@ -796,7 +800,6 @@
                     <div id="entry-daily-period-hint" style="font-size:11px;color:var(--text-muted,#64748b);margin-top:6px;line-height:1.45">
                       <strong>일 단위</strong>는 기간 일수×8시간이 소요시간에 자동 반영됩니다(공휴일·주말은 빼지 않으니, 해당일이 끼이지 않게 기간을 나누어 주세요). <strong>시간 단위</strong>는 시간제와 같이 시작·종료 일시로 입력합니다. 제출 시 1·2차 승인 절차가 적용됩니다.
                     </div>
-                    <input type="hidden" id="entry-work-date" value="" />
                   </div>
 
                   <!-- 소요시간 -->
@@ -1712,7 +1715,7 @@
             </div>
             <div class="card">
               <div class="card-header" style="padding:12px 16px 11px">
-                <h2><i class="fas fa-list-ol" style="color:var(--primary)"></i>&nbsp; 자문건수 순위(전체)</h2>
+                <h2><i class="fas fa-award" style="color:var(--primary)"></i>&nbsp; 업무성과 지수(전체)</h2>
               </div>
               <div class="card-body" style="height:220px;position:relative;padding:10px 12px;overflow:auto" id="staff-rank-advisory-count">
                 <div style="text-align:center;padding:18px;color:var(--text-muted);font-size:13px">분석 실행 후 표시됩니다.</div>
@@ -1723,7 +1726,7 @@
           <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-bottom:12px;">
             <div class="card">
               <div class="card-header" style="padding:12px 16px 11px">
-                <h2><i class="fas fa-stopwatch" style="color:#f97316"></i>&nbsp; 자문 업무유형 평균소요(전체)</h2>
+                <h2><i class="fas fa-gauge-high" style="color:#f97316"></i>&nbsp; 효율성 지수(전체)</h2>
               </div>
               <div class="card-body" style="height:220px;position:relative;padding:10px 12px;overflow:auto" id="staff-rank-advisory-worktype-avg">
                 <div style="text-align:center;padding:18px;color:var(--text-muted);font-size:13px">분석 실행 후 표시됩니다.</div>
