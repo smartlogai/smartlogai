@@ -3005,6 +3005,7 @@ async function saveEntry(status) {
   }
   const startAt    = document.getElementById('entry-start').value;
   const endAt      = document.getElementById('entry-end').value;
+  const isSubmitSave = status === 'submitted';
   // ★ 실제 소요시간: 사용자 직접 입력(시간·분) 우선, 없으면 hidden(자동계산) 사용
   syncActualDuration(); // 저장 직전 한 번 더 동기화
   const duration   = parseInt(document.getElementById('entry-duration').value) || 0;
@@ -3033,12 +3034,16 @@ async function saveEntry(status) {
   // 유효성 검사
   if (!catId || !subId)   { Toast.warning('대분류와 소분류를 선택하세요.'); return; }
   if (!omitTeamPick && !teamId) { Toast.warning('수행 팀을 선택하세요.'); return; }
-  if (!startAt || !endAt) {
+  if (!startAt || (isSubmitSave && !endAt)) {
     const dailyNoRange = entryFormSheetType() === 'daily' && _entryDailyEffectivePeriodMode() === 'by_day_span';
-    Toast.warning(dailyNoRange ? '투입 시작일과 종료일을 선택하세요.' : '업무 시작/종료 일시를 입력하세요.');
+    if (dailyNoRange) {
+      Toast.warning('투입 시작일과 종료일을 선택하세요.');
+    } else {
+      Toast.warning(isSubmitSave ? '제출 시 업무 시작/종료 일시를 입력하세요.' : '업무 시작 일시를 입력하세요.');
+    }
     return;
   }
-  if (duration <= 0)      { Toast.warning('실제 소요시간을 입력하세요. (시간 또는 분에 숫자를 입력)'); return; }
+  if (isSubmitSave && duration <= 0)      { Toast.warning('제출 시 실제 소요시간을 입력하세요. (시간 또는 분에 숫자를 입력)'); return; }
   if (catTypeEff === 'client' && !description) {
     Toast.warning('수행 내용을 입력하세요.');
     if (_quill) _quill.focus();
@@ -3076,7 +3081,7 @@ async function saveEntry(status) {
 
   // ★ 시간 겹침 — 경고만 표시, 저장은 허용 (일일·일 단위만 생략, 일일·시간 단위는 시간제와 동일 검사)
   const skipOverlapDaily = entryFormSheetType() === 'daily' && _entryDailyEffectivePeriodMode() === 'by_day_span';
-  if (!skipOverlapDaily) {
+  if (!skipOverlapDaily && startAt && endAt) {
     const newStart = new Date(startAt).getTime();
     const newEnd   = new Date(endAt).getTime();
     const { overlap, conflict } = await checkTimeOverlap(newStart, newEnd, _editEntryId || '');
@@ -3226,6 +3231,8 @@ async function _doSaveEntry(status, approverInfo, autoApprove = false) {
       effClientId = (document.getElementById('entry-daily-project-client-id')?.value || '').trim();
       effClientName = (document.getElementById('entry-daily-project-client-name')?.value || '').trim();
     }
+    const startAtTs = startAt ? new Date(startAt).getTime() : null;
+    const endAtTs = endAt ? new Date(endAt).getTime() : null;
     const entryData = {
       user_id:   session.id,
       user_name: session.name,
@@ -3238,8 +3245,8 @@ async function _doSaveEntry(status, approverInfo, autoApprove = false) {
       work_subcategory_id:   persistSubId || null,
       work_subcategory_name: persistSubName,
       time_category:  catTypeEff,
-      work_start_at:  new Date(startAt).getTime(),
-      work_end_at:    new Date(endAt).getTime(),
+      work_start_at:  startAtTs,
+      work_end_at:    endAtTs,
       duration_minutes: duration,
       work_description:    description,
       work_description_md: descriptionMd,
@@ -5902,6 +5909,16 @@ async function _deleteExistingAtt(idx) {
 
 async function submitSingleEntry(id) {
   try {
+    const entry = await API.get('time_entries', id);
+    if (!entry || !entry.work_start_at || !entry.work_end_at) {
+      Toast.warning('제출하려면 업무 시작/종료 일시를 모두 입력하세요.');
+      return;
+    }
+    if ((Number(entry.duration_minutes) || 0) <= 0) {
+      Toast.warning('제출하려면 실제 소요시간을 입력하세요.');
+      return;
+    }
+
     await API.patch('time_entries', id, { status: 'submitted' });
     Toast.success('제출되었습니다.');
 
@@ -5909,7 +5926,6 @@ async function submitSingleEntry(id) {
     if (typeof createNotification === 'function') {
       try {
         const session = getSession();
-        const entry   = await API.get('time_entries', id);
         if (entry && entry.approver_id) {
           const summary = `${entry.client_name || entry.work_category_name} | ${entry.work_subcategory_name || ''}`;
           createNotification({
