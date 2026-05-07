@@ -14,7 +14,7 @@ let _approvalModalAtts = []; // 승인 모달 첨부파일 임시 저장 (index 
 
 /** Approval 상단 탭: timesheet | project (main.js lazy 버전과 맞출 것) */
 let _approvalMainTab = 'timesheet';
-const APPROVAL_PROJ_REG_SCRIPT_VER = '20260420approvalFix2';
+const APPROVAL_PROJ_REG_SCRIPT_VER = '20260507projRegFlowRole3';
 
 function _approvalApplyTabCountLabels(counts) {
   const data = counts || window.__approvalBadgeSplit || {};

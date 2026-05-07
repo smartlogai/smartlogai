@@ -250,8 +250,32 @@ async function _projRegRegistrantSnapshot(session) {
       name: String((picked && picked.name) || '').trim(),
     };
   };
+  const pickDirector = () => {
+    if (!activeUsers.length) return { id: '', name: '' };
+    const pickScore = (cand) => {
+      if (!cand || _projRegNormRole(cand.role) !== 'director') return -1;
+      let s = 0;
+      if (u && u.hq_id && cand.hq_id && String(u.hq_id) === String(cand.hq_id)) s += 100;
+      if (u && u.dept_id && cand.dept_id && String(u.dept_id) === String(cand.dept_id)) s += 40;
+      if (u && u.cs_team_id && cand.cs_team_id && String(u.cs_team_id) === String(cand.cs_team_id)) s += 20;
+      return s;
+    };
+    const sorted = activeUsers
+      .filter((x) => _projRegNormRole((x && x.role) || '') === 'director')
+      .map((x) => ({ x, score: pickScore(x) }))
+      .sort((a, b) => {
+        if (a.score !== b.score) return b.score - a.score;
+        return String(a.x.name || '').localeCompare(String(b.x.name || ''));
+      });
+    const picked = sorted.length ? sorted[0].x : null;
+    return {
+      id: String((picked && picked.id) || '').trim(),
+      name: String((picked && picked.name) || '').trim(),
+    };
+  };
 
   const topMgr = pickTopMgr();
+  const director = pickDirector();
   const isCcbRegistrant = _projRegIsCcbRegistrant(u, session);
 
   // 승인체계
@@ -271,8 +295,8 @@ async function _projRegRegistrantSnapshot(session) {
   }
   if (myRole === 'manager') {
     return {
-      pa1Id,
-      pa1Name,
+      pa1Id: director.id,
+      pa1Name: director.name,
       pa2Id: '',
       pa2Name: '',
       pa3Id: topMgr.id,
@@ -533,12 +557,14 @@ function _projRegNotifyProjectNextPending({ row, fromSession, step }) {
   if (typeof createNotification !== 'function' || !row) return;
   const n = Number(step || 0);
   const sid = String(fromSession?.id || '');
-  const targetId = n === 2
-    ? String(row.reg_pa2_id || '').trim()
-    : (n === 3 ? String(row.reg_pa3_id || '').trim() : '');
-  const targetName = n === 2
-    ? String(row.reg_pa2_name || '').trim()
-    : (n === 3 ? String(row.reg_pa3_name || '').trim() : '');
+  const eff = _projRegEffectiveApprovers(row);
+  const targetId = String((eff.chain && eff.chain[n - 1]) || '').trim();
+  const targetName = (
+    targetId && String(row.reg_pa1_id || '').trim() === targetId ? String(row.reg_pa1_name || '').trim()
+    : targetId && String(row.reg_pa2_id || '').trim() === targetId ? String(row.reg_pa2_name || '').trim()
+    : targetId && String(row.reg_pa3_id || '').trim() === targetId ? String(row.reg_pa3_name || '').trim()
+    : ''
+  );
   if (!targetId || sid === targetId) return;
   const codeTxt = String(row.project_code || '').trim();
   const nameTxt = String(row.project_name || '').trim();
@@ -3465,7 +3491,7 @@ async function projRegSubmitForApproval() {
   const has1 = !!snap.pa1Id;
   const has2 = !!snap.pa2Id;
   const has3 = !!snap.pa3Id;
-  const myRole = String(session.role || '').trim().toLowerCase();
+  const myRole = _projRegNormRole(session.role || '');
   const isStaffRegistrant = myRole === 'staff';
   const isManagerRegistrant = myRole === 'manager';
   const isDirectorRegistrant = myRole === 'director';

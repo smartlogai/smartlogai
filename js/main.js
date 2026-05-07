@@ -514,8 +514,8 @@ const _LAZY_SCRIPTS = {
   'master-csteams'    : 'js/master.js?v=20260419clientApproverRouting1',
   'users'             : 'js/users.js?v=20260416tsopt1',
   'permission-management': 'js/permission-management.js?v=20260501permSystemAdminAll1',
-  'project-register'  : 'js/project-register.js?v=20260420projRegFlowRole1',
-  'project-management': 'js/project-register.js?v=20260420projRegFlowRole1',
+  'project-register'  : 'js/project-register.js?v=20260507projRegFlowRole3',
+  'project-management': 'js/project-register.js?v=20260507projRegFlowRole3',
   'helpdesk'          : 'js/helpdesk.js?v=20260420helpdesk7',
 };
 const _lazyLoaded = {};  // 이미 로드된 파일 추적
