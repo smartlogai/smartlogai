@@ -253,13 +253,31 @@ function _menuPolicyKeyByPage(page) {
   return alias[p] || p;
 }
 
+function _isCeoSession(session) {
+  if (!session) return false;
+  const roleRaw = String(session.role || '').trim().toLowerCase();
+  const roleNorm = normalizeRoleName(session.role);
+  const jobTitle = String(session.job_title || '').trim().toLowerCase();
+  return roleRaw === 'ceo' || roleNorm === 'ceo' || jobTitle === 'ceo';
+}
+
+function _isSecurityMenuDeniedForSystemAdmin(session, menuKey) {
+  if (!session) return false;
+  if (normalizeRoleName(session.role) !== 'admin') return false;
+  if (_isCeoSession(session)) return false;
+  const key = String(menuKey || '').trim();
+  return key === 'project-deliverables' || key === 'analysis-staff' || key === 'analysis-labor';
+}
+
 function _authCanReadMenuSync(session, menuKey, fallbackAllow) {
+  if (_isSecurityMenuDeniedForSystemAdmin(session, menuKey)) return false;
   const hit = _permResolveAllow(session, menuKey, 'read');
   if (hit == null) return !!fallbackAllow;
   return !!hit;
 }
 
 function _authCanActionSync(session, menuKey, actionKey, fallbackAllow) {
+  if (_isSecurityMenuDeniedForSystemAdmin(session, menuKey)) return false;
   const hit = _permResolveAllow(session, menuKey, actionKey);
   if (hit == null) return !!fallbackAllow;
   return !!hit;
@@ -416,25 +434,32 @@ const Auth = {
   isTopMgr:   (s) => s && Auth.roleOf(s) === 'top_mgr',
   isManager:  (s) => s && Auth.roleOf(s) === 'manager',
   isStaff:    (s) => s && Auth.roleOf(s) === 'staff',
+  isCeo:      (s) => _isCeoSession(s),
   isFinanceSupport: (s) => _isFinanceSupportUser(s),
   isCcbDivision: (s) => _isCcbDivisionUser(s),
 
   /** 프로젝트 산출물 열람: 권한정책 우선, 레거시 사용자 플래그 fallback */
   canViewProjectDeliverables: (s) => {
     if (!s) return false;
+    if (Auth.isAdmin(s) && !Auth.isCeo(s)) return false;
     const byPolicy = _permResolveAllow(s, 'project-deliverables', 'read');
     if (byPolicy != null) return byPolicy;
     return !!s.can_view_project_deliverables;
   },
   canDownloadProjectDeliverables: (s) => {
     if (!s) return false;
+    if (Auth.isAdmin(s) && !Auth.isCeo(s)) return false;
     const byPolicy = _permResolveAllow(s, 'project-deliverables', 'download');
     if (byPolicy != null) return byPolicy;
     return !!s.can_view_project_deliverables;
   },
 
   /** 비용·인건비·배부 성격 UI — admin 제외, director·top_mgr 허용 */
-  canViewCostFinancials: (s) => !!(s && (Auth.isDirector(s) || Auth.isTopMgr(s))),
+  canViewCostFinancials: (s) => {
+    if (!s) return false;
+    if (Auth.isAdmin(s)) return Auth.isCeo(s);
+    return !!(Auth.isDirector(s) || Auth.isTopMgr(s));
+  },
 
   /** 인건비 설정·매출 업로드 등 (기존 admin 전용 버튼 → 경영층으로 이전) */
   canManageLaborCostSettings: (s) => !!(s && (Auth.isDirector(s) || Auth.isTopMgr(s))),
@@ -542,8 +567,12 @@ const Auth = {
 
   // 분석 열람: director + top_mgr + admin
   canViewAnalysis: (s) => s && (Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isAdmin(s)),
-  // 고과분석 열람: director + top_mgr + admin
-  canViewStaffAnalysis: (s) => s && (s.role === 'director' || s.role === 'top_mgr' || s.role === 'admin'),
+  // 고과분석 열람: director + top_mgr + (대표이사 admin)
+  canViewStaffAnalysis: (s) => {
+    if (!s) return false;
+    if (Auth.isAdmin(s)) return Auth.isCeo(s);
+    return s.role === 'director' || s.role === 'top_mgr';
+  },
   // 프로젝트 매출·이익분석 열람: director + top_mgr + admin
   canViewProjectProfitAnalysis: (s) => s && (s.role === 'director' || s.role === 'top_mgr' || s.role === 'admin'),
 
@@ -2329,9 +2358,16 @@ function _applyPolicyToMenuVisibility(session) {
 function setupMenuByRole(session) {
   const role        = session ? session.role : '';
   if (session && Auth.isAdmin(session)) {
-    // 시스템관리자 요청: 사이드바의 모든 메뉴를 항상 노출
+    // 시스템관리자: 기본 메뉴 노출 + 보안 메뉴는 대표이사만 허용
     Array.from(document.querySelectorAll('.nav-item[data-page]')).forEach((el) => {
       el.style.display = '';
+    });
+    const securedPages = ['project-deliverables'];
+    securedPages.forEach((p) => {
+      if (_isSecurityMenuDeniedForSystemAdmin(session, p)) {
+        const el = document.querySelector(`.nav-item[data-page="${p}"]`);
+        if (el) el.style.display = 'none';
+      }
     });
     const tsSection = document.getElementById('menu-timesheet-section');
     const refLabel = document.getElementById('nav-ref-data-ts-label');
