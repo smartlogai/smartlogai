@@ -62,6 +62,9 @@ window.addEventListener('DOMContentLoaded', async () => {
         ),
         // 역할도 최신 값 사용 — DB 값이 반드시 우선 (null·빈값이면 기존 세션 유지)
         role:      normalizeRoleName((freshUser.role && freshUser.role.trim()) ? freshUser.role : _session.role),
+        job_title: (freshUser.job_title && String(freshUser.job_title).trim())
+          ? String(freshUser.job_title).trim()
+          : (_session.job_title || ''),
         is_active: freshUser.is_active !== undefined ? freshUser.is_active : _session.is_active,
       };
       // 갱신된 세션 저장

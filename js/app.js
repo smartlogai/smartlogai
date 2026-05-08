@@ -255,9 +255,13 @@ function _menuPolicyKeyByPage(page) {
 
 function _isCeoSession(session) {
   if (!session) return false;
+  const email = String(session.email || '').trim().toLowerCase();
+  const name = String(session.name || '').trim();
   const roleRaw = String(session.role || '').trim().toLowerCase();
   const roleNorm = normalizeRoleName(session.role);
   const jobTitle = String(session.job_title || '').trim().toLowerCase();
+  if (email === 'hshan@hjcustoms.co.kr') return true;
+  if (name === '한휘선') return true;
   return roleRaw === 'ceo' || roleNorm === 'ceo' || jobTitle === 'ceo';
 }
 
