@@ -270,6 +270,7 @@ function _isSecurityMenuDeniedForSystemAdmin(session, menuKey) {
 }
 
 function _authCanReadMenuSync(session, menuKey, fallbackAllow) {
+  if (_isCeoSession(session)) return true;
   if (_isSecurityMenuDeniedForSystemAdmin(session, menuKey)) return false;
   const hit = _permResolveAllow(session, menuKey, 'read');
   if (hit == null) return !!fallbackAllow;
@@ -277,6 +278,7 @@ function _authCanReadMenuSync(session, menuKey, fallbackAllow) {
 }
 
 function _authCanActionSync(session, menuKey, actionKey, fallbackAllow) {
+  if (_isCeoSession(session)) return true;
   if (_isSecurityMenuDeniedForSystemAdmin(session, menuKey)) return false;
   const hit = _permResolveAllow(session, menuKey, actionKey);
   if (hit == null) return !!fallbackAllow;
@@ -441,6 +443,7 @@ const Auth = {
   /** 프로젝트 산출물 열람: 권한정책 우선, 레거시 사용자 플래그 fallback */
   canViewProjectDeliverables: (s) => {
     if (!s) return false;
+    if (Auth.isCeo(s)) return true;
     if (Auth.isAdmin(s) && !Auth.isCeo(s)) return false;
     const byPolicy = _permResolveAllow(s, 'project-deliverables', 'read');
     if (byPolicy != null) return byPolicy;
@@ -448,6 +451,7 @@ const Auth = {
   },
   canDownloadProjectDeliverables: (s) => {
     if (!s) return false;
+    if (Auth.isCeo(s)) return true;
     if (Auth.isAdmin(s) && !Auth.isCeo(s)) return false;
     const byPolicy = _permResolveAllow(s, 'project-deliverables', 'download');
     if (byPolicy != null) return byPolicy;
@@ -2379,6 +2383,11 @@ function setupMenuByRole(session) {
     if (smartlogLabel) smartlogLabel.style.display = '';
     if (mgmtSection) mgmtSection.style.display = '';
     if (settingsSection) settingsSection.style.display = '';
+    _applyPolicyToMenuVisibility(session);
+    _loadPermissionPoliciesForSession(session).then(() => {
+      _applyPolicyToMenuVisibility(session);
+      refreshSidebarSectionCollapse();
+    }).catch(() => {});
     _showNoApproverBanner(false);
     refreshSidebarSectionCollapse();
     return;
