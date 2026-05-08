@@ -2328,6 +2328,25 @@ function _applyPolicyToMenuVisibility(session) {
 
 function setupMenuByRole(session) {
   const role        = session ? session.role : '';
+  if (session && Auth.isAdmin(session)) {
+    // 시스템관리자 요청: 사이드바의 모든 메뉴를 항상 노출
+    Array.from(document.querySelectorAll('.nav-item[data-page]')).forEach((el) => {
+      el.style.display = '';
+    });
+    const tsSection = document.getElementById('menu-timesheet-section');
+    const refLabel = document.getElementById('nav-ref-data-ts-label');
+    const smartlogLabel = document.getElementById('menu-smartlog-group');
+    const mgmtSection = document.getElementById('menu-management-section');
+    const settingsSection = document.querySelector('.menu-settings-section');
+    if (tsSection) tsSection.style.display = '';
+    if (refLabel) refLabel.style.display = '';
+    if (smartlogLabel) smartlogLabel.style.display = '';
+    if (mgmtSection) mgmtSection.style.display = '';
+    if (settingsSection) settingsSection.style.display = '';
+    _showNoApproverBanner(false);
+    refreshSidebarSectionCollapse();
+    return;
+  }
   const hasApprover = Auth.hasApprover(session);      // staff에서 승인자 지정 여부
   const isStaffWithApprover  = Auth.isStaff(session) && hasApprover;
   const isStaffTimesheetTarget = Auth.isStaff(session) && (
