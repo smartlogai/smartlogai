@@ -478,6 +478,7 @@ const Auth = {
   // 타임시트 작성: 승인자 지정 + 타임시트 대상 staff OR 타임시트 대상 manager
   canWriteEntry: (s) => {
     if (!s) return false;
+    if (Auth.isCeo(s)) return s.is_timesheet_target !== false;
     const isDailyDept = Auth.preferredSheetType(s) === 'daily';
     if (s.role === 'staff') return !!(s.approver_id) && (isDailyDept || s.is_timesheet_target !== false);
     if (s.role === 'manager') return isDailyDept || s.is_timesheet_target !== false;
@@ -497,6 +498,7 @@ const Auth = {
   timesheetDailyEnabled: (s) => {
     if (!s) return false;
     if (Auth.preferredSheetType(s) !== 'daily') return false;
+    if (Auth.isCeo(s)) return s.is_timesheet_target !== false;
     if (s.role === 'staff') return !!s.approver_id;
     return s.role === 'manager' || s.role === 'director';
   },
