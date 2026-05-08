@@ -492,13 +492,14 @@ const Auth = {
   timesheetHourlyEnabled: (s) => {
     if (!s) return false;
     if (s.is_timesheet_target === false) return false;
+    if (Auth.isCeo(s)) return s.timesheet_hourly !== false;
     return Auth.preferredSheetType(s) === 'hourly';
   },
   /** Daily 시트 메뉴·진입 (소속 기반 sheet_type + 타임시트 대상) */
   timesheetDailyEnabled: (s) => {
     if (!s) return false;
+    if (Auth.isCeo(s)) return s.is_timesheet_target !== false && s.timesheet_daily === true;
     if (Auth.preferredSheetType(s) !== 'daily') return false;
-    if (Auth.isCeo(s)) return s.is_timesheet_target !== false;
     if (s.role === 'staff') return !!s.approver_id;
     return s.role === 'manager' || s.role === 'director';
   },
@@ -511,6 +512,13 @@ const Auth = {
   /** 사용자 기본 시트 타입 (소속 우선, 없으면 users.sheet_type 사용) */
   preferredSheetType: (s) => {
     if (!s) return 'hourly';
+    if (Auth.isCeo(s)) {
+      const allowDaily = s.timesheet_daily === true;
+      const allowHourly = s.timesheet_hourly !== false;
+      if (allowDaily && !allowHourly) return 'daily';
+      if (!allowDaily && allowHourly) return 'hourly';
+      if (allowDaily) return 'daily';
+    }
     const deptBased = Auth.sheetTypeByDeptName(s.dept_name || '');
     if (deptBased) return deptBased;
     const st = String(s.sheet_type || '').toLowerCase();
