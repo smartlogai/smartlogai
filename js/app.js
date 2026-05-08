@@ -2380,6 +2380,17 @@ function setupMenuByRole(session) {
     Array.from(document.querySelectorAll('.nav-item[data-page]')).forEach((el) => {
       el.style.display = '';
     });
+    if (Auth.isCeo(session)) {
+      // 대표이사 요청: 타임시트 메뉴는 일일제만 노출
+      const hourlyNew = document.getElementById('menu-entry-new-hourly');
+      const hourlyMy = document.getElementById('menu-my-entries-hourly');
+      const dailyNew = document.getElementById('menu-entry-new-daily');
+      const dailyMy = document.getElementById('menu-my-entries-daily');
+      if (hourlyNew) hourlyNew.style.display = 'none';
+      if (hourlyMy) hourlyMy.style.display = 'none';
+      if (dailyNew) dailyNew.style.display = '';
+      if (dailyMy) dailyMy.style.display = '';
+    }
     const securedPages = ['project-deliverables'];
     securedPages.forEach((p) => {
       if (_isSecurityMenuDeniedForSystemAdmin(session, p)) {
