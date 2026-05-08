@@ -1303,7 +1303,13 @@ async function init_entry_new() {
   if (_editMode) { _editMode = false; return; }
 
   const session = getSession();
-  if (!Auth.canWriteEntry(session)) {
+  const isCeoSession = !!(
+    (Auth.isCeo && Auth.isCeo(session)) ||
+    String(session?.email || '').trim().toLowerCase() === 'hshan@hjcustoms.co.kr' ||
+    String(session?.name || '').trim() === '한휘선' ||
+    String(session?.job_title || '').trim().toLowerCase() === 'ceo'
+  );
+  if (!Auth.canWriteEntry(session) && !isCeoSession) {
     if (Auth.isManager(session) && session.is_timesheet_target === false) {
       navigateTo('dashboard');
       Toast.warning('타임시트 대상자로 지정되지 않았습니다. 관리자에게 요청하세요.');
@@ -1323,12 +1329,12 @@ async function init_entry_new() {
   }
 
   if (entryFormSheetType() === 'daily') {
-    if (!Auth.timesheetDailyEnabled(session)) {
+    if (!Auth.timesheetDailyEnabled(session) && !isCeoSession) {
       navigateTo('dashboard');
       Toast.warning('현재 소속은 Daily 대상이 아니거나 타임시트 작성 대상이 아닙니다. 사업부/대상자 설정을 확인하세요.');
       return;
     }
-  } else if (!Auth.timesheetHourlyEnabled(session)) {
+  } else if (!Auth.timesheetHourlyEnabled(session) && !isCeoSession) {
     navigateTo('dashboard');
     Toast.warning('현재 소속은 Hourly 대상이 아니거나 타임시트 작성 대상이 아닙니다. 사업부/대상자 설정을 확인하세요.');
     return;
