@@ -11,6 +11,10 @@ let _approvalProjTarget = null;
 let _approvalPage = 1;
 const APPROVAL_PER_PAGE = 20;
 let _approvalModalAtts = []; // 승인 모달 첨부파일 임시 저장 (index 기반 다운로드용)
+const APPROVAL_DEPT_OPTIONS = ['COB', 'CRB', 'CCB'];
+let _approvalCsTeamsByDept = { COB: [], CRB: [], CCB: [] };
+let _approvalAllCsTeamNames = [];
+let _approvalDeptByCsTeam = {};
 
 /** Approval 상단 탭: timesheet | project (main.js lazy 버전과 맞출 것) */
 let _approvalMainTab = 'timesheet';
@@ -654,6 +658,135 @@ function _approvalSyncFilterLayoutClass(showTeam) {
   bar.classList.toggle('approval-layout--team-hidden', !showTeam);
 }
 
+function _approvalNormText(v) {
+  return String(v || '').trim();
+}
+
+function _approvalFillSelect(el, placeholder, values, selected = '') {
+  if (!el) return;
+  const rows = Array.from(new Set((values || []).map(_approvalNormText).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ko'));
+  el.innerHTML = `<option value="">${placeholder}</option>`;
+  rows.forEach((name) => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    el.appendChild(opt);
+  });
+  el.value = selected && rows.includes(selected) ? selected : '';
+}
+
+function _approvalNormDept(v) {
+  return String(v || '').trim().toUpperCase();
+}
+
+function _approvalBuildCsTeamMap(rows) {
+  const byDept = { COB: [], CRB: [], CCB: [] };
+  const all = [];
+  const byTeam = {};
+  (rows || []).forEach((r) => {
+    if (!r || r.deleted === true) return;
+    const teamName = _approvalNormText(r.cs_team_name || r.team_name);
+    if (!teamName) return;
+    all.push(teamName);
+    const deptKey = _approvalNormDept(r.dept_name);
+    if (byDept[deptKey]) {
+      byDept[deptKey].push(teamName);
+      byTeam[_approvalNormText(teamName)] = deptKey;
+    }
+  });
+  return { byDept, all, byTeam };
+}
+
+function _approvalSyncCsTeamOptionsByDept() {
+  const hqEl = document.getElementById('filter-approval-hq');
+  const teamEl = document.getElementById('filter-approval-team');
+  if (!teamEl) return;
+  const prev = _approvalNormText(teamEl.value);
+  const deptKey = _approvalNormDept(hqEl && hqEl.value);
+  const names = deptKey && Array.isArray(_approvalCsTeamsByDept[deptKey])
+    ? _approvalCsTeamsByDept[deptKey]
+    : _approvalAllCsTeamNames;
+  _approvalFillSelect(teamEl, '전체 팀', names, prev);
+}
+
+function _approvalBuildUserMap(users) {
+  const m = new Map();
+  (users || []).forEach((u) => {
+    if (!u) return;
+    const id1 = String(u.id || '').trim();
+    const id2 = String(u.user_id || '').trim();
+    if (id1) m.set(id1, u);
+    if (id2) m.set(id2, u);
+  });
+  return m;
+}
+
+function _approvalWriterUser(entry, userMap) {
+  const uid = String(entry && entry.user_id || '').trim();
+  if (!uid || !(userMap instanceof Map)) return null;
+  return userMap.get(uid) || null;
+}
+
+function _approvalWriterDept(entry, userMap) {
+  const u = _approvalWriterUser(entry, userMap);
+  if (u) return _approvalNormText(u.dept_name);
+  return _approvalNormText((entry && (entry.user_dept_name || entry.dept_name)) || '');
+}
+
+function _approvalWriterHq(entry, userMap) {
+  const u = _approvalWriterUser(entry, userMap);
+  if (u) return _approvalNormText(u.hq_name);
+  return _approvalNormText((entry && (entry.user_hq_name || entry.hq_name)) || '');
+}
+
+function _approvalWriterTeam(entry, userMap) {
+  const u = _approvalWriterUser(entry, userMap);
+  if (u) {
+    return _approvalNormText(u.cs_team_name || u.team_name);
+  }
+  return _approvalNormText((entry && (entry.user_team_name || entry.cs_team_name || entry.team_name)) || '');
+}
+
+function _approvalMatchOrgFilter(entry, orgFilter, userMap) {
+  const hqVal = _approvalNormText(orgFilter && orgFilter.hq);
+  const teamVal = _approvalNormText(orgFilter && orgFilter.team);
+  const hqScope = _approvalNormText(orgFilter && orgFilter.hqScope) || 'hq';
+  if (!hqVal && !teamVal) return true;
+  const writerHq = _approvalWriterHq(entry, userMap);
+  const writerDept = _approvalWriterDept(entry, userMap);
+  const writerTeam = _approvalWriterTeam(entry, userMap);
+
+  const hqTokens = [
+    writerHq,
+    entry && entry.hq_name,
+    entry && entry.user_hq_name,
+  ].map(_approvalNormText).filter(Boolean);
+  const deptTokens = [
+    writerDept,
+    entry && entry.dept_name,
+    entry && entry.user_dept_name,
+  ].map(_approvalNormText).filter(Boolean);
+  const teamTokens = [
+    writerTeam,
+    entry && entry.team_name,
+    entry && entry.user_team_name,
+    entry && entry.cs_team_name,
+  ].map(_approvalNormText).filter(Boolean);
+
+  if (hqVal) {
+    if (hqScope === 'dept') {
+      const deptKey = _approvalNormDept(hqVal);
+      const deptMatched = deptTokens.some((t) => _approvalNormDept(t) === deptKey);
+      const teamMatched = teamTokens.some((t) => _approvalNormDept(_approvalDeptByCsTeam[_approvalNormText(t)]) === deptKey);
+      if (!deptMatched && !teamMatched) return false;
+    } else {
+      if (!hqTokens.includes(hqVal)) return false;
+    }
+  }
+  if (teamVal && !teamTokens.includes(teamVal)) return false;
+  return true;
+}
+
 /**
  * 기간 필터 — 업무일만 보면「어제 근무 → 오늘 최종승인」이 ‘당일’에서 빠짐.
  * 업무 시작·종료, 수정·등록, 1차·최종 승인 시각 중 하나라도 범위 안이면 통과 (승인자·Admin 공통).
@@ -707,20 +840,34 @@ async function _approvalPaginateTimeEntries(filterFragment) {
   return out;
 }
 
-async function _scopeTimeEntriesForApproval(entries, session, teamFilterForAdmin) {
+async function _scopeTimeEntriesForApproval(entries, session, orgFilter, userMap) {
   if (Auth.canViewAll(session)) {
-    if (!teamFilterForAdmin) return entries;
-    return entries.filter(e => e.team_name === teamFilterForAdmin);
+    return entries.filter((e) => _approvalMatchOrgFilter(e, orgFilter || {}, userMap || null));
   }
   if (Auth.isDirector(session)) {
     const allUsers = await Master.users();
     const scopeUserIds = new Set(
       allUsers.filter(u => Auth.scopeMatch(session, u)).map(u => String(u.id))
     );
+    const myNameNorm = String(session.name || '').toLowerCase().replace(/\s+/g, '').trim();
+    const byName = (v) => String(v || '').toLowerCase().replace(/\s+/g, '').trim() === myNameNorm;
     return entries.filter(e =>
       scopeUserIds.has(String(e.user_id)) ||
       String(e.reviewer2_id) === String(session.id) ||
-      String(e.approver_id) === String(session.id)
+      String(e.approver_id) === String(session.id) ||
+      byName(e.reviewer2_name) ||
+      byName(e.approver_name)
+    );
+  }
+  if (Auth.canApprove2nd(session)) {
+    const myId = String(session.id || '');
+    const myNameNorm = String(session.name || '').toLowerCase().replace(/\s+/g, '').trim();
+    const byName = (v) => String(v || '').toLowerCase().replace(/\s+/g, '').trim() === myNameNorm;
+    return entries.filter(e =>
+      String(e.reviewer2_id || '') === myId ||
+      String(e.approver_id || '') === myId ||
+      byName(e.reviewer2_name) ||
+      byName(e.approver_name)
     );
   }
   if (Auth.canApprove(session)) {
@@ -843,22 +990,96 @@ async function init_approval() {
     }
   }
 
-  // admin: 팀 필터 표시 (전체 열람 권한)
-  // director: 소속 사업부/본부/고객지원팀 범위 안내 표시
-  if (Auth.canViewAll(session)) {
-    const teams = await Master.teams();
-    const teamEl = document.getElementById('filter-approval-team');
-    teamEl.innerHTML = '<option value="">전체 팀</option>';
-    teams.forEach(t => {
-      const opt = document.createElement('option');
-      opt.value = t.team_name;
-      opt.textContent = t.team_name;
-      teamEl.appendChild(opt);
-    });
-    document.getElementById('filter-approval-team-group').style.display = '';
+  // 조직 필터(본부/팀): 역할별 노출/고정 정책
+  const hqGroupEl = document.getElementById('filter-approval-hq-group');
+  const hqEl = document.getElementById('filter-approval-hq');
+  const hqLabelEl = document.getElementById('filter-approval-hq-label');
+  const teamGroupEl = document.getElementById('filter-approval-team-group');
+  const teamEl = document.getElementById('filter-approval-team');
+  const teamLabelEl = document.getElementById('filter-approval-team-label');
+  if (hqEl) hqEl.dataset.scopeType = 'hq';
+
+  if (Auth.canViewAll(session) || Auth.isCeo(session)) {
+    if (hqLabelEl) hqLabelEl.textContent = '사업부';
+    if (hqEl) {
+      _approvalFillSelect(hqEl, '전체 사업부', APPROVAL_DEPT_OPTIONS);
+      hqEl.disabled = false;
+      hqEl.dataset.scopeType = 'dept';
+    }
+    let csTeams = [];
+    try {
+      const r = await API.list('cs_teams', { limit: 500 });
+      csTeams = (r && r.data) ? r.data : [];
+    } catch (_) { csTeams = []; }
+    const mapped = _approvalBuildCsTeamMap(csTeams);
+    _approvalCsTeamsByDept = mapped.byDept;
+    _approvalAllCsTeamNames = mapped.all;
+    _approvalDeptByCsTeam = mapped.byTeam;
+    if (teamLabelEl) teamLabelEl.textContent = '고객지원팀';
+    if (teamEl) {
+      teamEl.disabled = false;
+      _approvalSyncCsTeamOptionsByDept();
+    }
+    if (hqEl && !hqEl.dataset.deptBind) {
+      hqEl.dataset.deptBind = '1';
+      hqEl.addEventListener('change', () => {
+        _approvalPage = 1;
+        _approvalSyncCsTeamOptionsByDept();
+      });
+    }
+    if (hqGroupEl) hqGroupEl.style.display = '';
+    if (teamGroupEl) teamGroupEl.style.display = '';
     _approvalSyncFilterLayoutClass(true);
+  } else if (Auth.isManager(session)) {
+    const myTeam = _approvalNormText(session.cs_team_name || session.team_name);
+    if (teamLabelEl) teamLabelEl.textContent = '소속팀';
+    if (teamEl) {
+      teamEl.innerHTML = '';
+      const opt = document.createElement('option');
+      opt.value = myTeam;
+      opt.textContent = myTeam || '소속팀 미지정';
+      teamEl.appendChild(opt);
+      teamEl.value = myTeam;
+      teamEl.disabled = true;
+    }
+    if (hqGroupEl) hqGroupEl.style.display = 'none';
+    if (teamGroupEl) teamGroupEl.style.display = '';
+    _approvalSyncFilterLayoutClass(true);
+  } else if (Auth.isDirector(session)) {
+    const myHq = _approvalNormText(session.hq_name);
+    if (hqLabelEl) hqLabelEl.textContent = '소속본부';
+    if (hqEl) {
+      hqEl.innerHTML = '';
+      const opt = document.createElement('option');
+      opt.value = myHq;
+      opt.textContent = myHq || '소속본부 미지정';
+      hqEl.appendChild(opt);
+      hqEl.value = myHq;
+      hqEl.disabled = true;
+      hqEl.dataset.scopeType = 'hq';
+    }
+    if (hqGroupEl) hqGroupEl.style.display = '';
+    if (teamGroupEl) teamGroupEl.style.display = 'none';
+    _approvalSyncFilterLayoutClass(false);
+  } else if (Auth.isTopMgr(session)) {
+    const myDept = _approvalNormText(session.dept_name);
+    if (hqLabelEl) hqLabelEl.textContent = '소속사업부';
+    if (hqEl) {
+      hqEl.innerHTML = '';
+      const opt = document.createElement('option');
+      opt.value = myDept;
+      opt.textContent = myDept || '소속사업부 미지정';
+      hqEl.appendChild(opt);
+      hqEl.value = myDept;
+      hqEl.disabled = true;
+      hqEl.dataset.scopeType = 'dept';
+    }
+    if (hqGroupEl) hqGroupEl.style.display = '';
+    if (teamGroupEl) teamGroupEl.style.display = 'none';
+    _approvalSyncFilterLayoutClass(false);
   } else {
-    document.getElementById('filter-approval-team-group').style.display = 'none';
+    if (hqGroupEl) hqGroupEl.style.display = 'none';
+    if (teamGroupEl) teamGroupEl.style.display = 'none';
     _approvalSyncFilterLayoutClass(false);
   }
 
@@ -949,9 +1170,13 @@ async function loadApprovalList() {
   const dateFrom     = document.getElementById('filter-approval-date-from').value;
   const dateTo       = document.getElementById('filter-approval-date-to').value;
   const staffKw      = (document.getElementById('filter-approval-staff').value || '').trim().toLowerCase();
-  const teamFilter   = Auth.canViewAll(session)
-    ? document.getElementById('filter-approval-team').value
-    : '';
+  const hqEl = document.getElementById('filter-approval-hq');
+  const teamEl = document.getElementById('filter-approval-team');
+  const orgFilter = {
+    hq: _approvalNormText(hqEl && hqEl.value),
+    team: _approvalNormText(teamEl && teamEl.value),
+    hqScope: _approvalNormText(hqEl && hqEl.dataset && hqEl.dataset.scopeType) || 'hq',
+  };
   const clientFilter = (typeof ClientSearchSelect !== 'undefined')
     ? (ClientSearchSelect.getValue('filter-approval-client-wrap')?.id || '')
     : '';
@@ -960,6 +1185,8 @@ async function loadApprovalList() {
   const status       = document.getElementById('filter-approval-status').value;
 
   try {
+    const allUsers = await Master.users().catch(() => []);
+    const usersById = _approvalBuildUserMap(allUsers);
     const statusFrag = status
       ? `status=eq.${encodeURIComponent(status)}`
       : 'status=neq.draft';
@@ -990,8 +1217,12 @@ async function loadApprovalList() {
     let entries = await _scopeTimeEntriesForApproval(
       allFetched,
       session,
-      Auth.canViewAll(session) ? teamFilter : ''
+      orgFilter,
+      usersById
     );
+    if (!Auth.canViewAll(session) && (orgFilter.hq || orgFilter.team)) {
+      entries = entries.filter((e) => _approvalMatchOrgFilter(e, orgFilter, usersById));
+    }
 
     if (entries.length === 0 && allFetched.length > 0 && Auth.canApprove(session)) {
       // approver_id 매칭 없음: 정상 예외 조건 (승인자 미지정 등)
@@ -1043,19 +1274,22 @@ async function loadApprovalList() {
       for (const e of entries) await _apvAttachProjectSubcategory(e);
     }
 
-    // 2차 승인자(director) 화면: 본인이 처리/처리해야 하는 건만 노출
+    // 2차 승인자(본부장/사업부장) 화면: 본인이 처리/처리해야 하는 건만 노출
     // - 2차 대기: submitted | pre_approved 이면서 reviewer2_id 또는 approver_id가 본인
     //   (openApprovalModal·사이드바 배지 waitCount와 동일 — 팀장 본인 건 submitted 포함)
     // - 본인 반려: rejected 이면서 reviewer_id가 본인(2차 반려)
     // - 본인 승인: approved 이면서 reviewer_id가 본인(2차 최종승인)
-    // ※ 1차에서 최종승인된 내부업무(approved, reviewer_id=manager)는 자연스럽게 제외됨
+    // ※ 팀장 제출건 누락 방지를 위해 대분류 제한(needsSecondApproval)은 적용하지 않음
     if (Auth.canApprove2nd(session)) {
       const myId = String(session.id);
+      const myNameNorm = String(session.name || '').toLowerCase().replace(/\s+/g, '').trim();
+      const hitByName = (e) =>
+        String(e.reviewer2_name || '').toLowerCase().replace(/\s+/g, '').trim() === myNameNorm ||
+        String(e.approver_name || '').toLowerCase().replace(/\s+/g, '').trim() === myNameNorm;
       entries = entries.filter(e => {
-        if (!needsSecondApproval(e)) return false;
         const st = e.status;
         if (st === 'submitted' || st === 'pre_approved') {
-          return String(e.reviewer2_id || '') === myId || String(e.approver_id || '') === myId;
+          return String(e.reviewer2_id || '') === myId || String(e.approver_id || '') === myId || hitByName(e);
         }
         if (st === 'rejected') return String(e.reviewer_id || '') === myId;
         if (st === 'approved') return String(e.reviewer_id || '') === myId;
@@ -1130,38 +1364,9 @@ async function loadApprovalList() {
       });
     }
 
-    // ★ waitCount: 기간 필터와 무관하게 역할 범위 전체 기준으로 계산
-    //   (사이드바 배지와 동일한 기준 → 불일치 방지)
-    const session2 = getSession();
-    const myId2 = String(session2.id);
-    let waitCount = 0;
-
-    const pendingScoped = await _scopeTimeEntriesForApproval(pendingAll, session2, '');
-    if (Auth.isAdmin(session2)) {
-      waitCount = pendingScoped.length;
-    } else if (Auth.canApprove1st(session2)) {
-      waitCount = pendingScoped.filter(e =>
-        (e.status === 'submitted' || e.status === 'pre_approved') &&
-        (String(e.approver_id) === myId2 || String(e.pre_approver_id) === myId2)
-      ).length;
-    } else if (Auth.canApprove2nd(session2)) {
-      const ccbFirst = pendingScoped.filter(e =>
-        e.status === 'submitted' &&
-        _approvalIsCcbEntry(e) &&
-        String(e.approver_id || '') === myId2
-      ).length;
-      waitCount = pendingScoped.filter(e =>
-        needsSecondApproval(e) &&
-        (e.status === 'pre_approved' || e.status === 'submitted') &&
-        (String(e.reviewer2_id) === myId2 || String(e.approver_id) === myId2) &&
-        !(e.status === 'submitted' && _approvalIsCcbEntry(e) && String(e.approver_id || '') === myId2)
-      ).length + ccbFirst;
-    } else {
-      waitCount = pendingScoped.filter(e =>
-        (e.status === 'submitted' || e.status === 'pre_approved') &&
-        String(e.approver_id) === myId2
-      ).length;
-    }
+    // 목록 헤더/탭 카운트는 "현재 필터 결과"와 동일 기준으로 표기한다.
+    // (기존 전체 대기 기준 카운트는 목록 0건과 불일치하여 혼선 유발)
+    const waitCount = entries.length;
     const badge = document.getElementById('approval-count-badge');
     _approvalSetTabCountPartial('timesheet', waitCount);
     if (waitCount > 0) {
@@ -1257,7 +1462,7 @@ async function loadApprovalList() {
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12.5px;font-weight:600" title="${Utils.escHtml(e.user_name||'')}">${Utils.escHtml(e.user_name||'—')}</span>
           </td>
           <td style="padding:0 8px">
-            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12px;color:var(--text-secondary)" title="${Utils.escHtml(e.team_name||'')}">${Utils.escHtml(e.team_name||'—')}</span>
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12px;color:var(--text-secondary)" title="${Utils.escHtml(_approvalWriterTeam(e, usersById) || e.team_name || '')}">${Utils.escHtml(_approvalWriterTeam(e, usersById) || e.team_name || '—')}</span>
           </td>
           <td style="padding:0 10px">${clientHtml}</td>
           <td style="padding:0 10px">${categoryHtml}</td>
@@ -1298,8 +1503,14 @@ function resetApprovalFilter() {
     stEl.value = Auth.canApprove2nd(session) && !Auth.isAdmin(session) ? '' : 'submitted';
   }
   document.getElementById('filter-approval-staff').value = '';
+  const hqEl = document.getElementById('filter-approval-hq');
   const teamEl = document.getElementById('filter-approval-team');
-  if (teamEl) teamEl.value = '';
+  if (hqEl && !hqEl.disabled) {
+    hqEl.value = '';
+    _approvalSyncCsTeamOptionsByDept();
+  } else if (teamEl && !teamEl.disabled) {
+    teamEl.value = '';
+  }
   if (typeof ClientSearchSelect !== 'undefined') ClientSearchSelect.clear('filter-approval-client-wrap');
   const catEl = document.getElementById('filter-approval-category');
   if (catEl) catEl.value = '';
@@ -1762,12 +1973,19 @@ async function openApprovalModal(entryId, focusReject = false) {
 
     const session = getSession ? getSession() : null;
 
-    // ── 분기: 1차(manager) vs 2차(director/admin 열람) vs 상세보기
+    // ── 분기: 1차(manager) vs 2차(본부장/사업부장) vs 상세보기
     const is1st = _approvalCanDoFirst(session, entry);
-    // director: pre_approved 건 OR reviewer2_id로 지정된 submitted 건 (2차 대상 대분류만)
-    const is2nd = Auth.canApprove2nd(session) && needsSecondApproval(entry) && (
+    // 2차 승인자: pre_approved 건 OR 본인에게 지정된 submitted 건
+    // (팀장 제출건 누락 방지를 위해 대분류 제한 없이 처리)
+    const myIdNorm = String(session && session.id || '');
+    const myNameNorm = String(session && session.name || '').toLowerCase().replace(/\s+/g, '').trim();
+    const hitReviewer2 = String(entry.reviewer2_id || '') === myIdNorm ||
+      String(entry.approver_id || '') === myIdNorm ||
+      String(entry.reviewer2_name || '').toLowerCase().replace(/\s+/g, '').trim() === myNameNorm ||
+      String(entry.approver_name || '').toLowerCase().replace(/\s+/g, '').trim() === myNameNorm;
+    const is2nd = Auth.canApprove2nd(session) && (
       entry.status === 'pre_approved' ||
-      (entry.status === 'submitted' && String(entry.reviewer2_id) === String(session.id))
+      (entry.status === 'submitted' && hitReviewer2)
     );
 
     if (is1st) {

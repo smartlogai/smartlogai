@@ -534,7 +534,7 @@ const Auth = {
   // 1차 승인: manager (수행방식 확인 + 형식 검증)
   canApprove1st: (s) => s && Auth.isManager(s),
   // 2차 최종 승인: director (품질평가 + 전문성 + DB저장)
-  canApprove2nd: (s) => s && Auth.isDirector(s),
+  canApprove2nd: (s) => s && (Auth.isDirector(s) || Auth.isTopMgr(s)),
   // 하위 호환: 기존 canApprove = 1차 승인 권한과 동일
   canApprove: (s) => s && Auth.isManager(s),
 

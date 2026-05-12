@@ -26,7 +26,7 @@
   <script src="https://cdn.jsdelivr.net/npm/turndown/dist/turndown.js" defer></script>
   <!-- turndown-plugin-gfm: 테이블 등 GFM 확장 지원 -->
   <script src="https://cdn.jsdelivr.net/npm/turndown-plugin-gfm/dist/turndown-plugin-gfm.js" defer></script>
-  <link rel="stylesheet" href="css/style.css?v=20260420projRegFocus2" />
+  <link rel="stylesheet" href="css/style.css?v=20260512approvalFilterLayout7" />
   <!-- Chart.js: 대시보드/분석에서 사용 → defer로 DOM 파싱 차단 방지 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
   <!-- ★ 무거운 라이브러리는 필요한 시점에 동적으로 로드 (초기 blocking 제거) -->
@@ -1316,45 +1316,55 @@
               <button type="button" class="approval-quick-range-btn" data-approval-range="month">1개월</button>
             </div>
           </div>
-          <div class="filter-group filter-group-modern-compact" id="filter-approval-team-group" style="display:none">
-            <span class="filter-label">팀</span>
-            <select class="filter-control" id="filter-approval-team" style="width:110px">
-              <option value="">전체</option>
-            </select>
+          <div class="approval-filter-row approval-filter-row-top">
+            <div class="filter-group filter-group-modern-compact" id="filter-approval-hq-group" style="display:none">
+              <span class="filter-label" id="filter-approval-hq-label">본부</span>
+              <select class="filter-control" id="filter-approval-hq" style="width:120px">
+                <option value="">전체 사업부</option>
+              </select>
+            </div>
+            <div class="filter-group filter-group-modern-compact" id="filter-approval-team-group" style="display:none">
+              <span class="filter-label" id="filter-approval-team-label">팀</span>
+              <select class="filter-control" id="filter-approval-team" style="width:110px">
+                <option value="">전체</option>
+              </select>
+            </div>
+            <div class="filter-group filter-group-modern-client" id="filter-approval-client-group">
+              <span class="filter-label">고객사</span>
+              <div id="filter-approval-client-wrap" class="cs-wrap" style="min-height:30px;width:220px"></div>
+            </div>
+            <div class="filter-group filter-group-modern-compact" id="filter-approval-staff-group">
+              <span class="filter-label">컨설턴트</span>
+              <input type="text" class="filter-control" id="filter-approval-staff" placeholder="이름 검색" style="width:100px" />
+            </div>
           </div>
-          <div class="filter-group filter-group-modern-client" id="filter-approval-client-group">
-            <span class="filter-label">고객사</span>
-            <div id="filter-approval-client-wrap" class="cs-wrap" style="min-height:30px;width:220px"></div>
-          </div>
-          <div class="filter-group filter-group-modern-compact" id="filter-approval-staff-group">
-            <span class="filter-label">컨설턴트</span>
-            <input type="text" class="filter-control" id="filter-approval-staff" placeholder="이름 검색" style="width:100px" />
-          </div>
-          <div class="filter-group filter-group-modern-compact" id="filter-approval-category-group">
-            <span class="filter-label">업무 대분류</span>
-            <select class="filter-control" id="filter-approval-category" style="width:120px">
-              <option value="">전체 대분류</option>
-            </select>
-          </div>
-          <div class="filter-group filter-group-modern-compact" id="filter-approval-subcategory-group">
-            <span class="filter-label">업무 소분류</span>
-            <select class="filter-control" id="filter-approval-subcategory" style="width:120px">
-              <option value="">전체 소분류</option>
-            </select>
-          </div>
-          <div class="filter-group filter-group-modern-compact" id="filter-approval-status-group">
-            <span class="filter-label">상태</span>
-            <select class="filter-control" id="filter-approval-status" style="width:110px" onchange="loadApprovalList()">
-              <option value="" selected>전체</option>
-              <option value="submitted">1차 검토 대기</option>
-              <option value="pre_approved">최종 승인 대기</option>
-              <option value="approved">최종 승인</option>
-              <option value="rejected">반려</option>
-            </select>
-          </div>
-          <div class="filter-actions" id="filter-approval-actions">
-            <button class="btn btn-primary btn-sm" onclick="loadApprovalList()"><i class="fas fa-search"></i> 조회</button>
-            <button class="btn btn-ghost btn-sm" onclick="resetApprovalFilter()" title="초기화"><i class="fas fa-redo"></i></button>
+          <div class="approval-filter-row approval-filter-row-bottom">
+            <div class="filter-group filter-group-modern-compact" id="filter-approval-category-group">
+              <span class="filter-label">업무 대분류</span>
+              <select class="filter-control" id="filter-approval-category" style="width:120px">
+                <option value="">전체 대분류</option>
+              </select>
+            </div>
+            <div class="filter-group filter-group-modern-compact" id="filter-approval-subcategory-group">
+              <span class="filter-label">업무 소분류</span>
+              <select class="filter-control" id="filter-approval-subcategory" style="width:120px">
+                <option value="">전체 소분류</option>
+              </select>
+            </div>
+            <div class="filter-group filter-group-modern-compact" id="filter-approval-status-group">
+              <span class="filter-label">상태</span>
+              <select class="filter-control" id="filter-approval-status" style="width:110px" onchange="loadApprovalList()">
+                <option value="" selected>전체</option>
+                <option value="submitted">1차 검토 대기</option>
+                <option value="pre_approved">최종 승인 대기</option>
+                <option value="approved">최종 승인</option>
+                <option value="rejected">반려</option>
+              </select>
+            </div>
+            <div class="filter-actions" id="filter-approval-actions">
+              <button class="btn btn-primary btn-sm" onclick="loadApprovalList()"><i class="fas fa-search"></i> 조회</button>
+              <button class="btn btn-ghost btn-sm" onclick="resetApprovalFilter()" title="초기화"><i class="fas fa-redo"></i></button>
+            </div>
           </div>
         </div>
 
@@ -5746,20 +5756,20 @@
 </div>
 
 <!-- JS 파일들 -->
-<script src="js/app.js?v=20260509ceoTimesheetMenuFix1"></script>
+<script src="js/app.js?v=20260512canApprove2ndTopMgr1"></script>
 <script src="js/kw-example-maps.js?v=20260407a"></script>
 <script src="js/llm-proxy.js?v=20260409a"></script>
 <script src="js/notify.js?v=20260419invoiceDueRemind2"></script>
 <script src="js/dashboard.js?v=20260509dashDailyAvgRule3"></script>
-<script src="js/entry.js?v=20260509ceoTimesheetMenuFix1"></script>
+<script src="js/entry.js?v=20260512managerApprovalTopMgr2nd1"></script>
 <script src="js/daily-module.js?v=20260419dailyModePlan1"></script>
-<script src="js/approval.js?v=20260420approvalFix2"></script>
+<script src="js/approval.js?v=20260512topMgr2ndApprove2"></script>
 <script src="js/analysis.js?v=20260410a"></script>
 <script src="js/archive.js?v=20260410d"></script>
 <script src="js/project-management.js?v=20260420pmProgressCascade3"></script>
 <script src="js/project-dashboard-v2.js?v=20260430projectDashboardRevamp1"></script>
 <!-- master.js / users.js: Settings 메뉴 진입 시 동적 로드 (초기 81KB 절감) -->
-<script src="js/main.js?v=20260509ceoTimesheetMenuFix1"></script>
+<script src="js/main.js?v=20260512reviewer2TopMgr1"></script>
 
 
 </body>

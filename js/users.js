@@ -596,24 +596,25 @@ async function fillApproverSelect(excludeUserId = '', selectedApproverId = '', t
 }
 
 // ─────────────────────────────────────────────
-// 2차 승인자(Director) 드롭다운 채우기 — staff·manager 공통
+// 2차 승인자(본부장/사업부장) 드롭다운 채우기 — staff·manager 공통
 // ─────────────────────────────────────────────
 async function fillReviewer2Select(excludeUserId = '', selectedReviewer2Id = '') {
   const el = document.getElementById('user-reviewer2-input');
   if (!el) return;
 
   const users = await Master.users();
-  const directors = users.filter(u =>
-    u.role === 'director' &&
+  const reviewer2Users = users.filter(u =>
+    (u.role === 'director' || u.role === 'top_mgr') &&
     u.is_active !== false &&
     u.id !== excludeUserId
   );
 
   el.innerHTML = '<option value="">2차 승인자 선택 (미지정)</option>';
-  directors.forEach(u => {
+  reviewer2Users.forEach(u => {
     const opt = document.createElement('option');
     opt.value = u.id;
-    opt.textContent = `${u.name} (본부장)`;
+    const roleLabel = u.role === 'top_mgr' ? '사업부장' : '본부장';
+    opt.textContent = `${u.name} (${roleLabel})`;
     opt.dataset.name = u.name;
     if (u.id === selectedReviewer2Id) opt.selected = true;
     el.appendChild(opt);

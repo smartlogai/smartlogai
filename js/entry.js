@@ -1513,15 +1513,15 @@ async function init_entry_new() {
       const isManager = session.role === 'manager';
 
       if (isManager) {
-        // Manager → reviewer2_id(Director) 유무로 판단
-        const directorId   = (userRecord && userRecord.reviewer2_id)   || session.reviewer2_id   || '';
-        const directorName = (userRecord && userRecord.reviewer2_name) || session.reviewer2_name || '';
-        if (directorId) {
-          approverNameText.textContent   = 'Director: ' + (directorName || '지정됨');
+        // Manager → reviewer2_id(본부장/사업부장) 유무로 판단
+        const reviewer2Id   = (userRecord && userRecord.reviewer2_id)   || session.reviewer2_id   || '';
+        const reviewer2Name = (userRecord && userRecord.reviewer2_name) || session.reviewer2_name || '';
+        if (reviewer2Id) {
+          approverNameText.textContent   = '2차 승인자: ' + (reviewer2Name || '지정됨');
           approverNotice.style.display   = 'flex';
           noApproverNotice.style.display = 'none';
         } else {
-          if (noApproverSpan) noApproverSpan.textContent = 'Director가 지정되지 않았습니다.';
+          if (noApproverSpan) noApproverSpan.textContent = '2차 승인자(본부장/사업부장)가 지정되지 않았습니다.';
           approverNotice.style.display   = 'none';
           noApproverNotice.style.display = 'flex';
         }
@@ -2967,9 +2967,11 @@ async function saveEntryDraft() {
 
 async function saveEntry(status) {
   const session = getSession();
+  const isManagerRole = !!(typeof Auth !== 'undefined' && Auth.isManager && Auth.isManager(session));
   const isCcbAutoApprove =
     status === 'submitted' &&
-    (session.role === 'director' || session.role === 'top_mgr') &&
+    ((typeof Auth !== 'undefined' && Auth.isDirector && Auth.isDirector(session)) ||
+     (typeof Auth !== 'undefined' && Auth.isTopMgr && Auth.isTopMgr(session))) &&
     typeof Auth !== 'undefined' &&
     typeof Auth.preferredSheetType === 'function' &&
     Auth.preferredSheetType(session) === 'daily';
@@ -2997,25 +2999,44 @@ async function saveEntry(status) {
       const userRecord = await API.get('users', session.id);
       if (!userRecord) throw new Error('userRecord null');
 
-      if (session.role === 'manager') {
-        // manager 본인 건: reviewer2_id(director)를 approver_id로 저장
-        // → approval.js에서 director가 String(e.approver_id)===String(session.id) 로 조회
+      if (isManagerRole) {
+        // manager 본인 건: reviewer2_id(본부장/사업부장)를 approver_id로 저장
+        // → approval.js에서 2차 승인자(본부장/사업부장)가 조회
+        const allUsers = await Master.users().catch(() => []);
+        const userById = new Map((allUsers || []).map((u) => [String(u && u.id || ''), u]));
+        const normName = (v) => String(v || '').toLowerCase().replace(/\s+/g, '').trim();
+        const isSecondRole = (u) => {
+          const role = normalizeRoleName(u && u.role);
+          return role === 'director' || role === 'top_mgr';
+        };
+        const reviewer2Id = String(userRecord.reviewer2_id || '').trim();
+        const reviewer2Name = String(userRecord.reviewer2_name || '').trim();
         if (userRecord.reviewer2_id) {
+          let targetDirector = userById.get(reviewer2Id);
+          // reviewer2_id가 비활성/불일치(사용자 재생성)일 수 있으므로 이름+조직으로 재해석
+          if (!targetDirector || targetDirector.is_active === false || !isSecondRole(targetDirector)) {
+            const byName = (allUsers || []).find((u) =>
+              isSecondRole(u) &&
+              u.is_active !== false &&
+              normName(u.name) === normName(reviewer2Name) &&
+              Auth.scopeMatch(u, userRecord)
+            );
+            if (byName) targetDirector = byName;
+          }
           approverInfo = {
-            approver_id:    userRecord.reviewer2_id,
-            approver_name:  userRecord.reviewer2_name || '',
-            reviewer2_id:   userRecord.reviewer2_id,
-            reviewer2_name: userRecord.reviewer2_name || ''
+            approver_id:    targetDirector ? String(targetDirector.id || '') : reviewer2Id,
+            approver_name:  targetDirector ? String(targetDirector.name || '') : (reviewer2Name || ''),
+            reviewer2_id:   targetDirector ? String(targetDirector.id || '') : reviewer2Id,
+            reviewer2_name: targetDirector ? String(targetDirector.name || '') : (reviewer2Name || '')
           };
         } else {
-          // fallback: 소속 범위의 director 자동 탐색
-          const allUsers = await Master.users();
+          // fallback: 소속 범위의 본부장/사업부장 자동 탐색
           const myDirector = allUsers.find(u =>
-            u.role === 'director' &&
+            isSecondRole(u) &&
             u.is_active !== false &&
             Auth.scopeMatch(u, userRecord)
           ) || allUsers.find(u =>
-            u.role === 'director' && u.is_active !== false &&
+            isSecondRole(u) && u.is_active !== false &&
             u.dept_id && userRecord.dept_id && String(u.dept_id) === String(userRecord.dept_id)
           );
           if (myDirector) {
@@ -3026,6 +3047,11 @@ async function saveEntry(status) {
               reviewer2_name: myDirector.name || ''
             };
           }
+        }
+        // manager 제출은 본부장(approver_id) 미지정 시 반드시 차단
+        if (status === 'submitted' && !String(approverInfo.approver_id || '').trim()) {
+          Toast.warning('본부장(승인자)이 지정되지 않아 승인요청을 보낼 수 없습니다. 사용자 등록에서 Reviewer2(본부장)를 확인하세요.');
+          return;
         }
       } else {
         // staff: 등록된 승인자(manager) 사용
@@ -3048,8 +3074,8 @@ async function saveEntry(status) {
       console.warn('[saveEntry] approverInfo 조회 실패, session 캐시 사용:', err);
       // session 캐시 fallback 이미 적용됨 — approverInfo 유지
       // manager인데 reviewer2_id가 없으면 경고
-      if (session.role === 'manager' && !approverInfo.reviewer2_id && status === 'submitted') {
-        Toast.warning('2차 승인자(Director)가 지정되지 않았습니다. 관리자에게 요청하세요.');
+      if (isManagerRole && !approverInfo.reviewer2_id && status === 'submitted') {
+        Toast.warning('2차 승인자(본부장/사업부장)가 지정되지 않았습니다. 관리자에게 요청하세요.');
         return;
       }
     }
