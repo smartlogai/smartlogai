@@ -441,6 +441,8 @@ function _projRegCanApproveRow(session, row) {
   const eff = _projRegEffectiveApprovers(row);
   const targetId = String((eff.chain && eff.chain[step - 1]) || '');
   if (targetId && myIds.has(targetId)) return true;
+  // 사업부장(top_mgr)은 지정된 승인자 ID와 일치할 때만 승인 가능(참고건 오인 방지)
+  if (_projRegNormRole(session && session.role) === 'top_mgr') return false;
   // 운영 중 사용자 재생성 등으로 승인자 ID가 바뀐 경우(과거 pending 데이터),
   // 단계별 승인자 "이름"이 현재 세션명과 일치하면 승인 가능하도록 폴백한다.
   const normLoose = (v) => {
@@ -467,11 +469,8 @@ function _projRegCanApproveRow(session, row) {
       : String((row && row.reg_pa3_name) || '').trim());
   const myName = String((session && session.name) || '').trim();
   if (targetNameRaw && myName && isLooseNameMatch(targetNameRaw, myName)) return true;
-  // 사업부장(top_mgr): 최종 승인 단계에서는 ID/이름 불일치 이관 데이터도 승인 가능하도록 허용
-  // (본부장 1차 승인 후 사업부장 2차/3차 승인 누락 대응)
-  if (_projRegNormRole(session && session.role) === 'top_mgr' && Number(step || 0) === Number(eff.count || 0)) {
-    return true;
-  }
+  // 중요: 사업부장(top_mgr)이라도 "지정된 승인자"가 아니면 승인 불가
+  // (과거 완화 로직으로 타 사업부 pending 건이 승인대상으로 보이는 현상 방지)
   return false;
 }
 
