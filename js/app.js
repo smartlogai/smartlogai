@@ -958,19 +958,48 @@ const API = {
     return `${SUPABASE_URL}/storage/v1/object/public/${b}/${p}`;
   },
 
+  _guessMimeByName(name) {
+    const fileName = String(name || '').trim().toLowerCase();
+    const ext = fileName.includes('.') ? fileName.split('.').pop() : '';
+    const map = {
+      pdf: 'application/pdf',
+      txt: 'text/plain',
+      csv: 'text/csv',
+      json: 'application/json',
+      doc: 'application/msword',
+      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      xls: 'application/vnd.ms-excel',
+      xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ppt: 'application/vnd.ms-powerpoint',
+      pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      hwp: 'application/x-hwp',
+      hwpx: 'application/x-hwp+zip',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      gif: 'image/gif',
+      webp: 'image/webp',
+      zip: 'application/zip',
+      '7z': 'application/x-7z-compressed',
+    };
+    return map[ext] || '';
+  },
+
   async storageUpload(bucket, path, file, opts = {}) {
     if (!file) throw new Error('업로드할 파일이 없습니다.');
     const b = encodeURIComponent(String(bucket || '').trim());
     const p = this._encodeStoragePath(path);
     const upsert = opts.upsert === true ? 'true' : 'false';
     const url = `${SUPABASE_URL}/storage/v1/object/${b}/${p}?upsert=${upsert}`;
+    const guessedMime = this._guessMimeByName(file && file.name);
+    const contentType = String((file && file.type) || '').trim() || guessedMime || 'application/octet-stream';
     const res = await fetch(url, {
       method: 'POST',
       headers: {
         'apikey': SUPABASE_KEY,
         'Authorization': `Bearer ${SUPABASE_KEY}`,
         'x-upsert': upsert,
-        'content-type': file.type || 'application/octet-stream',
+        'content-type': contentType,
       },
       body: file,
     });
