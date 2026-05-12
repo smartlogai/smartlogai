@@ -39,6 +39,31 @@ function _approvalSetTabCountPartial(kind, count) {
   next.total = next.timesheet + next.project;
   window.__approvalBadgeSplit = next;
   _approvalApplyTabCountLabels(next);
+  // Approval 화면에서 탭 카운트가 갱신될 때 좌측 사이드바 배지도 동일 값으로 동기화
+  const sideBadge = document.getElementById('approval-badge');
+  if (sideBadge) {
+    sideBadge.textContent = String(next.total || 0);
+    sideBadge.style.display = (next.total > 0) ? '' : 'none';
+  }
+  _approvalAutoActivateSinglePendingTab(next);
+}
+
+function _approvalAutoActivateSinglePendingTab(split) {
+  const data = split || window.__approvalBadgeSplit || { timesheet: 0, project: 0 };
+  const ts = Number(data.timesheet) || 0;
+  const pj = Number(data.project) || 0;
+  const pjBtn = document.getElementById('approval-tab-project');
+  const pjVisible = !!(pjBtn && pjBtn.style.display !== 'none');
+  // 한쪽 탭에만 대기건이 있으면 해당 탭을 자동 활성화
+  if (pjVisible && ts === 0 && pj > 0 && _approvalMainTab !== 'project') {
+    _approvalSetMainTabVisual('project');
+    Promise.resolve().then(() => loadApprovalProjectList()).catch(() => {});
+    return;
+  }
+  if (ts > 0 && pj === 0 && _approvalMainTab !== 'timesheet') {
+    _approvalSetMainTabVisual('timesheet');
+    Promise.resolve().then(() => loadApprovalList()).catch(() => {});
+  }
 }
 
 function _approvalSetMainTabVisual(tab) {
@@ -1384,8 +1409,8 @@ async function loadApprovalList() {
       });
     }
 
-    // 목록 헤더/탭 카운트는 "현재 필터 결과"와 동일 기준으로 표기한다.
-    // (기존 전체 대기 기준 카운트는 목록 0건과 불일치하여 혼선 유발)
+    // 표 헤더/탭 카운트는 현재 필터 결과 건수로 통일한다.
+    // (사용자 화면에서 "목록 0건인데 탭은 1건" 불일치 방지)
     const waitCount = entries.length;
     const badge = document.getElementById('approval-count-badge');
     _approvalSetTabCountPartial('timesheet', waitCount);

@@ -2678,6 +2678,23 @@ function getInitial(name) {
 // ★ 캐시 활용 + 쓰로틀(30초 이내 재호출 방지)
 // ─────────────────────────────────────────────
 let _badgeLastUpdated = 0;
+function _badgeNormLooseName(v) {
+  let s = String(v || '').toLowerCase();
+  s = s.replace(/\([^)]*\)/g, '');
+  s = s.replace(/[^0-9a-z가-힣]/g, '');
+  s = s.replace(/(staff|manager|director|topmgr|top_mgr|cpm)$/g, '');
+  s = s.replace(/(사원|대리|과장|차장|부장|팀장|실장|본부장|사업부장|이사|상무|전무|부사장|사장)$/g, '');
+  return s.trim();
+}
+function _badgeLooseNameMatch(a, b) {
+  const x = _badgeNormLooseName(a);
+  const y = _badgeNormLooseName(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  if (x.length >= 3 && y.includes(x)) return true;
+  if (y.length >= 3 && x.includes(y)) return true;
+  return false;
+}
 function _projRegPendingStepForBadge(row) {
   const st = String((row && row.registration_status) || '').trim().toLowerCase();
   if (st !== 'pending') return null;
@@ -2718,7 +2735,17 @@ function _projRegCanApproveForBadge(session, row) {
     if (!chain.includes(id)) chain.push(id);
   });
   const target = String(chain[step - 1] || '');
-  return !!target && sid === target;
+  if (target && sid === target) return true;
+  const cnt = chain.length;
+  const targetName = step === 1
+    ? String((row && row.reg_pa1_name) || '').trim()
+    : (step === 2
+      ? String((cnt >= 3 ? row?.reg_pa2_name : row?.reg_pa3_name) || '').trim()
+      : String((row && row.reg_pa3_name) || '').trim());
+  const myName = String((session && session.name) || '').trim();
+  if (targetName && myName && _badgeLooseNameMatch(targetName, myName)) return true;
+  if (Auth.isTopMgr(session) && Number(step || 0) === Number(cnt || 0)) return true;
+  return false;
 }
 
 async function _countProjectApprovalBadge(session, force = false) {
@@ -2752,6 +2779,7 @@ async function _countProjectApprovalBadge(session, force = false) {
   }
   const byId = new Map((users || []).map((u) => [String(u.id || ''), u]));
   const myId = String(session.id || '');
+  const myName = String(session.name || '');
   const scoped = rows.filter((r) => {
     const creatorId = String((r && r.created_by) || '');
     if (!creatorId) {
@@ -2760,6 +2788,9 @@ async function _countProjectApprovalBadge(session, force = false) {
       const pa3 = String((r && r.reg_pa3_id) || '');
       return pa1 === myId || pa2 === myId || pa3 === myId;
     }
+    if (_badgeLooseNameMatch((r && r.reg_pa1_name) || '', myName)) return true;
+    if (_badgeLooseNameMatch((r && r.reg_pa2_name) || '', myName)) return true;
+    if (_badgeLooseNameMatch((r && r.reg_pa3_name) || '', myName)) return true;
     if (creatorId === myId) return true;
     const creator = byId.get(creatorId);
     if (!creator) return false;
@@ -2832,17 +2863,20 @@ async function updateApprovalBadge(session, force = false) {
       } else if (Auth.canApprove2nd(session)) {
         const allUsers = await Master.users();
         const scopeIds = new Set(allUsers.filter(u => Auth.scopeMatch(session, u)).map(u => String(u.id)));
+        const inScopeEntry = (e) => scopeIds.has(String(e && e.user_id || ''));
         const preApproved = r.data.filter(e =>
-          e.status === 'pre_approved' && scopeIds.has(String(e.user_id)) && _needsSecondApprovalByCategory(e)
+          e.status === 'pre_approved' && inScopeEntry(e) && _needsSecondApprovalByCategory(e)
         ).length;
         const ccbFirst = r.data.filter(e =>
           e.status === 'submitted' &&
           String(e.approver_id) === String(session.id) &&
+          inScopeEntry(e) &&
           String(e && e.dept_name || '').trim().toUpperCase().includes('CCB')
         ).length;
         const managerDirect = r.data.filter(e =>
           e.status === 'submitted' &&
           String(e.approver_id) === String(session.id) &&
+          inScopeEntry(e) &&
           _needsSecondApprovalByCategory(e) &&
           !String(e && e.dept_name || '').trim().toUpperCase().includes('CCB')
         ).length;
