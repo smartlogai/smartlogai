@@ -447,6 +447,8 @@ async function _hdCreateTicket() {
     if (typeof Toast !== 'undefined') {
       if (msg.includes('fn_helpdesk_assign_ticket_no') || msg.includes('_seq') || msg.includes('daily_counters')) {
         Toast.error('티켓 등록 실패: Help Desk 채번 트리거가 최신이 아닙니다. 최신 SQL(카운터 테이블 포함)을 다시 적용해주세요.');
+      } else if (/row-level security|rls|policy/i.test(msg)) {
+        Toast.error('티켓 등록 실패: Help Desk 테이블 RLS 정책으로 INSERT가 차단되었습니다. 운영 DB에서 helpdesk SQL(rls disable 구문)을 다시 적용해주세요.');
       } else {
         Toast.error('티켓 등록 실패: ' + msg);
       }

@@ -7,7 +7,7 @@
 //  내부 상태
 // ─────────────────────────────────────────────
 let _archivePage = 1;
-const _archiveLimit = 20;
+const _archiveLimit = 10;
 let _archiveTotal = 0;
 let _archiveNewPendingFiles = [];   // 직접등록 모달 파일 목록
 let _bulkPendingFiles = [];         // 일괄업로드 파일 목록
@@ -445,7 +445,7 @@ async function loadArchiveList() {
 
     // 페이지네이션
     const pg = document.getElementById('archive-pagination');
-    if (pg) pg.innerHTML = Utils.paginationHTML(_archivePage, Math.ceil(_archiveTotal/_archiveLimit), 'changeArchivePage');
+    if (pg) pg.innerHTML = Utils.paginationHTML(_archivePage, _archiveTotal, 'changeArchivePage', _archiveLimit);
 
   } catch(e) {
     console.error('loadArchiveList error', e);

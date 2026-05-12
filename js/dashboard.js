@@ -475,6 +475,91 @@ function prevMonthStr() {
   const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
+function _dashParseEntryDate(e) {
+  if (!e || !e.work_start_at) return null;
+  const raw = e.work_start_at;
+  let d;
+  const num = Number(raw);
+  if (!Number.isNaN(num) && num > 1000000000000) d = new Date(num);
+  else if (!Number.isNaN(num) && num > 1000000000) d = new Date(num * 1000);
+  else d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
+function _dashMonthCompareContext(now = new Date()) {
+  const curY = now.getFullYear();
+  const curM = now.getMonth();
+  const today = now.getDate();
+  const prevY = curM === 0 ? curY - 1 : curY;
+  const prevM = curM === 0 ? 11 : curM - 1;
+  const prevLastDay = new Date(prevY, prevM + 1, 0).getDate();
+  return { curY, curM, today, prevY, prevM, prevLastDay };
+}
+function _dashIsBusinessDay(d) {
+  const w = d.getDay();
+  return w !== 0 && w !== 6;
+}
+function _dashYmdKey(year, month0, day) {
+  return `${year}-${String(month0 + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+function _dashHolidayKeySet() {
+  const raw = window.SMARTLOG_HOLIDAYS;
+  if (!Array.isArray(raw)) return new Set();
+  return new Set(raw.map((v) => String(v || '').trim()).filter(Boolean));
+}
+function _dashIsEntryInMonthUpToDay(e, year, month0, maxDay) {
+  const d = _dashParseEntryDate(e);
+  if (!d) return false;
+  return d.getFullYear() === year && d.getMonth() === month0 && d.getDate() <= maxDay;
+}
+function _dashScopedTimesheetTargetIds(allUsers, visibleUserIds) {
+  const users = Array.isArray(allUsers) ? allUsers : [];
+  const scoped = visibleUserIds
+    ? users.filter((u) => visibleUserIds.has(String(u.id || '')))
+    : users;
+  return new Set(
+    scoped
+      .filter((u) => u && u.is_active !== false && u.is_timesheet_target !== false)
+      .map((u) => String(u.id || '').trim())
+      .filter(Boolean)
+  );
+}
+function _dashWriterCountByDay(entries, scopeUserIds, year, month0, maxDay) {
+  const byDay = {};
+  const idSet = scopeUserIds instanceof Set ? scopeUserIds : new Set();
+  const cap = Math.max(0, Number(maxDay) || 0);
+  (entries || []).forEach((e) => {
+    const uid = String(e.user_id || '').trim();
+    if (!uid || (idSet.size && !idSet.has(uid))) return;
+    const d = _dashParseEntryDate(e);
+    if (!d) return;
+    if (d.getFullYear() !== year || d.getMonth() !== month0) return;
+    const day = d.getDate();
+    if (day < 1 || day > cap) return;
+    if (!byDay[day]) byDay[day] = new Set();
+    byDay[day].add(uid);
+  });
+  return byDay;
+}
+function _dashEffectiveWorkDays(year, month0, maxDay, scopeUserIds, periodEntries, leaveDays = 1) {
+  const lastDay = new Date(year, month0 + 1, 0).getDate();
+  const cap = Math.max(0, Math.min(Number(maxDay) || 0, lastDay));
+  const targetIds = scopeUserIds instanceof Set ? scopeUserIds : new Set();
+  const holidaySet = _dashHolidayKeySet();
+  const writersByDay = _dashWriterCountByDay(periodEntries, targetIds, year, month0, cap);
+  let days = 0;
+  for (let day = 1; day <= cap; day += 1) {
+    const date = new Date(year, month0, day);
+    if (!_dashIsBusinessDay(date)) continue;
+    if (holidaySet.has(_dashYmdKey(year, month0, day))) continue;
+    const writerCnt = (writersByDay[day] && writersByDay[day].size) || 0;
+    // 요청 기준 해석: "2명 이상 타임시트 기록이 없는 날"은
+    // 실무상 "기록자 수가 2명 미만인 날"로 간주해 제외한다.
+    if (writerCnt < 2) continue;
+    days += 1;
+  }
+  return Math.max(0, days - Math.max(0, Number(leaveDays) || 0));
+}
 function entryMonth(e) {
   if (!e.work_start_at) return '';
   // 숫자형 타임스탬프(ms), 문자열 숫자, ISO 문자열 모두 처리
@@ -499,11 +584,20 @@ function _fmtPctDelta(cur, prev) {
   const c = Number(cur) || 0;
   const p = Number(prev) || 0;
   if (p <= 0 && c <= 0) return { pct: 0, label: '0%', cls: 'muted' };
-  if (p <= 0 && c > 0) return { pct: 999, label: '+∞', cls: 'up' };
+  // 전월 기준값이 0인 경우는 무한대 대신 "신규"로 표기해 오해를 줄인다.
+  if (p <= 0 && c > 0) return { pct: 100, label: '신규', cls: 'up' };
   const pct = Math.round(((c - p) / p) * 100);
   const cls = pct >= 0 ? 'up' : 'down';
   const sign = pct >= 0 ? '+' : '';
   return { pct, label: `${sign}${pct}%`, cls };
+}
+function _fmtPctDeltaByDays(curMin, prevMin, curDays, prevDays) {
+  const cDays = Number(curDays) || 0;
+  const pDays = Number(prevDays) || 0;
+  if (cDays <= 0 || pDays <= 0) return _fmtPctDelta(curMin, prevMin);
+  const curAvg = (Number(curMin) || 0) / cDays;
+  const prevAvg = (Number(prevMin) || 0) / pDays;
+  return _fmtPctDelta(curAvg, prevAvg);
 }
 
 function _buildLeaderMonthlyStats(approvedCur, approvedPrev) {
@@ -797,15 +891,18 @@ async function renderManagerDashboard(session) {
 
     const month = thisMonthStr();
     const prevMonth = prevMonthStr();
+    const cmp = _dashMonthCompareContext(new Date());
 
     const visibleUserIds = _getVisibleUserIdSetForDashboard(session, allUsers);
     let scopedEntries = allEntriesRaw;
     if (visibleUserIds) {
       scopedEntries = allEntriesRaw.filter(e => visibleUserIds.has(String(e.user_id)));
     }
-
-    const curEntriesAll  = scopedEntries.filter(e => entryMonth(e) === month);
-    const prevEntriesAll = scopedEntries.filter(e => entryMonth(e) === prevMonth);
+    const scopeUserIds = _dashScopedTimesheetTargetIds(allUsers, visibleUserIds);
+    const curEntriesAll  = scopedEntries.filter(e => _dashIsEntryInMonthUpToDay(e, cmp.curY, cmp.curM, cmp.today));
+    const prevEntriesAll = scopedEntries.filter(e => _dashIsEntryInMonthUpToDay(e, cmp.prevY, cmp.prevM, cmp.prevLastDay));
+    const curEffectiveDays = _dashEffectiveWorkDays(cmp.curY, cmp.curM, cmp.today, scopeUserIds, curEntriesAll, 1);
+    const prevEffectiveDays = _dashEffectiveWorkDays(cmp.prevY, cmp.prevM, cmp.prevLastDay, scopeUserIds, prevEntriesAll, 1);
     const approvedCur  = curEntriesAll.filter(e => e.status === 'approved');
     const approvedPrev = prevEntriesAll.filter(e => e.status === 'approved');
     const pendingCur   = curEntriesAll.filter(e => e.status === 'submitted');
@@ -819,7 +916,7 @@ async function renderManagerDashboard(session) {
     const totalMinPrev = approvedPrev.reduce((s,e)=>s+(e.duration_minutes||0),0);
     const consultCntPrev = approvedPrev.filter(e=>e.time_category==='client').length;
 
-    const dTotal = _fmtPctDelta(totalMinCur, totalMinPrev);
+    const dTotal = _fmtPctDeltaByDays(totalMinCur, totalMinPrev, curEffectiveDays, prevEffectiveDays);
     const dCnt = _fmtPctDelta(consultCntCur, consultCntPrev);
 
     document.getElementById('kpi-grid').innerHTML =
@@ -842,8 +939,12 @@ async function renderManagerDashboard(session) {
     </div>`).join('') || `<div style="padding:18px;text-align:center;color:#94a3b8;font-size:12px">데이터 없음</div>`;
 
     const spikeRows = stats
-      .map(r => ({ ...r, dH:_fmtPctDelta(r.curMin,r.prevMin), dC:_fmtPctDelta(r.curConsultCnt,r.prevConsultCnt) }))
-      .filter(r => (Math.abs(r.dH.pct) >= 30 || Math.abs(r.dC.pct) >= 30) && (r.prevMin >= 60 || r.prevConsultCnt >= 2))
+      .map(r => ({ ...r, dH:_fmtPctDeltaByDays(r.curMin, r.prevMin, curEffectiveDays, prevEffectiveDays), dC:_fmtPctDelta(r.curConsultCnt,r.prevConsultCnt) }))
+      .filter(r => {
+        const changed = Math.abs(r.dH.pct) >= 30 || Math.abs(r.dC.pct) >= 30;
+        const hasVolume = (r.prevMin >= 60 || r.prevConsultCnt >= 2 || r.curMin >= 60 || r.curConsultCnt >= 2);
+        return changed && hasVolume;
+      })
       .sort((a,b)=> (Math.max(Math.abs(b.dH.pct),Math.abs(b.dC.pct)) - Math.max(Math.abs(a.dH.pct),Math.abs(a.dC.pct))))
       .slice(0,10);
     const spikeHtml = spikeRows.map(r=> {
@@ -860,8 +961,12 @@ async function renderManagerDashboard(session) {
     }).join('') || `<div style="padding:18px;text-align:center;color:#94a3b8;font-size:12px">급변(±30%) 데이터 없음</div>`;
 
     const clientRows = clientRadar
-      .map(c => ({ ...c, dH:_fmtPctDelta(c.curMin,c.prevMin), dC:_fmtPctDelta(c.curCnt,c.prevCnt) }))
-      .filter(c => (c.dH.pct >= 30 || c.dC.pct >= 30) && (c.prevMin >= 60 || c.prevCnt >= 2))
+      .map(c => ({ ...c, dH:_fmtPctDeltaByDays(c.curMin, c.prevMin, curEffectiveDays, prevEffectiveDays), dC:_fmtPctDelta(c.curCnt,c.prevCnt) }))
+      .filter(c => {
+        const changed = c.dH.pct >= 30 || c.dC.pct >= 30;
+        const hasVolume = (c.prevMin >= 60 || c.prevCnt >= 2 || c.curMin >= 60 || c.curCnt >= 2);
+        return changed && hasVolume;
+      })
       .sort((a,b)=> (Math.max(b.dH.pct,b.dC.pct) - Math.max(a.dH.pct,a.dC.pct)))
       .slice(0,10);
     const clientHtml = clientRows.map(c => {
@@ -895,7 +1000,7 @@ async function renderManagerDashboard(session) {
         <div class="card">
           <div class="card-header" style="padding:12px 16px 10px">
             <h2><i class="fas fa-bolt" style="color:#dc2626"></i> &nbsp;전월 대비 급변(±30%)</h2>
-            <span style="font-size:11px;font-weight:400;color:var(--text-muted)">${prevMonth} → ${month} · 시간/건수</span>
+            <span style="font-size:11px;font-weight:400;color:var(--text-muted)">${prevMonth}(전체·유효 ${prevEffectiveDays}일) → ${month}(1~${cmp.today}일·유효 ${curEffectiveDays}일) · 시간(일평균)/건수</span>
           </div>
           <div class="card-body" style="padding:10px 14px;max-height:260px;overflow:auto">
             ${spikeHtml}
@@ -944,15 +1049,18 @@ async function renderDirectorDashboard(session) {
 
     const month = thisMonthStr();
     const prevMonth = prevMonthStr();
+    const cmp = _dashMonthCompareContext(new Date());
 
     const visibleUserIds = _getVisibleUserIdSetForDashboard(session, allUsers);
     let scopedEntries = allEntriesRaw;
     if (visibleUserIds) {
       scopedEntries = allEntriesRaw.filter(e => visibleUserIds.has(String(e.user_id)));
     }
-
-    const curEntriesAll  = scopedEntries.filter(e => entryMonth(e) === month);
-    const prevEntriesAll = scopedEntries.filter(e => entryMonth(e) === prevMonth);
+    const scopeUserIds = _dashScopedTimesheetTargetIds(allUsers, visibleUserIds);
+    const curEntriesAll  = scopedEntries.filter(e => _dashIsEntryInMonthUpToDay(e, cmp.curY, cmp.curM, cmp.today));
+    const prevEntriesAll = scopedEntries.filter(e => _dashIsEntryInMonthUpToDay(e, cmp.prevY, cmp.prevM, cmp.prevLastDay));
+    const curEffectiveDays = _dashEffectiveWorkDays(cmp.curY, cmp.curM, cmp.today, scopeUserIds, curEntriesAll, 1);
+    const prevEffectiveDays = _dashEffectiveWorkDays(cmp.prevY, cmp.prevM, cmp.prevLastDay, scopeUserIds, prevEntriesAll, 1);
     const approvedCur  = curEntriesAll.filter(e => e.status === 'approved');
     const approvedPrev = prevEntriesAll.filter(e => e.status === 'approved');
     const pendingCur   = curEntriesAll.filter(e => e.status === 'submitted');
@@ -966,7 +1074,7 @@ async function renderDirectorDashboard(session) {
     const totalMinPrev = approvedPrev.reduce((s,e)=>s+(e.duration_minutes||0),0);
     const consultCntPrev = approvedPrev.filter(e=>e.time_category==='client').length;
 
-    const dTotal = _fmtPctDelta(totalMinCur, totalMinPrev);
+    const dTotal = _fmtPctDeltaByDays(totalMinCur, totalMinPrev, curEffectiveDays, prevEffectiveDays);
     const dCnt = _fmtPctDelta(consultCntCur, consultCntPrev);
 
     // 대상 직원 수
@@ -995,8 +1103,12 @@ async function renderDirectorDashboard(session) {
     </div>`).join('') || `<div style="padding:18px;text-align:center;color:#94a3b8;font-size:12px">데이터 없음</div>`;
 
     const spikeRows = stats
-      .map(r => ({ ...r, dH:_fmtPctDelta(r.curMin,r.prevMin), dC:_fmtPctDelta(r.curConsultCnt,r.prevConsultCnt) }))
-      .filter(r => (Math.abs(r.dH.pct) >= 30 || Math.abs(r.dC.pct) >= 30) && (r.prevMin >= 60 || r.prevConsultCnt >= 2))
+      .map(r => ({ ...r, dH:_fmtPctDeltaByDays(r.curMin, r.prevMin, curEffectiveDays, prevEffectiveDays), dC:_fmtPctDelta(r.curConsultCnt,r.prevConsultCnt) }))
+      .filter(r => {
+        const changed = Math.abs(r.dH.pct) >= 30 || Math.abs(r.dC.pct) >= 30;
+        const hasVolume = (r.prevMin >= 60 || r.prevConsultCnt >= 2 || r.curMin >= 60 || r.curConsultCnt >= 2);
+        return changed && hasVolume;
+      })
       .sort((a,b)=> (Math.max(Math.abs(b.dH.pct),Math.abs(b.dC.pct)) - Math.max(Math.abs(a.dH.pct),Math.abs(a.dC.pct))))
       .slice(0,10);
     const spikeHtml = spikeRows.map(r=> {
@@ -1013,8 +1125,12 @@ async function renderDirectorDashboard(session) {
     }).join('') || `<div style="padding:18px;text-align:center;color:#94a3b8;font-size:12px">급변(±30%) 데이터 없음</div>`;
 
     const clientRows = clientRadar
-      .map(c => ({ ...c, dH:_fmtPctDelta(c.curMin,c.prevMin), dC:_fmtPctDelta(c.curCnt,c.prevCnt) }))
-      .filter(c => (c.dH.pct >= 30 || c.dC.pct >= 30) && (c.prevMin >= 60 || c.prevCnt >= 2))
+      .map(c => ({ ...c, dH:_fmtPctDeltaByDays(c.curMin, c.prevMin, curEffectiveDays, prevEffectiveDays), dC:_fmtPctDelta(c.curCnt,c.prevCnt) }))
+      .filter(c => {
+        const changed = c.dH.pct >= 30 || c.dC.pct >= 30;
+        const hasVolume = (c.prevMin >= 60 || c.prevCnt >= 2 || c.curMin >= 60 || c.curCnt >= 2);
+        return changed && hasVolume;
+      })
       .sort((a,b)=> (Math.max(b.dH.pct,b.dC.pct) - Math.max(a.dH.pct,a.dC.pct)))
       .slice(0,10);
     const clientHtml = clientRows.map(c => {
@@ -1048,7 +1164,7 @@ async function renderDirectorDashboard(session) {
         <div class="card">
           <div class="card-header" style="padding:12px 16px 10px">
             <h2><i class="fas fa-bolt" style="color:#dc2626"></i> &nbsp;전월 대비 급변(±30%)</h2>
-            <span style="font-size:11px;font-weight:400;color:var(--text-muted)">${prevMonth} → ${month} · 시간/건수</span>
+            <span style="font-size:11px;font-weight:400;color:var(--text-muted)">${prevMonth}(전체·유효 ${prevEffectiveDays}일) → ${month}(1~${cmp.today}일·유효 ${curEffectiveDays}일) · 시간(일평균)/건수</span>
           </div>
           <div class="card-body" style="padding:10px 14px;max-height:260px;overflow:auto">
             ${spikeHtml}

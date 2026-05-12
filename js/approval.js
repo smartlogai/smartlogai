@@ -112,6 +112,9 @@ async function _scopeProjectRowsForApproval(rows, session) {
     String(session.user_id || '').trim(),
   ].filter(Boolean));
   if (!myIds.size) return [];
+  const myName = String(session.name || '').trim();
+  const _norm = (v) => String(v || '').toLowerCase().replace(/\s+/g, '').trim();
+  const myNameNorm = _norm(myName);
   let users = [];
   try {
     users = await Master.users();
@@ -130,6 +133,14 @@ async function _scopeProjectRowsForApproval(rows, session) {
     const pa3 = String((r && r.reg_pa3_id) || '').trim();
     // 승인 라인에 본인이 포함된 건은 생성자 스코프와 무관하게 반드시 노출
     if (myIds.has(pa1) || myIds.has(pa2) || myIds.has(pa3)) return true;
+    // 운영 중 사용자 재생성 등으로 승인자 ID가 바뀐 과거/이관 데이터 대응:
+    // 승인자 이름이 현재 사용자명과 일치하면 승인대기 목록에 노출한다.
+    if (myNameNorm) {
+      const pa1Name = _norm((r && r.reg_pa1_name) || '');
+      const pa2Name = _norm((r && r.reg_pa2_name) || '');
+      const pa3Name = _norm((r && r.reg_pa3_name) || '');
+      if (myNameNorm === pa1Name || myNameNorm === pa2Name || myNameNorm === pa3Name) return true;
+    }
 
     const creatorId = String((r && r.created_by) || '');
     if (creatorId) {

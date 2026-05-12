@@ -2359,6 +2359,18 @@ function _applyPolicyToMenuVisibility(session) {
     settingsSection.style.display = anySettingsMenuVisible ? '' : 'none';
   }
 
+  // 대표이사 계정은 타임시트 메뉴를 일일제만 노출(정책 재적용 후에도 유지)
+  if (session && Auth.isCeo(session)) {
+    const hourlyNew = document.getElementById('menu-entry-new-hourly');
+    const hourlyMy = document.getElementById('menu-my-entries-hourly');
+    const dailyNew = document.getElementById('menu-entry-new-daily');
+    const dailyMy = document.getElementById('menu-my-entries-daily');
+    if (hourlyNew) hourlyNew.style.display = 'none';
+    if (hourlyMy) hourlyMy.style.display = 'none';
+    if (dailyNew) dailyNew.style.display = '';
+    if (dailyMy) dailyMy.style.display = '';
+  }
+
   // 권한 변경으로 "새롭게 표시된" 메뉴가 있으면 해당 섹션만 자동 펼침
   // (기존에 사용자가 접어둔 다른 섹션은 유지)
   if (revealedItems.length) {
@@ -2380,17 +2392,6 @@ function setupMenuByRole(session) {
     Array.from(document.querySelectorAll('.nav-item[data-page]')).forEach((el) => {
       el.style.display = '';
     });
-    if (Auth.isCeo(session)) {
-      // 대표이사 요청: 타임시트 메뉴는 일일제만 노출
-      const hourlyNew = document.getElementById('menu-entry-new-hourly');
-      const hourlyMy = document.getElementById('menu-my-entries-hourly');
-      const dailyNew = document.getElementById('menu-entry-new-daily');
-      const dailyMy = document.getElementById('menu-my-entries-daily');
-      if (hourlyNew) hourlyNew.style.display = 'none';
-      if (hourlyMy) hourlyMy.style.display = 'none';
-      if (dailyNew) dailyNew.style.display = '';
-      if (dailyMy) dailyMy.style.display = '';
-    }
     const securedPages = ['project-deliverables'];
     securedPages.forEach((p) => {
       if (_isSecurityMenuDeniedForSystemAdmin(session, p)) {
