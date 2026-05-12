@@ -18,7 +18,7 @@ let _approvalDeptByCsTeam = {};
 
 /** Approval 상단 탭: timesheet | project (main.js lazy 버전과 맞출 것) */
 let _approvalMainTab = 'timesheet';
-const APPROVAL_PROJ_REG_SCRIPT_VER = '20260507projRegFlowRole3';
+const APPROVAL_PROJ_REG_SCRIPT_VER = '20260512projRegTopMgrFinalFallback1';
 
 function _approvalApplyTabCountLabels(counts) {
   const data = counts || window.__approvalBadgeSplit || {};
@@ -118,6 +118,23 @@ async function _scopeProjectRowsForApproval(rows, session) {
   if (!myIds.size) return [];
   const myName = String(session.name || '').trim();
   const _norm = (v) => String(v || '').toLowerCase().replace(/\s+/g, '').trim();
+  const _normLoose = (v) => {
+    let s = String(v || '').toLowerCase();
+    s = s.replace(/\([^)]*\)/g, '');
+    s = s.replace(/[^0-9a-z가-힣]/g, '');
+    s = s.replace(/(staff|manager|director|topmgr|top_mgr|cpm)$/g, '');
+    s = s.replace(/(사원|대리|과장|차장|부장|팀장|실장|본부장|사업부장|이사|상무|전무|부사장|사장)$/g, '');
+    return s.trim();
+  };
+  const _isLooseNameMatch = (a, b) => {
+    const x = _normLoose(a);
+    const y = _normLoose(b);
+    if (!x || !y) return false;
+    if (x === y) return true;
+    if (x.length >= 3 && y.includes(x)) return true;
+    if (y.length >= 3 && x.includes(y)) return true;
+    return false;
+  };
   const myNameNorm = _norm(myName);
   let users = [];
   try {
@@ -144,6 +161,9 @@ async function _scopeProjectRowsForApproval(rows, session) {
       const pa2Name = _norm((r && r.reg_pa2_name) || '');
       const pa3Name = _norm((r && r.reg_pa3_name) || '');
       if (myNameNorm === pa1Name || myNameNorm === pa2Name || myNameNorm === pa3Name) return true;
+      if (_isLooseNameMatch((r && r.reg_pa1_name) || '', myName)) return true;
+      if (_isLooseNameMatch((r && r.reg_pa2_name) || '', myName)) return true;
+      if (_isLooseNameMatch((r && r.reg_pa3_name) || '', myName)) return true;
     }
 
     const creatorId = String((r && r.created_by) || '');

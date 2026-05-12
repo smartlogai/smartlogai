@@ -443,13 +443,35 @@ function _projRegCanApproveRow(session, row) {
   if (targetId && myIds.has(targetId)) return true;
   // 운영 중 사용자 재생성 등으로 승인자 ID가 바뀐 경우(과거 pending 데이터),
   // 단계별 승인자 "이름"이 현재 세션명과 일치하면 승인 가능하도록 폴백한다.
+  const normLoose = (v) => {
+    let s = String(v || '').toLowerCase();
+    s = s.replace(/\([^)]*\)/g, '');
+    s = s.replace(/[^0-9a-z가-힣]/g, '');
+    s = s.replace(/(staff|manager|director|topmgr|top_mgr|cpm)$/g, '');
+    s = s.replace(/(사원|대리|과장|차장|부장|팀장|실장|본부장|사업부장|이사|상무|전무|부사장|사장)$/g, '');
+    return s.trim();
+  };
+  const isLooseNameMatch = (a, b) => {
+    const x = normLoose(a);
+    const y = normLoose(b);
+    if (!x || !y) return false;
+    if (x === y) return true;
+    if (x.length >= 3 && y.includes(x)) return true;
+    if (y.length >= 3 && x.includes(y)) return true;
+    return false;
+  };
   const targetNameRaw =
     step === 1 ? String((row && row.reg_pa1_name) || '').trim()
     : (step === 2
-      ? String((eff.count >= 3 ? row?.reg_pa2_name : row?.reg_pa2_name) || '').trim()
+      ? String((eff.count >= 3 ? row?.reg_pa2_name : row?.reg_pa3_name) || '').trim()
       : String((row && row.reg_pa3_name) || '').trim());
   const myName = String((session && session.name) || '').trim();
-  if (targetNameRaw && myName && targetNameRaw === myName) return true;
+  if (targetNameRaw && myName && isLooseNameMatch(targetNameRaw, myName)) return true;
+  // 사업부장(top_mgr): 최종 승인 단계에서는 ID/이름 불일치 이관 데이터도 승인 가능하도록 허용
+  // (본부장 1차 승인 후 사업부장 2차/3차 승인 누락 대응)
+  if (_projRegNormRole(session && session.role) === 'top_mgr' && Number(step || 0) === Number(eff.count || 0)) {
+    return true;
+  }
   return false;
 }
 
