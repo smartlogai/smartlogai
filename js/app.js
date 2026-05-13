@@ -2678,6 +2678,26 @@ function getInitial(name) {
 // ★ 캐시 활용 + 쓰로틀(30초 이내 재호출 방지)
 // ─────────────────────────────────────────────
 let _badgeLastUpdated = 0;
+let _approvalBadgeReqSeq = 0;
+
+function _isApprovalPageActive() {
+  const page = document.getElementById('page-approval');
+  if (!page) return false;
+  return page.style.display !== 'none';
+}
+
+function _applyApprovalBadgeFromSplit(split) {
+  const s = split || {};
+  const ts = Number(s.timesheet) || 0;
+  const pj = Number(s.project) || 0;
+  const total = ts + pj;
+  window.__approvalBadgeSplit = { timesheet: ts, project: pj, total };
+  const badge = document.getElementById('approval-badge');
+  if (badge) {
+    badge.textContent = String(total);
+    badge.style.display = total > 0 ? '' : 'none';
+  }
+}
 function _badgeNormLooseName(v) {
   let s = String(v || '').toLowerCase();
   s = s.replace(/\([^)]*\)/g, '');
@@ -2843,9 +2863,16 @@ async function updateApprovalBadge(session, force = false) {
 
   // manager/director/top_mgr 대상 통합 Approval 배지
   if (!(Auth.canApprove1st(session) || Auth.canApprove2nd(session) || Auth.isTopMgr(session))) return;
+  // Approval 화면에서는 목록 로직이 계산한 split 값을 단일 기준으로 사용
+  // (비동기 재계산 레이스로 탭/메뉴 숫자가 흔들리는 문제 방지)
+  if (_isApprovalPageActive() && window.__approvalBadgeSplit) {
+    _applyApprovalBadgeFromSplit(window.__approvalBadgeSplit);
+    return;
+  }
   const now = Date.now();
   if (!force && now - _badgeLastUpdated < 30000) return;
   _badgeLastUpdated = now;
+  const reqSeq = ++_approvalBadgeReqSeq;
   try {
     const sid = encodeURIComponent(String(session.id));
     const r = await Cache.get('time_entries_badge_' + session.id, async () => {
@@ -2896,6 +2923,7 @@ async function updateApprovalBadge(session, force = false) {
       }
       const pjCount = await _countProjectApprovalBadge(session, force);
       const count = tsCount + pjCount;
+      if (reqSeq !== _approvalBadgeReqSeq) return;
       window.__approvalBadgeSplit = { timesheet: tsCount, project: pjCount, total: count };
       const badge = document.getElementById('approval-badge');
       if (badge) {

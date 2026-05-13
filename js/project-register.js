@@ -441,8 +441,17 @@ function _projRegCanApproveRow(session, row) {
   const eff = _projRegEffectiveApprovers(row);
   const targetId = String((eff.chain && eff.chain[step - 1]) || '');
   if (targetId && myIds.has(targetId)) return true;
-  // 사업부장(top_mgr)은 지정된 승인자 ID와 일치할 때만 승인 가능(참고건 오인 방지)
-  if (_projRegNormRole(session && session.role) === 'top_mgr') return false;
+  const creatorId = String((row && row.created_by) || '').trim();
+  // 사업부장(top_mgr): Approval 화면 정책과 동일하게 등록자 스코프 기준 승인 허용
+  if (_projRegNormRole(session && session.role) === 'top_mgr') {
+    if (creatorId && (myIds.has(creatorId))) return true;
+    if (creatorId && Array.isArray(_projRegUsers) && _projRegUsers.length) {
+      const creator = _projRegUsers.find((u) => String(u && u.id || '').trim() === creatorId);
+      if (creator && Auth && typeof Auth.scopeMatch === 'function' && Auth.scopeMatch(session, creator)) return true;
+    }
+    // created_by 누락 과거 데이터만 이름 폴백 허용
+    if (creatorId) return false;
+  }
   // 운영 중 사용자 재생성 등으로 승인자 ID가 바뀐 경우(과거 pending 데이터),
   // 단계별 승인자 "이름"이 현재 세션명과 일치하면 승인 가능하도록 폴백한다.
   const normLoose = (v) => {
@@ -3830,8 +3839,19 @@ async function _projRegResolveRow(id) {
   return row;
 }
 
+async function _projRegEnsureUsersCache() {
+  if (Array.isArray(_projRegUsers) && _projRegUsers.length) return _projRegUsers;
+  try {
+    _projRegUsers = await Master.users();
+  } catch (_) {
+    _projRegUsers = [];
+  }
+  return _projRegUsers;
+}
+
 async function projRegApprove(id) {
   const session = getSession();
+  await _projRegEnsureUsersCache();
   const row = await _projRegResolveRow(id);
   if (!row || _projRegNormStatus(row) !== 'pending') return;
   if (!_projRegCanApproveRow(session, row)) {
@@ -3956,6 +3976,7 @@ async function projRegApprove(id) {
 
 async function projRegReject(id) {
   const session = getSession();
+  await _projRegEnsureUsersCache();
   const row = await _projRegResolveRow(id);
   if (!row || _projRegNormStatus(row) !== 'pending') return;
   if (!_projRegCanApproveRow(session, row)) {

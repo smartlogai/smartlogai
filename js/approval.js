@@ -16,10 +16,16 @@ let _approvalCsTeamsByDept = { COB: [], CRB: [], CCB: [] };
 let _approvalAllCsTeamNames = [];
 let _approvalDeptByCsTeam = {};
 let _approvalScopeUserIdSet = new Set();
+let _approvalListReqSeq = 0;
+
+function _approvalIsPageActive() {
+  const page = document.getElementById('page-approval');
+  return !!(page && page.style.display !== 'none');
+}
 
 /** Approval 상단 탭: timesheet | project (main.js lazy 버전과 맞출 것) */
 let _approvalMainTab = 'timesheet';
-const APPROVAL_PROJ_REG_SCRIPT_VER = '20260513projRegPendingEditDelete1';
+const APPROVAL_PROJ_REG_SCRIPT_VER = '20260513projRegPendingEditDelete2';
 
 function _approvalNormLooseName(v) {
   let s = String(v || '').toLowerCase();
@@ -1265,23 +1271,21 @@ async function init_approval() {
     );
     pjTabBtn.style.display = canProjectApproval ? '' : 'none';
   }
-  try {
-    await updateApprovalBadge(session, true);
-  } catch (_) {}
-  _approvalApplyTabCountLabels();
-  const split = window.__approvalBadgeSplit || { timesheet: 0, project: 0 };
-  const projectOnlyPending = (Number(split.project) || 0) > 0 && (Number(split.timesheet) || 0) === 0;
   const projectTabVisible = pjTabBtn && pjTabBtn.style.display !== 'none';
-  if (projectOnlyPending && projectTabVisible) {
-    _approvalSetMainTabVisual('project');
+  // Approval 화면의 카운트는 목록 로직에서 계산한 값만 사용한다.
+  // (초기 진입 시 전역 배지 재계산 결과가 덮어써서 숫자가 바뀌는 현상 방지)
+  _approvalSetMainTabVisual('timesheet');
+  await loadApprovalList();
+  if (projectTabVisible) {
     await loadApprovalProjectList();
   } else {
-    _approvalSetMainTabVisual('timesheet');
-    await loadApprovalList();
+    _approvalSetTabCountPartial('project', 0);
   }
+  _approvalAutoActivateSinglePendingTab(window.__approvalBadgeSplit);
 }
 
 async function loadApprovalList() {
+  const reqSeq = ++_approvalListReqSeq;
   _approvalSyncRangeButtonState();
   const session      = getSession();
   const dateFrom     = document.getElementById('filter-approval-date-from').value;
@@ -1479,14 +1483,16 @@ async function loadApprovalList() {
     }).length;
     const badge = document.getElementById('approval-count-badge');
     _approvalSetTabCountPartial('timesheet', waitCount);
-    if (waitCount > 0) {
-      badge.className = 'badge badge-red';
-      badge.style = '';
-      badge.textContent = `${waitCount}건 검토 대기`;
-    } else {
-      badge.className = '';
-      badge.style.cssText = 'font-size:12px;color:var(--text-muted);font-weight:400';
-      badge.textContent = `0건 검토 대기`;
+    if (badge) {
+      if (waitCount > 0) {
+        badge.className = 'badge badge-red';
+        badge.style = '';
+        badge.textContent = `${waitCount}건 검토 대기`;
+      } else {
+        badge.className = '';
+        badge.style.cssText = 'font-size:12px;color:var(--text-muted);font-weight:400';
+        badge.textContent = '0건 검토 대기';
+      }
     }
 
     // 첨부파일 맵
@@ -1588,10 +1594,14 @@ async function loadApprovalList() {
       }).join('');
     }
 
-    document.getElementById('approval-pagination').innerHTML =
-      Utils.paginationHTML(_approvalPage, entries.length, APPROVAL_PER_PAGE);
+    const pager = document.getElementById('approval-pagination');
+    if (pager) {
+      pager.innerHTML = Utils.paginationHTML(_approvalPage, entries.length, APPROVAL_PER_PAGE);
+    }
 
   } catch (err) {
+    if (reqSeq !== _approvalListReqSeq) return;
+    if (!_approvalIsPageActive()) return;
     console.error(err);
     Toast.error('데이터 로드 실패');
   }
