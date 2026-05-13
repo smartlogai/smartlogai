@@ -4707,7 +4707,7 @@ async function loadMyEntries() {
     _entrySyncConsultantColumns(canViewStaffRecords);
 
     document.getElementById('entry-pagination').innerHTML =
-      Utils.paginationHTML(_entriesPage, entries.length, ENTRIES_PER_PAGE);
+      Utils.paginationHTML(_entriesPage, entries.length, 'changeEntryPage', ENTRIES_PER_PAGE);
 
   } catch (err) {
     console.error(err);
@@ -5638,7 +5638,7 @@ async function loadAttachmentsMap(entryIds) {
 // ─────────────────────────────────────────────
 // 페이지 변경
 // ─────────────────────────────────────────────
-function changePage(page) {
+function changeEntryPage(page) {
   _entriesPage = page;
   loadMyEntries();
 }

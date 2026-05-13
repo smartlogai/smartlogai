@@ -1596,7 +1596,7 @@ async function loadApprovalList() {
 
     const pager = document.getElementById('approval-pagination');
     if (pager) {
-      pager.innerHTML = Utils.paginationHTML(_approvalPage, entries.length, APPROVAL_PER_PAGE);
+      pager.innerHTML = Utils.paginationHTML(_approvalPage, entries.length, 'changeApprovalPage', APPROVAL_PER_PAGE);
     }
 
   } catch (err) {
@@ -3633,7 +3633,7 @@ async function loadAttachmentsMap(entryIds) {
   } catch { return {}; }
 }
 
-function changePage(p) {
+function changeApprovalPage(p) {
   _approvalPage = p;
   loadApprovalList();
 }
