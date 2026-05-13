@@ -2744,7 +2744,6 @@ function _projRegCanApproveForBadge(session, row) {
       : String((row && row.reg_pa3_name) || '').trim());
   const myName = String((session && session.name) || '').trim();
   if (targetName && myName && _badgeLooseNameMatch(targetName, myName)) return true;
-  if (Auth.isTopMgr(session) && Number(step || 0) === Number(cnt || 0)) return true;
   return false;
 }
 
@@ -2780,8 +2779,19 @@ async function _countProjectApprovalBadge(session, force = false) {
   const byId = new Map((users || []).map((u) => [String(u.id || ''), u]));
   const myId = String(session.id || '');
   const myName = String(session.name || '');
+  const scopeUserIds = new Set(
+    (users || [])
+      .filter((u) => Auth.scopeMatch(session, u))
+      .map((u) => String(u.id || ''))
+      .filter(Boolean)
+  );
   const scoped = rows.filter((r) => {
     const creatorId = String((r && r.created_by) || '');
+    const inScopeByCreator = !!creatorId && (creatorId === myId || scopeUserIds.has(creatorId));
+    if (Auth.isTopMgr(session)) {
+      // Approval 화면 정책과 동일: 사업부장은 "내 스코프 등록자" 건만 카운트
+      return inScopeByCreator;
+    }
     if (!creatorId) {
       const pa1 = String((r && r.reg_pa1_id) || '');
       const pa2 = String((r && r.reg_pa2_id) || '');
@@ -2791,7 +2801,7 @@ async function _countProjectApprovalBadge(session, force = false) {
     if (_badgeLooseNameMatch((r && r.reg_pa1_name) || '', myName)) return true;
     if (_badgeLooseNameMatch((r && r.reg_pa2_name) || '', myName)) return true;
     if (_badgeLooseNameMatch((r && r.reg_pa3_name) || '', myName)) return true;
-    if (creatorId === myId) return true;
+    if (inScopeByCreator) return true;
     const creator = byId.get(creatorId);
     if (!creator) return false;
     return Auth.scopeMatch(session, creator);
