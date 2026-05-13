@@ -15,10 +15,58 @@ const APPROVAL_DEPT_OPTIONS = ['COB', 'CRB', 'CCB'];
 let _approvalCsTeamsByDept = { COB: [], CRB: [], CCB: [] };
 let _approvalAllCsTeamNames = [];
 let _approvalDeptByCsTeam = {};
+let _approvalScopeUserIdSet = new Set();
 
 /** Approval 상단 탭: timesheet | project (main.js lazy 버전과 맞출 것) */
 let _approvalMainTab = 'timesheet';
 const APPROVAL_PROJ_REG_SCRIPT_VER = '20260512projRegTopMgrAssignedOnly3';
+
+function _approvalNormLooseName(v) {
+  let s = String(v || '').toLowerCase();
+  s = s.replace(/\([^)]*\)/g, '');
+  s = s.replace(/[^0-9a-z가-힣]/g, '');
+  s = s.replace(/(staff|manager|director|topmgr|top_mgr|cpm)$/g, '');
+  s = s.replace(/(사원|대리|과장|차장|부장|팀장|실장|본부장|사업부장|이사|상무|전무|부사장|사장)$/g, '');
+  return s.trim();
+}
+
+function _approvalIsLooseNameMatch(a, b) {
+  const x = _approvalNormLooseName(a);
+  const y = _approvalNormLooseName(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  if (x.length >= 3 && y.includes(x)) return true;
+  if (y.length >= 3 && x.includes(y)) return true;
+  return false;
+}
+
+function _approvalTopMgrCanApproveByScopeRule(session, row, P) {
+  if (!session || !row || !P) return false;
+  const role = String(session.role || '').trim().toLowerCase();
+  if (role !== 'top_mgr') return false;
+  if (String((typeof P.normStatus === 'function' ? P.normStatus(row) : row.registration_status) || '').trim().toLowerCase() !== 'pending') return false;
+  const myIds = new Set([
+    String(session.id || '').trim(),
+    String(session.user_id || '').trim(),
+  ].filter(Boolean));
+  // 정책 고정: 사업부장은 "등록자가 내 사업부 스코프"인 pending 건을 승인대상으로 본다.
+  const creatorId = String((row && row.created_by) || '').trim();
+  if (creatorId) return myIds.has(creatorId) || _approvalScopeUserIdSet.has(creatorId);
+  // 과거 데이터(created_by 누락)는 승인자 매칭으로만 보정
+  const step = (typeof P.pendingStep === 'function') ? Number(P.pendingStep(row) || 0) : 0;
+  const eff = (typeof P.calcChain === 'function') ? P.calcChain(row) : null;
+  const totalSteps = Number(eff && eff.count || 0);
+  if (!step || !totalSteps) return false;
+  const targetId = String((eff && eff.chain && eff.chain[step - 1]) || '').trim();
+  if (targetId && myIds.has(targetId)) return true;
+  const usePa3OnStep2 = totalSteps < 3;
+  const targetName = String(
+    step === 1 ? (row && row.reg_pa1_name)
+    : (step === 2 ? (usePa3OnStep2 ? (row && row.reg_pa3_name) : (row && row.reg_pa2_name)) : (row && row.reg_pa3_name))
+  || '').trim();
+  const myName = String(session.name || '').trim();
+  return !!targetName && !!myName && _approvalIsLooseNameMatch(targetName, myName);
+}
 
 function _approvalPatchProjectRegRuntime(P) {
   if (!P || typeof P.canApproveRow !== 'function' || P.__approvalTopMgrGuardPatched) return;
@@ -27,29 +75,7 @@ function _approvalPatchProjectRegRuntime(P) {
     const base = originalCanApproveRow(session, row);
     const role = String(session && session.role || '').trim().toLowerCase();
     if (role !== 'top_mgr' || !row) return base;
-    const myIds = new Set([
-      String(session && session.id || '').trim(),
-      String(session && session.user_id || '').trim(),
-    ].filter(Boolean));
-    const rawIds = [
-      String((row && row.reg_pa1_id) || '').trim(),
-      String((row && row.reg_pa2_id) || '').trim(),
-      String((row && row.reg_pa3_id) || '').trim(),
-    ].filter(Boolean);
-    const chain = [];
-    rawIds.forEach((id) => { if (!chain.includes(id)) chain.push(id); });
-    if (!chain.length) return false;
-    let step = null;
-    if (!row.first_approved_at) step = 1;
-    else if (chain.length >= 3) {
-      if (!row.second_approved_at) step = 2;
-      else if (!row.final_approved_at) step = 3;
-    } else if (chain.length >= 2 && !row.final_approved_at) {
-      step = 2;
-    }
-    if (!step) return base;
-    const targetId = String(chain[step - 1] || '');
-    return !!targetId && myIds.has(targetId);
+    return _approvalTopMgrCanApproveByScopeRule(session, row, P);
   };
   P.__approvalTopMgrGuardPatched = true;
 }
@@ -182,23 +208,6 @@ async function _scopeProjectRowsForApproval(rows, session) {
   if (!myIds.size) return [];
   const myName = String(session.name || '').trim();
   const _norm = (v) => String(v || '').toLowerCase().replace(/\s+/g, '').trim();
-  const _normLoose = (v) => {
-    let s = String(v || '').toLowerCase();
-    s = s.replace(/\([^)]*\)/g, '');
-    s = s.replace(/[^0-9a-z가-힣]/g, '');
-    s = s.replace(/(staff|manager|director|topmgr|top_mgr|cpm)$/g, '');
-    s = s.replace(/(사원|대리|과장|차장|부장|팀장|실장|본부장|사업부장|이사|상무|전무|부사장|사장)$/g, '');
-    return s.trim();
-  };
-  const _isLooseNameMatch = (a, b) => {
-    const x = _normLoose(a);
-    const y = _normLoose(b);
-    if (!x || !y) return false;
-    if (x === y) return true;
-    if (x.length >= 3 && y.includes(x)) return true;
-    if (y.length >= 3 && x.includes(y)) return true;
-    return false;
-  };
   const myNameNorm = _norm(myName);
   let users = [];
   try {
@@ -212,6 +221,7 @@ async function _scopeProjectRowsForApproval(rows, session) {
       .map((u) => String(u.id || ''))
       .filter(Boolean)
   );
+  _approvalScopeUserIdSet = scopeUserIds;
   return rows.filter((r) => {
     const pa1 = String((r && r.reg_pa1_id) || '').trim();
     const pa2 = String((r && r.reg_pa2_id) || '').trim();
@@ -225,9 +235,9 @@ async function _scopeProjectRowsForApproval(rows, session) {
       const pa2Name = _norm((r && r.reg_pa2_name) || '');
       const pa3Name = _norm((r && r.reg_pa3_name) || '');
       if (myNameNorm === pa1Name || myNameNorm === pa2Name || myNameNorm === pa3Name) return true;
-      if (_isLooseNameMatch((r && r.reg_pa1_name) || '', myName)) return true;
-      if (_isLooseNameMatch((r && r.reg_pa2_name) || '', myName)) return true;
-      if (_isLooseNameMatch((r && r.reg_pa3_name) || '', myName)) return true;
+      if (_approvalIsLooseNameMatch((r && r.reg_pa1_name) || '', myName)) return true;
+      if (_approvalIsLooseNameMatch((r && r.reg_pa2_name) || '', myName)) return true;
+      if (_approvalIsLooseNameMatch((r && r.reg_pa3_name) || '', myName)) return true;
     }
 
     const creatorId = String((r && r.created_by) || '');
@@ -320,6 +330,7 @@ function _approvalProjCompSummary(row) {
 function _approvalProjCanApproveStrict(session, row, P) {
   if (!session || !row || !P) return false;
   if (Auth.isCeo && Auth.isCeo(session)) return true;
+  if (_approvalTopMgrCanApproveByScopeRule(session, row, P)) return true;
   const step = (typeof P.pendingStep === 'function') ? P.pendingStep(row) : null;
   if (!step) return false;
   const myIds = new Set([
@@ -333,7 +344,10 @@ function _approvalProjCanApproveStrict(session, row, P) {
     : (step === 2)
       ? String((usePa3OnStep2 ? row.reg_pa3_id : row.reg_pa2_id) || '').trim()
       : String((row && row.reg_pa3_id) || '').trim();
-  return !!targetId && myIds.has(targetId);
+  if (targetId && myIds.has(targetId)) return true;
+  const role = String(session.role || '').trim().toLowerCase();
+  if (role !== 'top_mgr') return false;
+  return false;
 }
 
 async function openApprovalProjectModal(id) {
@@ -454,27 +468,10 @@ async function loadApprovalProjectList() {
   }
   rows = (rows || []).filter((r) => P.normStatus(r) !== 'draft');
   rows = await _scopeProjectRowsForApproval(rows, session);
-  const _myIds = new Set([
-    String(session?.id || '').trim(),
-    String(session?.user_id || '').trim(),
-  ].filter(Boolean));
-  const _isMyProcessed = (r) => {
-    if (!_myIds.size || !r) return false;
-    const ids = [
-      String(r.first_approved_by || '').trim(),
-      String(r.second_approved_by || '').trim(),
-      String(r.final_approved_by || '').trim(),
-      String(r.rejected_by || '').trim(),
-    ].filter(Boolean);
-    return ids.some((id) => _myIds.has(id));
-  };
-  if (!Auth.isAdmin(session)) {
-    rows = rows.filter((r) => {
-      const canStrict = _approvalProjCanApproveStrict(session, r, P);
-      // 사업부장은 참고 목적으로 pending 건을 볼 수 있게 유지하되 승인대상은 strict 기준만 허용
-      if (Auth.isTopMgr(session) && P.normStatus(r) === 'pending') return true;
-      return canStrict || _isMyProcessed(r);
-    });
+  // Approval 정책: 승인대기 + 실제 승인 가능한 건만 노출 (참고용/처리이력 제외)
+  rows = rows.filter((r) => P.normStatus(r) === 'pending');
+  if (!Auth.canViewAll(session) && !Auth.isCeo(session)) {
+    rows = rows.filter((r) => _approvalProjCanApproveStrict(session, r, P));
   }
   const _sortTsPending = (r) => {
     const t = Number(r?.created_at || 0);
@@ -492,28 +489,16 @@ async function loadApprovalProjectList() {
     );
     return Number.isFinite(t) ? t : 0;
   };
-  const _statusRank = (r) => {
-    const st = P.normStatus(r);
-    if (st === 'rejected') return 0;
-    if (st === 'pending') return 1;
-    if (st === 'approved') return 2;
-    return 3;
-  };
+  const _statusRank = () => 1;
   rows.sort((a, b) => {
     const ra = _statusRank(a);
     const rb = _statusRank(b);
     if (ra !== rb) return ra - rb;
     const sa = P.normStatus(a);
     const sb = P.normStatus(b);
-    if (sa === 'approved' && sb === 'approved') {
-      const ta = _sortTsDone(a);
-      const tb = _sortTsDone(b);
-      if (ta !== tb) return tb - ta; // 승인완료는 최신순
-    } else {
-      const ta = _sortTsPending(a);
-      const tb = _sortTsPending(b);
-      if (ta !== tb) return ta - tb; // 그 외(반려/대기)는 과거순
-    }
+    const ta = _sortTsPending(a);
+    const tb = _sortTsPending(b);
+    if (ta !== tb) return ta - tb; // 승인대기 과거순
     return String(a?.id || '').localeCompare(String(b?.id || ''));
   });
   const projectPendingCount = rows.filter((r) => P.normStatus(r) === 'pending').length;
@@ -524,7 +509,6 @@ async function loadApprovalProjectList() {
   }
   tbody.innerHTML = rows.map((r, i) => {
     const st = P.normStatus(r);
-    const canApproveRow = st === 'pending' && _approvalProjCanApproveStrict(session, r, P);
     const codeDisp = (r.project_code && String(r.project_code).trim()) ? String(r.project_code) : '';
     const cd = r.created_at && Utils.formatDate ? Utils.formatDate(r.created_at) : (r.created_at || '—');
     const contribRaw = String(r.order_contributors_text || '');
@@ -533,21 +517,14 @@ async function loadApprovalProjectList() {
     const contribBtn = (contribCount && typeof P.openContribModal === 'function')
       ? `<button type="button" class="btn btn-sm btn-outline proj-reg-contrib-btn" onclick="SmartlogProjReg.openContribModal(decodeURIComponent('${encodeURIComponent(contribRaw)}'),'${contribLabel}')" title="수주 참여자 보기"><i class="fas fa-users"></i><span>참여 ${contribCount}</span></button>`
       : '<span style="font-size:12px;color:var(--text-muted)">-</span>';
-    const detailBtn = canApproveRow
-      ? `<button type="button" class="btn btn-sm btn-outline btn-icon" onclick="openApprovalProjectModal('${r.id}')" title="승인 처리"><i class="fas fa-edit"></i></button>`
-      : `<button type="button" class="btn btn-sm btn-outline btn-icon" onclick="openApprovalProjectModal('${r.id}')" title="참고 보기"><i class="fas fa-eye"></i></button>`;
+    const detailBtn = `<button type="button" class="btn btn-sm btn-outline btn-icon" onclick="openApprovalProjectModal('${r.id}')" title="승인 처리"><i class="fas fa-edit"></i></button>`;
     const actFallback = detailBtn;
     const act = `<div style="display:flex;gap:6px;justify-content:center;align-items:center;min-height:32px;width:100%">
         ${actFallback}
       </div>`;
-    const scopeBadge = st === 'pending'
-      ? (canApproveRow
-        ? `<div style="margin-top:4px"><span style="display:inline-flex;align-items:center;padding:1px 7px;border-radius:999px;font-size:10px;font-weight:700;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe">승인대상</span></div>`
-        : `<div style="margin-top:4px"><span style="display:inline-flex;align-items:center;padding:1px 7px;border-radius:999px;font-size:10px;font-weight:700;background:#f8fafc;color:#64748b;border:1px solid #e2e8f0">참고용</span></div>`)
-      : '';
     return `<tr>
       <td class="text-center" style="color:var(--text-muted)">${i + 1}</td>
-      <td class="text-center"><span class="${P.statusBadgeClass(st, r)}">${Utils.escHtml(P.statusLabel(st, r))}</span>${scopeBadge}</td>
+      <td class="text-center"><span class="${P.statusBadgeClass(st, r)}">${Utils.escHtml(P.statusLabel(st, r))}</span></td>
       <td>${codeDisp ? `<strong>${Utils.escHtml(codeDisp)}</strong>` : '<span class="proj-reg-code-empty">코드생성전</span>'}</td>
       <td>${Utils.escHtml(r.project_name || '')}</td>
       <td>${Utils.escHtml(r.client_name || '')}</td>
@@ -1299,22 +1276,6 @@ async function loadApprovalList() {
   const categoryFilter = (document.getElementById('filter-approval-category') || {}).value || '';
   const subFilter    = (document.getElementById('filter-approval-subcategory') || {}).value || '';
   const status       = document.getElementById('filter-approval-status').value;
-  const myIdNorm = String(session && session.id || '').trim();
-  const myNameNorm = String(session && session.name || '').toLowerCase().replace(/\s+/g, '').trim();
-  const _isAssignedToMe = (e) => {
-    if (!e) return false;
-    if (myIdNorm) {
-      if (String(e.approver_id || '').trim() === myIdNorm) return true;
-      if (String(e.reviewer2_id || '').trim() === myIdNorm) return true;
-      if (String(e.pre_approver_id || '').trim() === myIdNorm) return true;
-    }
-    if (myNameNorm) {
-      const nameHit = (v) => String(v || '').toLowerCase().replace(/\s+/g, '').trim() === myNameNorm;
-      if (nameHit(e.approver_name) || nameHit(e.reviewer2_name) || nameHit(e.pre_approver_name)) return true;
-    }
-    return false;
-  };
-
   try {
     const allUsers = await Master.users().catch(() => []);
     const usersById = _approvalBuildUserMap(allUsers);
@@ -1352,8 +1313,7 @@ async function loadApprovalList() {
       usersById
     );
     if (!Auth.canViewAll(session) && (orgFilter.hq || orgFilter.team)) {
-      // 내 승인 배정건은 조직 필터와 무관하게 반드시 노출
-      entries = entries.filter((e) => _approvalMatchOrgFilter(e, orgFilter, usersById) || _isAssignedToMe(e));
+      entries = entries.filter((e) => _approvalMatchOrgFilter(e, orgFilter, usersById));
     }
 
     if (entries.length === 0 && allFetched.length > 0 && Auth.canApprove(session)) {
@@ -1406,12 +1366,7 @@ async function loadApprovalList() {
       for (const e of entries) await _apvAttachProjectSubcategory(e);
     }
 
-    // 2차 승인자(본부장/사업부장) 화면: 본인이 처리/처리해야 하는 건만 노출
-    // - 2차 대기: submitted | pre_approved 이면서 reviewer2_id 또는 approver_id가 본인
-    //   (openApprovalModal·사이드바 배지 waitCount와 동일 — 팀장 본인 건 submitted 포함)
-    // - 본인 반려: rejected 이면서 reviewer_id가 본인(2차 반려)
-    // - 본인 승인: approved 이면서 reviewer_id가 본인(2차 최종승인)
-    // ※ 팀장 제출건 누락 방지를 위해 대분류 제한(needsSecondApproval)은 적용하지 않음
+    // Approval 정책: 2차 승인자는 실제 승인대기 건(submitted/pre_approved)만 노출
     if (Auth.canApprove2nd(session)) {
       const myId = String(session.id);
       const myNameNorm = String(session.name || '').toLowerCase().replace(/\s+/g, '').trim();
@@ -1420,12 +1375,8 @@ async function loadApprovalList() {
         String(e.approver_name || '').toLowerCase().replace(/\s+/g, '').trim() === myNameNorm;
       entries = entries.filter(e => {
         const st = e.status;
-        if (st === 'submitted' || st === 'pre_approved') {
-          return String(e.reviewer2_id || '') === myId || String(e.approver_id || '') === myId || hitByName(e);
-        }
-        if (st === 'rejected') return String(e.reviewer_id || '') === myId;
-        if (st === 'approved') return String(e.reviewer_id || '') === myId;
-        return false;
+        if (!(st === 'submitted' || st === 'pre_approved')) return false;
+        return String(e.reviewer2_id || '') === myId || String(e.approver_id || '') === myId || hitByName(e);
       });
     }
 
