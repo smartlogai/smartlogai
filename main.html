@@ -26,7 +26,7 @@
   <script src="https://cdn.jsdelivr.net/npm/turndown/dist/turndown.js" defer></script>
   <!-- turndown-plugin-gfm: 테이블 등 GFM 확장 지원 -->
   <script src="https://cdn.jsdelivr.net/npm/turndown-plugin-gfm/dist/turndown-plugin-gfm.js" defer></script>
-  <link rel="stylesheet" href="css/style.css?v=20260512approvalFilterLayout7" />
+  <link rel="stylesheet" href="css/style.css?v=20260514projRegRangeLayout2" />
   <!-- Chart.js: 대시보드/분석에서 사용 → defer로 DOM 파싱 차단 방지 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
   <!-- ★ 무거운 라이브러리는 필요한 시점에 동적으로 로드 (초기 blocking 제거) -->
@@ -2441,10 +2441,10 @@
                 <button type="button" class="btn btn-sm btn-primary" id="pm-progress-search-btn"><i class="fas fa-search"></i> 조회</button>
               </div>
               <div class="pm-progress-quick-range-group">
-                <button type="button" class="pm-progress-quick-range-btn" data-pm-progress-range="today">당일</button>
-                <button type="button" class="pm-progress-quick-range-btn" data-pm-progress-range="yesterday">전일</button>
-                <button type="button" class="pm-progress-quick-range-btn" data-pm-progress-range="week">1주</button>
-                <button type="button" class="pm-progress-quick-range-btn" data-pm-progress-range="month">1개월</button>
+                <button type="button" class="pm-progress-quick-range-btn" data-pm-progress-range="this_month">당월</button>
+                <button type="button" class="pm-progress-quick-range-btn" data-pm-progress-range="last_3m">최근 3개월</button>
+                <button type="button" class="pm-progress-quick-range-btn" data-pm-progress-range="last_6m">최근 6개월</button>
+                <button type="button" class="pm-progress-quick-range-btn" data-pm-progress-range="last_1y">최근 1년</button>
               </div>
             </div>
             <div class="table-wrapper" style="border:1px solid var(--border-light);border-radius:8px;overflow:auto">
@@ -2486,8 +2486,16 @@
               <div class="proj-reg-list-filters" id="proj-reg-list-filters">
                 <div class="proj-reg-list-filters-grid">
                   <div class="form-group" style="margin:0">
-                    <label class="form-label" for="proj-reg-filter-org">조직 (사업부/본부)</label>
-                    <select id="proj-reg-filter-org" class="form-control" title="조직(사업부/본부)"></select>
+                    <label class="form-label" for="proj-reg-filter-dept">사업부</label>
+                    <select id="proj-reg-filter-dept" class="form-control" title="사업부"></select>
+                  </div>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label" for="proj-reg-filter-hq">본부</label>
+                    <select id="proj-reg-filter-hq" class="form-control" title="본부"></select>
+                  </div>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label" for="proj-reg-filter-csteam">고객지원팀</label>
+                    <select id="proj-reg-filter-csteam" class="form-control" title="고객지원팀"></select>
                   </div>
                   <div class="form-group" style="margin:0">
                     <label class="form-label" for="proj-reg-filter-client">고객사</label>
@@ -2507,9 +2515,21 @@
                       <option value="rejected">반려</option>
                     </select>
                   </div>
-                </div>
-                <div class="proj-reg-list-filters-actions">
-                  <button type="button" class="btn btn-sm btn-outline" onclick="projRegResetListFilters()"><i class="fas fa-undo"></i> 조건 초기화</button>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label" for="proj-reg-filter-date-from">등록일(From)</label>
+                    <input type="date" id="proj-reg-filter-date-from" class="form-control" />
+                  </div>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label" for="proj-reg-filter-date-to">등록일(To)</label>
+                    <input type="date" id="proj-reg-filter-date-to" class="form-control" />
+                  </div>
+                  <div class="proj-reg-list-range-row" aria-label="기간 빠른 선택">
+                    <button type="button" class="btn btn-sm btn-ghost proj-reg-quick-range-btn" data-proj-reg-range="this_month">당월</button>
+                    <button type="button" class="btn btn-sm btn-ghost proj-reg-quick-range-btn" data-proj-reg-range="last_3m">최근 3개월</button>
+                    <button type="button" class="btn btn-sm btn-ghost proj-reg-quick-range-btn" data-proj-reg-range="last_6m">최근 6개월</button>
+                    <button type="button" class="btn btn-sm btn-ghost proj-reg-quick-range-btn" data-proj-reg-range="last_1y">최근 1년</button>
+                    <button type="button" class="btn btn-sm btn-outline proj-reg-reset-inline-btn" onclick="projRegResetListFilters()"><i class="fas fa-undo"></i> 조건 초기화</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -5770,10 +5790,10 @@
 <script src="js/approval.js?v=20260513approvalScopeOnly6"></script>
 <script src="js/analysis.js?v=20260410a"></script>
 <script src="js/archive.js?v=20260410d"></script>
-<script src="js/project-management.js?v=20260513pmDeptFilterFix1"></script>
+<script src="js/project-management.js?v=20260514pmRangePreset1"></script>
 <script src="js/project-dashboard-v2.js?v=20260430projectDashboardRevamp1"></script>
 <!-- master.js / users.js: Settings 메뉴 진입 시 동적 로드 (초기 81KB 절감) -->
-<script src="js/main.js?v=20260513projRegPendingEditDelete2"></script>
+<script src="js/main.js?v=20260514projRegFilterAlign3"></script>
 
 
 </body>

@@ -2443,20 +2443,28 @@ function _pmApplyProgressPreset(kind) {
   if (!fromEl || !toEl) return;
   const today = new Date();
   const toDateText = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const addMonths = (base, delta) => {
+    const d = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+    d.setMonth(d.getMonth() + delta);
+    return d;
+  };
   let from = '';
   let to = '';
-  if (kind === 'today') {
-    from = to = toDateText(today);
-  } else if (kind === 'yesterday') {
-    const y = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-    from = to = toDateText(y);
-  } else if (kind === 'week') {
-    const w = new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000);
-    from = toDateText(w);
-    to = toDateText(today);
-  } else if (kind === 'month') {
+  if (kind === 'this_month') {
     const m = new Date(today.getFullYear(), today.getMonth(), 1);
     from = toDateText(m);
+    to = toDateText(today);
+  } else if (kind === 'last_3m') {
+    const m = addMonths(today, -3);
+    from = toDateText(m);
+    to = toDateText(today);
+  } else if (kind === 'last_6m') {
+    const m = addMonths(today, -6);
+    from = toDateText(m);
+    to = toDateText(today);
+  } else if (kind === 'last_1y') {
+    const y = addMonths(today, -12);
+    from = toDateText(y);
     to = toDateText(today);
   }
   fromEl.value = from;

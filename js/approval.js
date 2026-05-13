@@ -25,7 +25,7 @@ function _approvalIsPageActive() {
 
 /** Approval 상단 탭: timesheet | project (main.js lazy 버전과 맞출 것) */
 let _approvalMainTab = 'timesheet';
-const APPROVAL_PROJ_REG_SCRIPT_VER = '20260513projRegPendingEditDelete2';
+const APPROVAL_PROJ_REG_SCRIPT_VER = '20260514projRegFilterAlign3';
 
 function _approvalNormLooseName(v) {
   let s = String(v || '').toLowerCase();

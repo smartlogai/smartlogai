@@ -2412,14 +2412,48 @@ textarea.form-control {
   min-height: 34px;
   padding: 4px 8px;
 }
+#page-project-register .proj-reg-list-range-row {
+  grid-column: 3 / 5;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  margin-top: 2px;
+}
+#page-project-register .proj-reg-list-range-row .proj-reg-quick-range-btn {
+  min-height: 32px;
+  padding: 6px 14px;
+  font-size: 12px;
+  border-radius: 9px;
+}
+#page-project-register .proj-reg-list-range-row .proj-reg-reset-inline-btn {
+  margin-left: auto;
+  min-height: 32px;
+  padding: 6px 12px;
+  border-radius: 9px;
+}
 @media (max-width: 1280px) {
   #page-project-register .proj-reg-list-filters-grid {
     grid-template-columns: repeat(2, minmax(160px, 1fr));
+  }
+  #page-project-register .proj-reg-list-range-row {
+    grid-column: 1 / -1;
+    margin-top: 4px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  #page-project-register .proj-reg-list-range-row .proj-reg-reset-inline-btn {
+    margin-left: 0;
   }
 }
 @media (max-width: 720px) {
   #page-project-register .proj-reg-list-filters-grid {
     grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+  #page-project-register .proj-reg-list-range-row .proj-reg-quick-range-btn {
+    min-height: 30px;
+    padding: 5px 10px;
+    font-size: 11.5px;
   }
 }
 #page-project-register .proj-reg-list-filters-actions {

@@ -2485,7 +2485,8 @@ function _projRegOrgParts(row) {
   const u = _projRegCreatorUser(row);
   const dept = String((u && u.dept_name) || (row && row.dept_name) || '').trim();
   const hq = String((u && u.hq_name) || (row && row.hq_name) || '').trim();
-  return { dept, hq };
+  const cs = String((u && (u.cs_team_name || u.team_name)) || (row && (row.cs_team_name || row.team_name)) || '').trim();
+  return { dept, hq, cs };
 }
 
 function _projRegNormalizeOrgFilter(v) {
@@ -2494,7 +2495,25 @@ function _projRegNormalizeOrgFilter(v) {
 
 function _projRegDateStr(v) {
   if (v == null || v === '') return '';
-  return String(v).slice(0, 10);
+  const raw = String(v).trim();
+  if (!raw) return '';
+  // epoch(ms/sec) 값과 ISO 날짜 문자열 모두 지원
+  if (/^\d+$/.test(raw)) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) {
+      const ms = n > 1000000000000 ? n : n * 1000;
+      const d = new Date(ms);
+      if (!Number.isNaN(d.getTime())) {
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      }
+    }
+  }
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  const d = new Date(raw);
+  if (!Number.isNaN(d.getTime())) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  return '';
 }
 
 /** 등록일(행 created_at)이 필터 [fromF, toF] 구간에 포함되면 true */
@@ -2530,58 +2549,93 @@ function _projRegPopulateListMainSelect() {
 }
 
 function _projRegPopulateListFilterDropdowns() {
-  const orgSel = document.getElementById('proj-reg-filter-org');
-  if (orgSel) {
-    const prev = orgSel.value;
-    const orgSet = new Set();
+  const uniq = (arr) => [...new Set((arr || []).filter(Boolean).map((v) => String(v).trim()))].sort((a, b) => a.localeCompare(b, 'ko'));
+  const deptEl = document.getElementById('proj-reg-filter-dept');
+  const hqEl = document.getElementById('proj-reg-filter-hq');
+  const csEl = document.getElementById('proj-reg-filter-csteam');
+  const prev = {
+    dept: deptEl?.value || '',
+    hq: hqEl?.value || '',
+    cs: csEl?.value || '',
+  };
 
-    // 우선: 현재 화면에 실제 표시 가능한 행 기준으로 조직 옵션 구성
-    // - 사업부 단독(예: CRB)
-    // - 사업부/본부 조합(예: CRB / 수입통관업무본부)
-    (_projRegRows || []).forEach((r) => {
-      const parts = _projRegOrgParts(r);
-      const dept = String(parts.dept || '').trim();
-      const hq = String(parts.hq || '').trim();
-      if (dept) orgSet.add(dept);
-      if (dept && hq) orgSet.add(`${dept} / ${hq}`);
-      else if (!dept && hq) orgSet.add(hq);
-    });
+  const rows = (_projRegRows || []).map((r) => {
+    const p = _projRegOrgParts(r);
+    return { dept: p.dept, hq: p.hq, cs: p.cs };
+  });
+  const depts = uniq(rows.map((x) => x.dept));
+  const deptRows = prev.dept ? rows.filter((x) => x.dept === prev.dept) : rows;
+  const hqs = uniq(deptRows.map((x) => x.hq));
+  const safeHq = prev.dept && prev.hq && hqs.includes(prev.hq) ? prev.hq : '';
+  const hqRows = safeHq ? deptRows.filter((x) => x.hq === safeHq) : deptRows;
+  const css = uniq(hqRows.map((x) => x.cs));
+  const safeCs = safeHq && prev.cs && css.includes(prev.cs) ? prev.cs : '';
 
-    // 목록 데이터가 아직 없을 때만 사용자 기준으로 보조 구성
-    if (!orgSet.size) {
-      (_projRegUsers || [])
-        .filter((u) => u.deleted !== true && u.is_active !== false)
-        .forEach((u) => {
-          const dept = String(u.dept_name || '').trim();
-          const hq = String(u.hq_name || '').trim();
-          if (dept) orgSet.add(dept);
-          if (dept && hq) orgSet.add(`${dept} / ${hq}`);
-          else if (!dept && hq) orgSet.add(hq);
-        });
-    }
-
-    orgSel.innerHTML = '<option value="">사업부+본부 전체</option>';
-    [...orgSet].sort((a, b) => a.localeCompare(b, 'ko')).forEach((label) => {
-      const o = document.createElement('option');
-      o.value = label;
-      o.textContent = label;
-      orgSel.appendChild(o);
-    });
-    if (prev && [...orgSel.options].some((o) => o.value === prev)) orgSel.value = prev;
+  if (deptEl) {
+    deptEl.innerHTML = '<option value="">사업부 전체</option>' + depts.map((v) => `<option value="${Utils.escHtml(v)}">${Utils.escHtml(v)}</option>`).join('');
+    if (prev.dept && [...deptEl.options].some((o) => o.value === prev.dept)) deptEl.value = prev.dept;
   }
+  if (hqEl) {
+    hqEl.innerHTML = '<option value="">본부 전체</option>' + hqs.map((v) => `<option value="${Utils.escHtml(v)}">${Utils.escHtml(v)}</option>`).join('');
+    if (safeHq && [...hqEl.options].some((o) => o.value === safeHq)) hqEl.value = safeHq;
+  }
+  if (csEl) {
+    csEl.innerHTML = '<option value="">고객지원팀 전체</option>' + css.map((v) => `<option value="${Utils.escHtml(v)}">${Utils.escHtml(v)}</option>`).join('');
+    if (safeCs && [...csEl.options].some((o) => o.value === safeCs)) csEl.value = safeCs;
+  }
+}
+
+function _projRegApplyListDatePreset(kind) {
+  const fromEl = document.getElementById('proj-reg-filter-date-from');
+  const toEl = document.getElementById('proj-reg-filter-date-to');
+  if (!fromEl || !toEl) return;
+  const now = new Date();
+  const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const addMonths = (base, delta) => {
+    const d = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+    d.setMonth(d.getMonth() + delta);
+    return d;
+  };
+  let from = '';
+  let to = fmt(now);
+  if (kind === 'this_month') {
+    from = fmt(new Date(now.getFullYear(), now.getMonth(), 1));
+  } else if (kind === 'last_3m') {
+    from = fmt(addMonths(now, -3));
+  } else if (kind === 'last_6m') {
+    from = fmt(addMonths(now, -6));
+  } else if (kind === 'last_1y') {
+    from = fmt(addMonths(now, -12));
+  }
+  fromEl.value = from;
+  toEl.value = to;
+  document.querySelectorAll('.proj-reg-quick-range-btn').forEach((btn) => {
+    btn.classList.toggle('is-active', btn.dataset.projRegRange === kind);
+  });
 }
 
 function _projRegBindListFiltersOnce() {
   if (_projRegListFiltersBound) return;
   const main = document.getElementById('proj-reg-filter-main');
   if (main) main.addEventListener('change', () => projRegRenderList());
-  ['proj-reg-filter-org', 'proj-reg-filter-status'].forEach((id) => {
+  ['proj-reg-filter-dept', 'proj-reg-filter-hq', 'proj-reg-filter-csteam', 'proj-reg-filter-status'].forEach((id) => {
     const el = document.getElementById(id);
-    if (el) el.addEventListener('change', () => projRegRenderList());
+    if (el) {
+      el.addEventListener('change', () => {
+        if (id === 'proj-reg-filter-dept' || id === 'proj-reg-filter-hq') _projRegPopulateListFilterDropdowns();
+        projRegRenderList();
+      });
+    }
   });
-  ['proj-reg-filter-client'].forEach((id) => {
+  ['proj-reg-filter-client', 'proj-reg-filter-date-from', 'proj-reg-filter-date-to'].forEach((id) => {
     const el = document.getElementById(id);
-    if (el) el.addEventListener('input', () => projRegRenderList());
+    if (el) el.addEventListener(id.includes('date') ? 'change' : 'input', () => projRegRenderList());
+  });
+  document.querySelectorAll('.proj-reg-quick-range-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      _projRegApplyListDatePreset(btn.dataset.projRegRange || '');
+      projRegRenderList();
+    });
   });
   _projRegListFiltersBound = true;
 }
@@ -2589,36 +2643,39 @@ function _projRegBindListFiltersOnce() {
 function projRegResetListFilters() {
   [
     'proj-reg-filter-main',
-    'proj-reg-filter-org',
+    'proj-reg-filter-dept',
+    'proj-reg-filter-hq',
+    'proj-reg-filter-csteam',
     'proj-reg-filter-client',
     'proj-reg-filter-status',
+    'proj-reg-filter-date-from',
+    'proj-reg-filter-date-to',
   ].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
+  document.querySelectorAll('.proj-reg-quick-range-btn').forEach((btn) => btn.classList.remove('is-active'));
+  _projRegPopulateListFilterDropdowns();
   projRegRenderList();
 }
 
 function _projRegApplyListFilters(rowsIn) {
   const mainMc = (document.getElementById('proj-reg-filter-main')?.value || '').trim();
-  const orgFilter = (document.getElementById('proj-reg-filter-org')?.value || '').trim();
+  const fDept = (document.getElementById('proj-reg-filter-dept')?.value || '').trim();
+  const fHq = (document.getElementById('proj-reg-filter-hq')?.value || '').trim();
+  const fCs = (document.getElementById('proj-reg-filter-csteam')?.value || '').trim();
   const clientKw = (document.getElementById('proj-reg-filter-client')?.value || '').trim().toLowerCase();
   const stF = (document.getElementById('proj-reg-filter-status')?.value || '').trim().toLowerCase();
+  const fromF = (document.getElementById('proj-reg-filter-date-from')?.value || '').trim();
+  const toF = (document.getElementById('proj-reg-filter-date-to')?.value || '').trim();
 
   return rowsIn.filter((r) => {
     const st = _projRegNormStatus(r);
     if (mainMc && _projRegRowMainCode(r) !== mainMc) return false;
-    if (orgFilter) {
-      const { dept, hq } = _projRegOrgParts(r);
-      const picked = _projRegNormalizeOrgFilter(orgFilter);
-      // 사업부만 선택하면 해당 사업부 전체(본부 무관) 포함
-      if (!picked.includes('/')) {
-        if (!dept || dept !== picked) return false;
-      } else {
-        const rowOrg = _projRegNormalizeOrgFilter(dept && hq ? `${dept}/${hq}` : (dept || hq || ''));
-        if (rowOrg !== picked) return false;
-      }
-    }
+    const p = _projRegOrgParts(r);
+    if (fDept && String(p.dept || '') !== fDept) return false;
+    if (fHq && String(p.hq || '') !== fHq) return false;
+    if (fCs && String(p.cs || '') !== fCs) return false;
     if (clientKw) {
       const cb = [r.client_name, r.client_id].map((x) => String(x || '').toLowerCase()).join(' ');
       if (!cb.includes(clientKw)) return false;
@@ -2632,6 +2689,7 @@ function _projRegApplyListFilters(rowsIn) {
         return false;
       }
     }
+    if (!_projRegCreatedAtInRange(r, fromF, toF)) return false;
     return true;
   });
 }
