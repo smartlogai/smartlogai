@@ -2894,9 +2894,10 @@
                 <div class="proj-reg-footer-actions" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
                   <button type="button" class="btn btn-ghost" onclick="projRegShowList()">취소</button>
                   <span id="proj-reg-footer-draft" style="display:none;gap:8px;align-items:center">
-                    <button type="button" class="btn btn-outline" onclick="projRegSaveDraft()"><i class="fas fa-file-alt"></i> 임시저장</button>
-                    <button type="button" class="btn btn-primary" onclick="projRegSubmitForApproval()"><i class="fas fa-paper-plane"></i> 승인 요청</button>
+                    <button type="button" id="proj-reg-btn-save-draft" class="btn btn-outline" onclick="projRegSaveDraft()"><i class="fas fa-file-alt"></i> 임시저장</button>
+                    <button type="button" id="proj-reg-btn-submit-approval" class="btn btn-primary" onclick="projRegSubmitForApproval()"><i class="fas fa-paper-plane"></i> 승인 요청</button>
                   </span>
+                  <button type="button" id="proj-reg-btn-delete" class="btn btn-danger" style="display:none" onclick="projRegDeleteCurrent()"><i class="fas fa-trash"></i> 삭제</button>
                   <span id="proj-reg-footer-approval-redirect" style="display:none;align-items:center;gap:8px;max-width:520px;font-size:12.5px;color:#334155;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 12px">
                     <i class="fas fa-external-link-alt" style="color:#2563eb;flex-shrink:0"></i>
                     <span>프로젝트 <strong>승인·반려</strong>는 <strong>Approval → 프로젝트 승인</strong> 탭에서 처리합니다.</span>
@@ -4590,6 +4591,9 @@
     <div class="modal-body" id="projectApprovalModalBody"></div>
     <div class="modal-footer">
       <button type="button" class="btn btn-ghost" onclick="closeProjectApprovalModal()">닫기</button>
+      <button type="button" class="btn btn-outline" id="projectApprovalEditBtn" onclick="openApprovalProjectEdit()" style="display:none">
+        <i class="fas fa-pen"></i> 수정 후 승인
+      </button>
       <button type="button" class="btn btn-danger" id="projectApprovalRejectBtn" onclick="processProjectApproval('rejected')" style="display:none">
         <i class="fas fa-times"></i> 반려
       </button>
@@ -5763,13 +5767,13 @@
 <script src="js/dashboard.js?v=20260509dashDailyAvgRule3"></script>
 <script src="js/entry.js?v=20260512managerApprovalTopMgr2nd1"></script>
 <script src="js/daily-module.js?v=20260419dailyModePlan1"></script>
-<script src="js/approval.js?v=20260513approvalScopeOnly2"></script>
+<script src="js/approval.js?v=20260513approvalScopeOnly3"></script>
 <script src="js/analysis.js?v=20260410a"></script>
 <script src="js/archive.js?v=20260410d"></script>
 <script src="js/project-management.js?v=20260420pmProgressCascade3"></script>
 <script src="js/project-dashboard-v2.js?v=20260430projectDashboardRevamp1"></script>
 <!-- master.js / users.js: Settings 메뉴 진입 시 동적 로드 (초기 81KB 절감) -->
-<script src="js/main.js?v=20260512projRegTopMgrAssignedOnly3"></script>
+<script src="js/main.js?v=20260513projRegPendingEditDelete1"></script>
 
 
 </body>

@@ -682,9 +682,21 @@ function projRegUpdateFormFooter(session, editId, row) {
   const st = editId && row ? _projRegNormStatus(row) : 'draft';
   const owner = !editId || _projRegIsOwner(session, row);
   const canAp = row && st === 'pending' && _projRegCanApproveRow(session, row);
+  const pendingStep = row && st === 'pending' ? _projRegPendingStep(row) : null;
+  const canOwnerEditPending = !!(row && st === 'pending' && owner && pendingStep === 1);
+  const canDeleteCurrent = !!(
+    row && (
+      st === 'draft' ||
+      st === 'rejected' ||
+      (st === 'pending' && pendingStep === 1 && owner) ||
+      String(session && session.role || '') === 'admin'
+    )
+  );
   const footDraft = document.getElementById('proj-reg-footer-draft');
   const footRedirect = document.getElementById('proj-reg-footer-approval-redirect');
   const btnAppr = document.getElementById('proj-reg-btn-save-approved');
+  const btnDelete = document.getElementById('proj-reg-btn-delete');
+  const btnSubmitApproval = document.getElementById('proj-reg-btn-submit-approval');
   const banner = document.getElementById('proj-reg-status-banner');
   if (banner) {
     banner.hidden = !editId || !row;
@@ -710,6 +722,8 @@ function projRegUpdateFormFooter(session, editId, row) {
   if (footDraft) footDraft.style.display = 'none';
   if (footRedirect) footRedirect.style.display = 'none';
   if (btnAppr) btnAppr.style.display = 'none';
+  if (btnDelete) btnDelete.style.display = canDeleteCurrent ? 'inline-flex' : 'none';
+  if (btnSubmitApproval) btnSubmitApproval.style.display = 'inline-flex';
 
   if (!editId) {
     if (footDraft) footDraft.style.display = 'inline-flex';
@@ -735,10 +749,19 @@ function projRegUpdateFormFooter(session, editId, row) {
     if (yymmEl) yymmEl.disabled = true;
     return;
   }
+  if (canOwnerEditPending) {
+    // 등록자는 1차 승인 전(pending step=1)까지 수정/삭제 가능
+    if (footDraft) footDraft.style.display = 'inline-flex';
+    projRegSetFormFieldsDisabled(false);
+    if (btnSubmitApproval) btnSubmitApproval.style.display = 'none';
+    return;
+  }
   if (st === 'pending' && canAp) {
     if (_projRegOpenedFromApprovalDetail) {
       if (footDraft) footDraft.style.display = 'inline-flex';
       projRegSetFormFieldsDisabled(false);
+      // 승인권자 수정 모드에서는 임시저장만 허용하고 승인요청은 숨김
+      if (btnSubmitApproval) btnSubmitApproval.style.display = 'none';
     } else {
       if (footRedirect) footRedirect.style.display = 'inline-flex';
       projRegSetFormFieldsDisabled(true);
@@ -3401,7 +3424,9 @@ async function projRegSaveDraft(opts = {}) {
         return false;
       }
       const st = _projRegNormStatus(prev);
-      if (st === 'pending' && !canEditFromApproval) {
+      const pendingStep = st === 'pending' ? _projRegPendingStep(prev) : null;
+      const canOwnerEditPending = !!(_projRegIsOwner(session, prev) && pendingStep === 1);
+      if (st === 'pending' && !canEditFromApproval && !canOwnerEditPending) {
         Toast.warning('승인 대기 중에는 수정할 수 없습니다.');
         return false;
       }
@@ -3998,8 +4023,14 @@ async function projRegDelete(id) {
   if (!row) return;
   const st = _projRegNormStatus(row);
   const owner = _projRegIsOwner(session, row);
-  if (st !== 'draft' && st !== 'rejected') {
-    Toast.warning('임시저장·반려 상태만 삭제할 수 있습니다.');
+  const pendingStep = st === 'pending' ? _projRegPendingStep(row) : null;
+  const canDeleteByStatus = (
+    st === 'draft' ||
+    st === 'rejected' ||
+    (st === 'pending' && pendingStep === 1)
+  );
+  if (!canDeleteByStatus) {
+    Toast.warning('임시저장·반려·1차 승인 전 승인대기 상태만 삭제할 수 있습니다.');
     return;
   }
   if (!owner && session.role !== 'admin') {
@@ -4017,6 +4048,11 @@ async function projRegDelete(id) {
   }
 }
 
+function projRegDeleteCurrent() {
+  const id = document.getElementById('proj-reg-edit-id')?.value;
+  if (id) projRegDelete(id);
+}
+
 window.init_project_register = init_project_register;
 window.projRegShowList = projRegShowList;
 window.projRegShowForm = projRegShowForm;
@@ -4031,6 +4067,7 @@ window.projRegReject = projRegReject;
 window.projRegApproveCurrent = projRegApproveCurrent;
 window.projRegRejectCurrent = projRegRejectCurrent;
 window.projRegDelete = projRegDelete;
+window.projRegDeleteCurrent = projRegDeleteCurrent;
 window.projRegOnCodeTypeChange = projRegOnCodeTypeChange;
 window.projRegScrollToSection = projRegScrollToSection;
 window.projRegRefreshProgress = projRegRefreshProgress;

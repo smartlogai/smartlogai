@@ -19,7 +19,7 @@ let _approvalScopeUserIdSet = new Set();
 
 /** Approval 상단 탭: timesheet | project (main.js lazy 버전과 맞출 것) */
 let _approvalMainTab = 'timesheet';
-const APPROVAL_PROJ_REG_SCRIPT_VER = '20260512projRegTopMgrAssignedOnly3';
+const APPROVAL_PROJ_REG_SCRIPT_VER = '20260513projRegPendingEditDelete1';
 
 function _approvalNormLooseName(v) {
   let s = String(v || '').toLowerCase();
@@ -380,6 +380,7 @@ async function openApprovalProjectModal(id) {
   const body = document.getElementById('projectApprovalModalBody');
   const approveBtn = document.getElementById('projectApprovalApproveBtn');
   const rejectBtn = document.getElementById('projectApprovalRejectBtn');
+  const editBtn = document.getElementById('projectApprovalEditBtn');
   if (!body || !approveBtn || !rejectBtn) return;
   body.innerHTML = `
     <div style="display:grid;grid-template-columns:130px 1fr;gap:8px 12px;font-size:13px;line-height:1.55">
@@ -402,12 +403,34 @@ async function openApprovalProjectModal(id) {
   `;
   approveBtn.style.display = canDo ? 'inline-flex' : 'none';
   rejectBtn.style.display = canDo ? 'inline-flex' : 'none';
+  if (editBtn) editBtn.style.display = canDo ? 'inline-flex' : 'none';
   openModal('projectApprovalModal');
 }
 
 function closeProjectApprovalModal() {
   _approvalProjTarget = null;
   closeModal('projectApprovalModal');
+}
+
+async function openApprovalProjectEdit() {
+  const id = String((_approvalProjTarget && _approvalProjTarget.id) || '').trim();
+  if (!id) return;
+  let P = window.SmartlogProjReg;
+  if (!P || typeof P.openDetailFromApproval !== 'function') {
+    try {
+      await _approvalEnsureProjRegScript();
+      P = window.SmartlogProjReg;
+    } catch (e) {
+      Toast.error('프로젝트 수정 화면을 불러오지 못했습니다.');
+      return;
+    }
+  }
+  if (!P || typeof P.openDetailFromApproval !== 'function') {
+    Toast.error('프로젝트 수정 기능을 찾을 수 없습니다.');
+    return;
+  }
+  closeProjectApprovalModal();
+  await P.openDetailFromApproval(id);
 }
 
 function openApprovalProjectFile(urlEnc) {
@@ -540,6 +563,7 @@ window.switchApprovalMainTab = switchApprovalMainTab;
 window.loadApprovalProjectList = loadApprovalProjectList;
 window.openApprovalProjectModal = openApprovalProjectModal;
 window.closeProjectApprovalModal = closeProjectApprovalModal;
+window.openApprovalProjectEdit = openApprovalProjectEdit;
 window.processProjectApproval = processProjectApproval;
 window.openApprovalProjectFile = openApprovalProjectFile;
 
