@@ -2984,10 +2984,14 @@ function _projRegCollectBilling() {
 function _projRegBillingHasAnyAmount(billing) {
   if (!billing || typeof billing !== 'object') return false;
   const keys = ['down', 'interim', 'final', 'additional', 'success'];
-  return keys.some((k) => {
+  const hasPositiveAmount = keys.some((k) => {
     const n = Number(billing?.[k]?.amount || 0);
     return Number.isFinite(n) && n > 0;
   });
+  if (hasPositiveAmount) return true;
+  // 성공보수는 금액이 0이어도 조건 문구(예: "00금액의 0%")가 있으면 유효로 본다.
+  const successTerms = String(billing?.success?.terms_note || '').trim();
+  return successTerms.length > 0;
 }
 
 async function projRegShowForm(editId, opts) {
@@ -3484,7 +3488,7 @@ async function projRegSubmitForApproval() {
     return;
   }
   if (!_projRegBillingHasAnyAmount(f.billing)) {
-    Toast.warning('보수조건 금액(착수금/중도금/잔금/Time Charge/성공보수) 중 최소 1개를 입력하세요.');
+    Toast.warning('보수조건 금액(착수금/중도금/잔금/Time Charge/성공보수) 또는 성공보수 조건 문구를 입력하세요.');
     return;
   }
   const contribValid = _projRegValidateContributorsForApproval();
