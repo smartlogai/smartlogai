@@ -2966,6 +2966,46 @@ function _pmInvoicePmAndTeam(project) {
   };
 }
 
+function _pmNormDeptCode(v) {
+  const s = String(v || '').trim().toUpperCase();
+  if (!s) return '';
+  if (s.includes('COB')) return 'COB';
+  if (s.includes('CRB')) return 'CRB';
+  if (s.includes('CCB')) return 'CCB';
+  return String(v || '').trim();
+}
+
+function _pmResolveProjectOrg(project, userMap) {
+  const p = project || {};
+  const map = userMap || {};
+  const cpm = map[String(p.cpm_user_id || '').trim()] || null;
+  const creator = map[String(p.created_by || '').trim()] || null;
+  const deptRaw = String(
+    (cpm && cpm.dept_name)
+    || (creator && creator.dept_name)
+    || p.dept_name
+    || ''
+  ).trim();
+  const hqRaw = String(
+    (cpm && cpm.hq_name)
+    || (creator && creator.hq_name)
+    || p.hq_name
+    || ''
+  ).trim();
+  const csRaw = String(
+    (cpm && (cpm.cs_team_name || cpm.team_name))
+    || (creator && (creator.cs_team_name || creator.team_name))
+    || p.cs_team_name
+    || p.team_name
+    || ''
+  ).trim();
+  return {
+    dept: _pmNormDeptCode(deptRaw),
+    hq: hqRaw,
+    cs: csRaw,
+  };
+}
+
 function _pmCurrentPageMode() {
   if (String(window.__PM_PENDING_TAB__ || '').trim()) return 'manage';
   if (window.__PM_INVOICE_ALERT__) return 'manage';
@@ -3985,12 +4025,12 @@ async function loadProjectMgmtProgress() {
       String(r.project_code || '').trim() !== '' &&
       String(r.registration_status || '').trim() === 'approved'
     ).map((r) => {
-      const u = userMap[String(r.cpm_user_id || '')] || {};
+      const org = _pmResolveProjectOrg(r, userMap);
       return {
         ...r,
-        _dept_name: String(u.dept_name || '').trim(),
-        _hq_name: String(u.hq_name || '').trim(),
-        _cs_team_name: String(u.cs_team_name || '').trim(),
+        _dept_name: String(org.dept || '').trim(),
+        _hq_name: String(org.hq || '').trim(),
+        _cs_team_name: String(org.cs || '').trim(),
       };
     });
     _pmBuildProgressFilters(rows);
