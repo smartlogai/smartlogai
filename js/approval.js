@@ -1447,9 +1447,12 @@ async function loadApprovalList() {
       });
     }
 
-    // 표 헤더/탭 카운트는 현재 필터 결과 건수로 통일한다.
-    // (사용자 화면에서 "목록 0건인데 탭은 1건" 불일치 방지)
-    const waitCount = entries.length;
+    // 검토대기 카운트는 실제 대기 상태만 집계한다.
+    // (submitted / pre_approved 외 상태는 목록에 있더라도 대기 건수에서 제외)
+    const waitCount = entries.filter((e) => {
+      const st = String(e && e.status || '').trim();
+      return st === 'submitted' || st === 'pre_approved';
+    }).length;
     const badge = document.getElementById('approval-count-badge');
     _approvalSetTabCountPartial('timesheet', waitCount);
     if (waitCount > 0) {
