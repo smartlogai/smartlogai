@@ -200,13 +200,15 @@ function _getVisibleUserIdSetForAnalysis(session, allUsers) {
   if (role === 'admin') return activeIdSet;
   if (role === 'staff') return activeIdSet.has(sid) ? new Set([sid]) : new Set();
   if (role === 'manager') {
-    // 팀장: 승인자 지정(approver_id) 기준 팀원만
-    return new Set(
+    // 팀장: 승인자 지정(approver_id) 기준 팀원 + 본인 기록 포함
+    const scoped = new Set(
       activeUsers
         .filter(u => String(u.approver_id || '') === sid)
         .map(u => String(u.id))
         .filter(Boolean)
     );
+    if (activeIdSet.has(sid)) scoped.add(sid);
+    return scoped;
   }
   if (role === 'director' || role === 'top_mgr') {
     const deptId = String(s.dept_id || '');
@@ -380,8 +382,10 @@ async function init_analysis() {
   const deptList   = Array.isArray(deptRes)   ? deptRes   : [];
   const csTeamList = Array.isArray(csTeamRes) ? csTeamRes : [];
 
-  // 담당자(Staff) 목록 (담당자 검색형 선택용)
-  const staffs = allUsers.filter((u) => _analysisIsActiveUser(u) && u.role === 'staff');
+  // 담당자 목록 (staff + manager, 담당자 검색형 선택용)
+  const staffs = allUsers.filter((u) =>
+    _analysisIsActiveUser(u) && (u.role === 'staff' || u.role === 'manager')
+  );
 
   // ── 사업부/고객지원팀 드롭다운 공통 빌더 ──────────────────
   function _fillDept(elId, includeAll) {
@@ -1024,29 +1028,23 @@ async function loadStaffAnalysis() {
         .map((u) => String(u.id || '').trim())
         .filter(Boolean)
     );
-    const managerUserIds = new Set(
-      safeUsers
-        .filter((u) => String(u.role || '').trim() === 'manager')
-        .map((u) => String(u.id || '').trim())
-        .filter(Boolean)
-    );
-
     // ── 전체 ID를 String으로 정규화 ─────────────────────────────────
     allEntries = allEntries.map(e => ({
       ...e,
       user_id:     String(e.user_id     || ''),
       approver_id: String(e.approver_id || ''),
     }));
-    // CCB 소속 + 팀장(manager)은 고과분석 대상에서 제외
+    // CCB 소속은 고과분석 대상에서 제외
     allEntries = allEntries.filter((e) => {
       const uid = String(e.user_id || '').trim();
-      return !ccbUserIds.has(uid) && !managerUserIds.has(uid);
+      return !ccbUserIds.has(uid);
     });
     // ── 역할별 범위 제한 ──────────────────────────────────────────────
     if (session.role === 'staff') {
       allEntries = allEntries.filter(e => e.user_id === String(session.id));
     } else if (session.role === 'manager') {
-      allEntries = allEntries.filter(e => e.approver_id === String(session.id));
+      const sid = String(session.id || '');
+      allEntries = allEntries.filter(e => e.approver_id === sid || e.user_id === sid);
     } else if (Auth.isDirector(session)) {
       // dashboard.js와 동일한 단순 패턴 사용
       const scopeIds = new Set(safeUsers.filter(u => Auth.scopeMatch(session, u)).map(u => String(u.id)));
@@ -1139,22 +1137,20 @@ async function loadStaffAnalysis() {
       el.classList.toggle('btn-ghost', k !== _staffWorklogScope);
     });
 
-    const clientEntries = filteredEntries.filter(e => e.time_category === 'client');
-
-    // ── 대상 직원 목록: 승인자 지정 + 타임시트 대상만 (staff + 타임시트 대상 manager 포함) ────────
-    let targetUsers = safeUsers
+    // ── 대상 직원 목록: 근무시간 대비 기록률 전용(staff + manager) ────────
+    let targetUsersForWorklog = safeUsers
       .filter(u =>
-        u.role === 'staff' &&
+        (u.role === 'staff' || u.role === 'manager') &&
         u.is_active !== false &&
         !_isCcbUser(u) &&
         u.is_timesheet_target !== false &&
-        (u.approver_id && String(u.approver_id).trim() !== '')
+        (u.role === 'manager' ? true : (u.approver_id && String(u.approver_id).trim() !== ''))
       )
       .map(u => ({ ...u, id: String(u.id || '') }));
 
-    if (deptFilter)    targetUsers = targetUsers.filter((u) => _analysisNormText(_analysisUserDept(u)) === _analysisNormText(deptFilter));
-    if (csTeamFilter)  targetUsers = targetUsers.filter((u) => _analysisNormText(_analysisUserCsTeam(u)) === _analysisNormText(csTeamFilter));
-    if (staffFilter)  targetUsers = targetUsers.filter(u => String(u.id) === String(staffFilter));
+    if (deptFilter)    targetUsersForWorklog = targetUsersForWorklog.filter((u) => _analysisNormText(_analysisUserDept(u)) === _analysisNormText(deptFilter));
+    if (csTeamFilter)  targetUsersForWorklog = targetUsersForWorklog.filter((u) => _analysisNormText(_analysisUserCsTeam(u)) === _analysisNormText(csTeamFilter));
+    if (staffFilter)  targetUsersForWorklog = targetUsersForWorklog.filter(u => String(u.id) === String(staffFilter));
 
     // 근무시간 대비 타임시트 기록률 (사업부/팀/개인)
     const dayKey = (ts) => {
@@ -1193,7 +1189,7 @@ async function loadStaffAnalysis() {
     );
     const adjustedBizDays = Math.max(0, effectiveBizDays - leaveMonths);
 
-    const userMetaById = new Map(targetUsers.map((u) => [String(u.id || ''), u]));
+    const userMetaById = new Map(targetUsersForWorklog.map((u) => [String(u.id || ''), u]));
     const grouped = {};
     const scopeLabel = (u, uid, fallbackName = '') => {
       if (_staffWorklogScope === 'dept') return _analysisUserDept(u) || '미지정 사업부';
@@ -1201,7 +1197,7 @@ async function loadStaffAnalysis() {
       return String(u?.name || fallbackName || uid || '').trim() || '미지정 담당자';
     };
 
-    targetUsers.forEach((u) => {
+    targetUsersForWorklog.forEach((u) => {
       const uid = String(u.id || '').trim();
       if (!uid) return;
       const label = scopeLabel(u, uid, String(u.name || '').trim());
@@ -1243,6 +1239,13 @@ async function loadStaffAnalysis() {
       emptyText: '근무시간 대비 기록률 데이터가 없습니다.',
     });
 
+    // 고과분석의 나머지 지표는 팀장 제외(staff만)
+    let targetUsers = targetUsersForWorklog.filter((u) => String(u.role || '') === 'staff');
+    const targetUserIdSet = new Set(targetUsers.map((u) => String(u.id || '')));
+    const benchmarkEntriesForPerf = benchmarkEntries.filter((e) => targetUserIdSet.has(String(e.user_id || '')));
+    const filteredEntriesForPerf = filteredEntries.filter((e) => targetUserIdSet.has(String(e.user_id || '')));
+    const filteredAllEntriesForPerf = filteredAllEntries.filter((e) => targetUserIdSet.has(String(e.user_id || '')));
+
     // 성과/효율 지수 카드는 직원별 집계(rows) 산출 이후 렌더링
 
     // 독립수행(직원) — 수행방식 표본 5건 이상
@@ -1252,7 +1255,7 @@ async function loadStaffAnalysis() {
     const MIN_INDEP_RATING_SAMPLE = 3;
     targetUsers.forEach(u => {
       const uid = String(u.id||'');
-      const uEntries = filteredEntries.filter(e => String(e.user_id) === uid);
+      const uEntries = filteredEntriesForPerf.filter(e => String(e.user_id) === uid);
       const perf = uEntries.filter(e => e.performance_type);
       if (perf.length >= MIN_PERF_SAMPLE) {
         const indepCnt = perf.filter(e => e.performance_type === 'independent').length;
@@ -1288,7 +1291,7 @@ async function loadStaffAnalysis() {
 
     // ── 소분류(업무유형) 벤치마크 평균(분) ───────────────────
     const benchAgg = {}; // { sub: { sum, cnt } }
-    benchmarkEntries.forEach(e => {
+    benchmarkEntriesForPerf.forEach(e => {
       const sub = (e.work_subcategory_name || '').trim();
       const m = Number(e.duration_minutes) || 0;
       if (!sub || m <= 0) return;
@@ -1316,8 +1319,8 @@ async function loadStaffAnalysis() {
 
     // ── 직원별 집계 ──────────────────────────────────────
     const rows = targetUsers.map(u => {
-      const uEntries  = filteredEntries.filter(e => String(e.user_id) === String(u.id));
-      const uAllEntries = filteredAllEntries.filter(e => String(e.user_id) === String(u.id));
+      const uEntries  = filteredEntriesForPerf.filter(e => String(e.user_id) === String(u.id));
+      const uAllEntries = filteredAllEntriesForPerf.filter(e => String(e.user_id) === String(u.id));
       const totalMin  = uEntries.reduce((s,e)=>s+(e.duration_minutes||0),0);
       const clientMin = uEntries.filter(e=>e.time_category==='client').reduce((s,e)=>s+(e.duration_minutes||0),0);
       const clientCount = uEntries.filter(e => e.time_category === 'client').length;
@@ -1610,6 +1613,7 @@ async function loadStaffAnalysis() {
       );
       yearScopeEntries = yearScopeEntries.filter(e => matchedUserIds.has(String(e.user_id)));
     }
+    yearScopeEntries = yearScopeEntries.filter((e) => targetUserIdSet.has(String(e.user_id || '')));
 
     const _calcYearBenchMin = (entries, range) => {
       const agg = {};
@@ -1925,7 +1929,10 @@ async function exportPerformanceYearlyExcel() {
     let allEntries = (allEntries_raw || []).slice().map(e => ({ ...e, user_id: String(e.user_id||''), approver_id: String(e.approver_id||'') }));
     // 역할별 범위 제한(고과분석과 동일)
     if (session.role === 'staff') allEntries = allEntries.filter(e => e.user_id === String(session.id));
-    else if (session.role === 'manager') allEntries = allEntries.filter(e => e.approver_id === String(session.id));
+    else if (session.role === 'manager') {
+      const sid = String(session.id || '');
+      allEntries = allEntries.filter(e => e.approver_id === sid || e.user_id === sid);
+    }
     else if (Auth.isDirector(session)) {
       const scopeIds = new Set(allUsers.filter(u => Auth.scopeMatch(session, u)).map(u => String(u.id)));
       allEntries = allEntries.filter(e => scopeIds.has(e.user_id));
@@ -1979,18 +1986,20 @@ async function exportPerformanceYearlyExcel() {
       scopeEntries = scopeEntries.filter(e => matchedUserIds.has(String(e.user_id)));
     }
 
-    // 대상 직원 목록(필터 포함)
+    // 대상 직원 목록(필터 포함, 고과분석 기준: 팀장 제외)
     let targetUsers = allUsers
       .filter(u =>
-        (u.role === 'staff' || u.role === 'manager') &&
+        u.role === 'staff' &&
         u.is_active !== false &&
         u.is_timesheet_target !== false &&
-        (u.role === 'manager' ? true : (u.approver_id && String(u.approver_id).trim() !== ''))
+        (u.approver_id && String(u.approver_id).trim() !== '')
       )
       .map(u => ({ ...u, id: String(u.id||'') }));
     if (deptFilter) targetUsers = targetUsers.filter((u) => _analysisNormText(_analysisUserDept(u)) === _analysisNormText(deptFilter));
     if (csTeamFilter) targetUsers = targetUsers.filter((u) => _analysisNormText(_analysisUserCsTeam(u)) === _analysisNormText(csTeamFilter));
     if (staffFilter) targetUsers = targetUsers.filter(u => String(u.id) === String(staffFilter));
+    const targetUserIdSet = new Set(targetUsers.map((u) => String(u.id || '')));
+    scopeEntries = scopeEntries.filter((e) => targetUserIdSet.has(String(e.user_id || '')));
 
     const _calcBench = (entries, range) => {
       const agg = {};
@@ -2557,7 +2566,9 @@ async function _computeLaborAggregation() {
       return ts >= pFrom && ts <= pTo;
     });
 
-    let targetUsers = allUsers.filter(u => u.role === 'staff' && u.is_active !== false);
+    let targetUsers = allUsers.filter(
+      (u) => (u.role === 'staff' || u.role === 'manager') && u.is_active !== false
+    );
     if (visibleUserIds) targetUsers = targetUsers.filter(u => visibleUserIds.has(String(u.id)));
     if (deptFilter) targetUsers = targetUsers.filter(u => (u.department || '') === deptFilter);
     if (hqFilter) targetUsers = targetUsers.filter(u => (u.hq_name || '') === hqFilter);
@@ -2802,11 +2813,12 @@ async function loadLaborCostList() {
   tbody.innerHTML = `<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--text-muted);font-size:12px"><i class="fas fa-spinner fa-spin"></i> 로딩 중...</td></tr>`;
 
   try {
-    // 직원 목록 (staff 역할만)
+    // 직원 목록 (staff + manager)
     const usersRes = await API.list('users', { limit: 200 });
     const allUsers = (usersRes && usersRes.data) ? usersRes.data : [];
-    // staff만 (자문 인력)
-    const staffUsers = allUsers.filter(u => u.role === 'staff' && u.is_active !== false);
+    const staffUsers = allUsers.filter(
+      (u) => (u.role === 'staff' || u.role === 'manager') && u.is_active !== false
+    );
 
     // 기존 인건비 데이터
     const lcRes  = await API.list('labor_costs', { limit: 200 });
@@ -2933,7 +2945,9 @@ async function downloadLaborCostTemplate() {
   // 현재 직원 목록 가져오기
   const usersRes  = await API.list('users', { limit: 200 });
   const allUsers  = (usersRes && usersRes.data) ? usersRes.data : [];
-  const staffList = allUsers.filter(u => u.role === 'staff' && u.is_active !== false);
+  const staffList = allUsers.filter(
+    (u) => (u.role === 'staff' || u.role === 'manager') && u.is_active !== false
+  );
 
   // 기존 입력된 인건비 가져오기
   const lcRes    = await API.list('labor_costs', { limit: 200 });
@@ -2969,7 +2983,7 @@ async function downloadLaborCostTemplate() {
     { '항목': 'B열 - 연간 인건비(원)', '설명': '숫자만 입력 (예: 60000000 → 6,000만원), 쉼표 제거' },
     { '항목': 'C열 - 비고',           '설명': '선택 입력 (메모 용도)' },
     { '항목': '주의사항',              '설명': '이름이 시스템 등록 직원과 정확히 일치해야 반영됩니다.' },
-    { '항목': '대상 직원',             '설명': '담당/자문 역할만 해당 (팀장, 본부장, Admin 제외)' },
+    { '항목': '대상 직원',             '설명': '담당/자문 인력 대상 (staff, manager 포함 / 본부장, Admin 제외)' },
   ];
   const wsGuide = XLSX.utils.json_to_sheet(guideRows);
   wsGuide['!cols'] = [{ wch: 22 }, { wch: 52 }];
