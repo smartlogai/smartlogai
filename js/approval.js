@@ -17,6 +17,8 @@ let _approvalAllCsTeamNames = [];
 let _approvalDeptByCsTeam = {};
 let _approvalScopeUserIdSet = new Set();
 let _approvalListReqSeq = 0;
+let _approvalListLoading = false;
+let _approvalMutationInFlight = false;
 
 function _approvalIsPageActive() {
   const page = document.getElementById('page-approval');
@@ -1286,6 +1288,7 @@ async function init_approval() {
 
 async function loadApprovalList() {
   const reqSeq = ++_approvalListReqSeq;
+  _approvalListLoading = true;
   _approvalSyncRangeButtonState();
   const session      = getSession();
   const dateFrom     = document.getElementById('filter-approval-date-from').value;
@@ -1604,6 +1607,8 @@ async function loadApprovalList() {
     if (!_approvalIsPageActive()) return;
     console.error(err);
     Toast.error('데이터 로드 실패');
+  } finally {
+    if (reqSeq === _approvalListReqSeq) _approvalListLoading = false;
   }
 }
 
@@ -2069,6 +2074,10 @@ function _buildRatingBtns(name) {
 // 승인 모달 열기 — 1차(manager) / 2차(director) 자동 분기
 // ══════════════════════════════════════════════
 async function openApprovalModal(entryId, focusReject = false) {
+  if (_approvalMutationInFlight || _approvalListLoading) {
+    Toast.info('승인 처리 후 목록을 갱신 중입니다. 잠시 후 다시 시도해주세요.');
+    return;
+  }
   try {
     resetApprovalModalState();
     const _rb = document.getElementById('rejectBtn');
@@ -2131,7 +2140,9 @@ async function openApprovalModal(entryId, focusReject = false) {
     }
     if (focusReject) setTimeout(() => document.getElementById('approval-comment')?.focus(), 100);
   } catch (err) {
-    Toast.error('데이터 로드 실패');
+    if (!(_approvalMutationInFlight || _approvalListLoading)) {
+      Toast.error('데이터 로드 실패');
+    }
     console.error(err);
   }
 }
@@ -2417,6 +2428,8 @@ function _openApprovalModalReadonly(entry, atts, session) {
 // ══════════════════════════════════════════════
 async function processApproval1st(decision) {
   if (!_approvalTarget) return;
+  if (_approvalMutationInFlight) return;
+  _approvalMutationInFlight = true;
   const session = getSession();
   const comment = document.getElementById('approval-comment')?.value.trim() || '';
   const entry0 = _approvalTarget;
@@ -2546,7 +2559,7 @@ async function processApproval1st(decision) {
     Cache.invalidate('dash_time_entries');
     window._dashNeedsRefresh = true; // 대시보드 재진입 시 콘텐츠 갱신
     await updateApprovalBadge(session, true);
-    loadApprovalList();
+    await loadApprovalList();
     if (nextStatus === 'rejected') {
       Toast.success('반려되었습니다.');
     } else if (nextStatus === 'pre_approved') {
@@ -2557,6 +2570,8 @@ async function processApproval1st(decision) {
   } catch (err) {
     restoreBtn(); restoreOthers();
     Toast.error('처리 실패: ' + err.message);
+  } finally {
+    _approvalMutationInFlight = false;
   }
 }
 
@@ -2565,6 +2580,8 @@ async function processApproval1st(decision) {
 // ══════════════════════════════════════════════
 async function processApproval2nd(decision) {
   if (!_approvalTarget) return;
+  if (_approvalMutationInFlight) return;
+  _approvalMutationInFlight = true;
   const session = getSession();
   const comment = document.getElementById('approval-comment')?.value.trim() || '';
 
@@ -2773,10 +2790,12 @@ async function processApproval2nd(decision) {
     Cache.invalidate('dash_archive_stars');
     window._dashNeedsRefresh = true; // 대시보드 재진입 시 콘텐츠 갱신
     await updateApprovalBadge(session, true);
-    loadApprovalList();
+    await loadApprovalList();
   } catch (err) {
     restoreBtn(); restoreOthers();
     Toast.error('처리 실패: ' + err.message);
+  } finally {
+    _approvalMutationInFlight = false;
   }
 }
 
