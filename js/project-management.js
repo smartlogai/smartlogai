@@ -4206,7 +4206,7 @@ async function pmDownloadProgressList() {
       사업부: String(r._dept_name || ''),
       본부: String(r._hq_name || ''),
       고객지원팀: String(r._cs_team_name || ''),
-      상태기준일: _pmTsToDateText(Number(life.basisTs || 0)) || '-',
+      상태기준일: String(x.approvedDate || '-'),
     };
   });
   const wb = XLSX.utils.book_new();
