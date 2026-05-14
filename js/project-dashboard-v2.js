@@ -45,13 +45,26 @@ function _projDashCanViewAll(session) {
   return !!(session && Auth && typeof Auth.canViewDashboardAll === 'function' && Auth.canViewDashboardAll(session));
 }
 
+function _projDashIsActiveUser(u) {
+  if (!u) return false;
+  if (u.deleted === true) return false;
+  if (u.is_active === false) return false;
+  return true;
+}
+
 function _projDashVisibleUserIds(session, allUsers) {
   const users = Array.isArray(allUsers) ? allUsers : [];
-  if (_projDashCanViewAll(session)) return null;
+  const activeUsers = users.filter(_projDashIsActiveUser);
+  const activeIdSet = new Set(
+    activeUsers
+      .map((u) => String(u.id || '').trim())
+      .filter(Boolean)
+  );
+  if (_projDashCanViewAll(session)) return activeIdSet;
   if (!session || !Auth || typeof Auth.canViewDashboardMenu !== 'function') return new Set();
   if (!Auth.canViewDashboardMenu(session)) return new Set();
   return new Set(
-    users
+    activeUsers
       .filter((u) => Auth.scopeMatch(session, u))
       .map((u) => String(u.id || '').trim())
       .filter(Boolean)

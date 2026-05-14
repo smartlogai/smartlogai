@@ -704,6 +704,18 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
 // ─────────────────────────────────────────────
 const API = {
 
+  _sessionHeaders() {
+    const s = Session.get() || {};
+    const uid = String(s.id || s.user_id || '').trim();
+    const role = String(s.role || '').trim().toLowerCase();
+    const email = String(s.email || '').trim().toLowerCase();
+    const headers = {};
+    if (uid) headers['x-app-user-id'] = uid;
+    if (role) headers['x-app-user-role'] = role;
+    if (email) headers['x-app-user-email'] = email;
+    return headers;
+  },
+
   // 공통 헤더
   _headers() {
     return {
@@ -711,6 +723,7 @@ const API = {
       'apikey': SUPABASE_KEY,
       'Authorization': `Bearer ${SUPABASE_KEY}`,
       'Prefer': 'return=representation',
+      ...this._sessionHeaders(),
     };
   },
 
@@ -2830,10 +2843,11 @@ async function _countProjectApprovalBadge(session, force = false) {
 }
 
 async function updateApprovalBadge(session, force = false) {
-  const _needsSecondApprovalByCategory = (e) => {
-    const n = String(e?.work_category_name || '').trim();
-    return n === '일반자문업무' || n === '프로젝트업무';
+  const _isPendingApproval = (e) => {
+    const st = String((e && e.status) || '').trim().toLowerCase();
+    return st === 'submitted' || st === 'pre_approved';
   };
+  const _normName = (v) => String(v || '').toLowerCase().replace(/\s+/g, '').trim();
 
   // admin: 전사 1차(submitted)·2차(pre_approved) 건수 — 별도 배지
   if (Auth.isAdmin(session)) {
@@ -2841,12 +2855,19 @@ async function updateApprovalBadge(session, force = false) {
     if (!force && now - _badgeLastUpdated < 30000) return;
     _badgeLastUpdated = now;
     try {
+      if (force) {
+        Cache.invalidate('time_entries_badge_admin_sub');
+        Cache.invalidate('time_entries_badge_admin_pre');
+      }
       const [submittedRows, preRows] = await Promise.all([
         Cache.get('time_entries_badge_admin_sub', async () => API.listAllPages('time_entries', { filter: 'status=eq.submitted', limit: 300, maxPages: 40 }), 120000),
         Cache.get('time_entries_badge_admin_pre', async () => API.listAllPages('time_entries', { filter: 'status=eq.pre_approved', limit: 300, maxPages: 40 }), 120000),
       ]);
       const c1 = (submittedRows || []).length;
-      const c2 = (preRows || []).filter(e => _needsSecondApprovalByCategory(e)).length;
+      const c2 = (preRows || []).length;
+      const tsCount = c1 + c2;
+      const pjCount = await _countProjectApprovalBadge(session, force);
+      _applyApprovalBadgeFromSplit({ timesheet: tsCount, project: pjCount });
       const b1 = document.getElementById('approval-badge-1st');
       const b2 = document.getElementById('approval-badge-2nd');
       if (b1) {
@@ -2875,7 +2896,9 @@ async function updateApprovalBadge(session, force = false) {
   const reqSeq = ++_approvalBadgeReqSeq;
   try {
     const sid = encodeURIComponent(String(session.id));
-    const r = await Cache.get('time_entries_badge_' + session.id, async () => {
+    const tsCacheKey = 'time_entries_badge_' + session.id;
+    if (force) Cache.invalidate(tsCacheKey);
+    const r = await Cache.get(tsCacheKey, async () => {
       if (Auth.canApprove1st(session)) {
         try {
           const rows = await API.listAllPages('time_entries', {
@@ -2898,26 +2921,16 @@ async function updateApprovalBadge(session, force = false) {
           e.status === 'submitted' && String(e.approver_id) === String(session.id)
         ).length;
       } else if (Auth.canApprove2nd(session)) {
-        const allUsers = await Master.users();
-        const scopeIds = new Set(allUsers.filter(u => Auth.scopeMatch(session, u)).map(u => String(u.id)));
-        const inScopeEntry = (e) => scopeIds.has(String(e && e.user_id || ''));
-        const preApproved = r.data.filter(e =>
-          e.status === 'pre_approved' && inScopeEntry(e) && _needsSecondApprovalByCategory(e)
-        ).length;
-        const ccbFirst = r.data.filter(e =>
-          e.status === 'submitted' &&
-          String(e.approver_id) === String(session.id) &&
-          inScopeEntry(e) &&
-          String(e && e.dept_name || '').trim().toUpperCase().includes('CCB')
-        ).length;
-        const managerDirect = r.data.filter(e =>
-          e.status === 'submitted' &&
-          String(e.approver_id) === String(session.id) &&
-          inScopeEntry(e) &&
-          _needsSecondApprovalByCategory(e) &&
-          !String(e && e.dept_name || '').trim().toUpperCase().includes('CCB')
-        ).length;
-        tsCount = preApproved + managerDirect + ccbFirst;
+        const myId = String((session && session.id) || '');
+        const myNameNorm = _normName((session && session.name) || '');
+        tsCount = r.data.filter((e) => {
+          if (!_isPendingApproval(e)) return false;
+          if (String((e && e.reviewer2_id) || '') === myId) return true;
+          if (String((e && e.approver_id) || '') === myId) return true;
+          if (_normName(e && e.reviewer2_name) === myNameNorm) return true;
+          if (_normName(e && e.approver_name) === myNameNorm) return true;
+          return false;
+        }).length;
       } else {
         tsCount = 0;
       }

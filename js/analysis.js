@@ -90,20 +90,33 @@ function _analysisCustomsEntry(e) {
   return cat === '일반통관업무';
 }
 
+function _analysisIsActiveUser(u) {
+  if (!u) return false;
+  if (u.deleted === true) return false;
+  if (u.is_active === false) return false;
+  return true;
+}
+
 
 function _getVisibleUserIdSetForAnalysis(session, allUsers) {
   const s = session || {};
   const users = Array.isArray(allUsers) ? allUsers : [];
   const role = s.role || '';
   const sid = String(s.id || '');
+  const activeUsers = users.filter(_analysisIsActiveUser);
+  const activeIdSet = new Set(
+    activeUsers
+      .map((u) => String(u.id || '').trim())
+      .filter(Boolean)
+  );
 
   if (!sid) return new Set();
-  if (role === 'admin') return null; // null = no restriction
-  if (role === 'staff') return new Set([sid]);
+  if (role === 'admin') return activeIdSet;
+  if (role === 'staff') return activeIdSet.has(sid) ? new Set([sid]) : new Set();
   if (role === 'manager') {
     // 팀장: 승인자 지정(approver_id) 기준 팀원만
     return new Set(
-      users
+      activeUsers
         .filter(u => String(u.approver_id || '') === sid)
         .map(u => String(u.id))
         .filter(Boolean)
@@ -116,7 +129,7 @@ function _getVisibleUserIdSetForAnalysis(session, allUsers) {
     // 본부장: 최종승인자(reviewer2_id)로 지정된 직원만
     if (hqId) {
       return new Set(
-        users
+        activeUsers
           .filter(u => String(u.reviewer2_id || '') === sid)
           .map(u => String(u.id))
           .filter(Boolean)
@@ -125,7 +138,7 @@ function _getVisibleUserIdSetForAnalysis(session, allUsers) {
     // 사업부장: 동일 사업부(dept_id) 전체 직원
     if (deptId) {
       return new Set(
-        users
+        activeUsers
           .filter(u => String(u.dept_id || '') === deptId)
           .map(u => String(u.id))
           .filter(Boolean)
@@ -133,7 +146,7 @@ function _getVisibleUserIdSetForAnalysis(session, allUsers) {
     }
     // 예외: 소속값이 없으면 기존 scopeMatch로 fallback (최소한의 안전망)
     return new Set(
-      users
+      activeUsers
         .filter(u => Auth.scopeMatch(s, u))
         .map(u => String(u.id))
         .filter(Boolean)
@@ -290,7 +303,7 @@ async function init_analysis() {
   const csTeamList = Array.isArray(csTeamRes) ? csTeamRes : [];
 
   // 담당자(Staff) 목록 (담당자 검색형 선택용)
-  const staffs = allUsers.filter(u => u.role === 'staff');
+  const staffs = allUsers.filter((u) => _analysisIsActiveUser(u) && u.role === 'staff');
 
   // ── 사업부/고객지원팀 드롭다운 공통 빌더 ──────────────────
   function _fillDept(elId, includeAll) {

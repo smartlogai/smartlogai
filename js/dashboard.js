@@ -8,6 +8,57 @@
 
 let _dashCharts = {};
 
+function _dashIsActiveUser(u) {
+  if (!u) return false;
+  if (u.deleted === true) return false;
+  if (u.is_active === false) return false;
+  return true;
+}
+
+function _dashIsPendingApprovalStatus(st) {
+  const s = String(st || '').trim().toLowerCase();
+  return s === 'submitted' || s === 'pre_approved';
+}
+
+function _dashPendingCountForRole(session, entries) {
+  const rows = Array.isArray(entries) ? entries : [];
+  const myId = String((session && session.id) || '');
+  const myNameNorm = String((session && session.name) || '').toLowerCase().replace(/\s+/g, '').trim();
+  if (!myId) return 0;
+
+  if (Auth.canApprove1st(session) && !Auth.canApprove2nd(session)) {
+    return rows.filter((e) => String(e && e.status || '').trim().toLowerCase() === 'submitted'
+      && String((e && e.approver_id) || '') === myId).length;
+  }
+
+  if (Auth.canApprove2nd(session)) {
+    return rows.filter((e) => {
+      if (!_dashIsPendingApprovalStatus(e && e.status)) return false;
+      if (String((e && e.reviewer2_id) || '') === myId) return true;
+      if (String((e && e.approver_id) || '') === myId) return true;
+      const reviewer2Name = String((e && e.reviewer2_name) || '').toLowerCase().replace(/\s+/g, '').trim();
+      const approverName = String((e && e.approver_name) || '').toLowerCase().replace(/\s+/g, '').trim();
+      return reviewer2Name === myNameNorm || approverName === myNameNorm;
+    }).length;
+  }
+
+  if (Auth.isAdmin(session)) {
+    return rows.filter((e) => _dashIsPendingApprovalStatus(e && e.status)).length;
+  }
+
+  return rows.filter((e) => _dashIsPendingApprovalStatus(e && e.status)).length;
+}
+
+async function _dashSyncedTimesheetPendingCount(session, fallbackEntries) {
+  try {
+    if (typeof updateApprovalBadge === 'function') await updateApprovalBadge(session, true);
+    const split = window.__approvalBadgeSplit || {};
+    const ts = Number(split.timesheet);
+    if (Number.isFinite(ts) && ts >= 0) return ts;
+  } catch (_) {}
+  return _dashPendingCountForRole(session, fallbackEntries);
+}
+
 // ─────────────────────────────────────────────
 // ★ 대시보드 범위(권한)
 // - Admin/경영지원: 전체
@@ -20,13 +71,19 @@ function _getVisibleUserIdSetForDashboard(session, allUsers) {
   const role = s.role || '';
   const sid = String(s.id || '');
   if (!sid) return new Set();
+  const activeUsers = users.filter(_dashIsActiveUser);
+  const activeIdSet = new Set(
+    activeUsers
+      .map((u) => String(u.id || '').trim())
+      .filter(Boolean)
+  );
 
-  if (Auth.canViewDashboardAll(s)) return null; // null = 제한 없음
-  if (role === 'staff') return new Set([sid]);
+  if (Auth.canViewDashboardAll(s)) return activeIdSet;
+  if (role === 'staff') return activeIdSet.has(sid) ? new Set([sid]) : new Set();
 
   if (Auth.canViewDashboardMenu(s)) {
     return new Set(
-      users
+      activeUsers
         .filter(u => Auth.scopeMatch(s, u))
         .map(u => String(u.id))
         .filter(Boolean)
@@ -519,7 +576,7 @@ function _dashScopedTimesheetTargetIds(allUsers, visibleUserIds) {
     : users;
   return new Set(
     scoped
-      .filter((u) => u && u.is_active !== false && u.is_timesheet_target !== false)
+      .filter((u) => _dashIsActiveUser(u) && u.is_timesheet_target !== false)
       .map((u) => String(u.id || '').trim())
       .filter(Boolean)
   );
@@ -685,7 +742,8 @@ async function renderStaffDashboard(session) {
     const monthNum = parseInt(month.split('-')[1], 10);
     const monthEntries   = entries.filter(e => entryMonth(e) === month);
     const approvedMonth  = monthEntries.filter(e => e.status === 'approved');
-    const submittedCount = entries.filter(e => e.status === 'submitted').length;
+    const pendingCountRaw = entries.filter((e) => _dashIsPendingApprovalStatus(e.status)).length;
+    const pendingCount = Math.max(0, Number(pendingCountRaw) || 0);
 
     const totalMin  = approvedMonth.reduce((s, e) => s + (e.duration_minutes || 0), 0);
     const clientMin = approvedMonth.filter(e => e.time_category === 'client').reduce((s, e) => s + (e.duration_minutes || 0), 0);
@@ -696,7 +754,7 @@ async function renderStaffDashboard(session) {
       kpiCard('fa-clock',       '', '', `${monthNum}월 투입시간`,  (totalMin/60).toFixed(1),     'h',  '승인 완료 기준',  '',          '#1a2b45') +
       kpiCard('fa-briefcase',   '', '', '고객사 업무',             (clientMin/60).toFixed(1),    'h',  `비율 ${clientRatio}%`,        '',          '#2d6bb5') +
       kpiCard('fa-building',    '', '', '내부 업무',               (internalMin/60).toFixed(1),  'h',  `비율 ${100-clientRatio}%`,    '',          '#4a7fc4') +
-      kpiCard('fa-paper-plane', '', '', '승인 대기',               submittedCount,               '건', '',               '',          '#6b95ce');
+      kpiCard('fa-paper-plane', '', '', '승인 대기',               pendingCount,                 '건', '검토 대기 기준', '',          '#6b95ce');
 
     // ── 데이터 집계 (본인 데이터만) ─────────────────────────────────────────
     const majorMap = {};
@@ -894,10 +952,8 @@ async function renderManagerDashboard(session) {
     const cmp = _dashMonthCompareContext(new Date());
 
     const visibleUserIds = _getVisibleUserIdSetForDashboard(session, allUsers);
-    let scopedEntries = allEntriesRaw;
-    if (visibleUserIds) {
-      scopedEntries = allEntriesRaw.filter(e => visibleUserIds.has(String(e.user_id)));
-    }
+    const allowedUserIds = visibleUserIds || new Set();
+    const scopedEntries = allEntriesRaw.filter(e => allowedUserIds.has(String(e.user_id)));
     const scopeUserIds = _dashScopedTimesheetTargetIds(allUsers, visibleUserIds);
     const curEntriesAll  = scopedEntries.filter(e => _dashIsEntryInMonthUpToDay(e, cmp.curY, cmp.curM, cmp.today));
     const prevEntriesAll = scopedEntries.filter(e => _dashIsEntryInMonthUpToDay(e, cmp.prevY, cmp.prevM, cmp.prevLastDay));
@@ -905,7 +961,7 @@ async function renderManagerDashboard(session) {
     const prevEffectiveDays = _dashEffectiveWorkDays(cmp.prevY, cmp.prevM, cmp.prevLastDay, scopeUserIds, prevEntriesAll, 1);
     const approvedCur  = curEntriesAll.filter(e => e.status === 'approved');
     const approvedPrev = prevEntriesAll.filter(e => e.status === 'approved');
-    const pendingCur   = curEntriesAll.filter(e => e.status === 'submitted');
+    const pendingCount = await _dashSyncedTimesheetPendingCount(session, allEntriesRaw);
 
     const stats = _buildLeaderMonthlyStats(approvedCur, approvedPrev);
     const clientRadar = _buildClientRadar(approvedCur, approvedPrev);
@@ -922,8 +978,8 @@ async function renderManagerDashboard(session) {
     document.getElementById('kpi-grid').innerHTML =
       kpiCard('fa-clock', '', '', '당월 총 투입', (totalMinCur/60).toFixed(1), 'h', `전월 ${dTotal.label}`, '', '#1a2b45') +
       kpiCard('fa-briefcase','', '', '당월 자문(고객)', (consultMinCur/60).toFixed(1), 'h', `건수 ${consultCntCur}건 · 전월 ${dCnt.label}`, '', '#2d6bb5') +
-      kpiCard('fa-hourglass-half','', '', '승인 대기', pendingCur.length, '건', pendingCur.length>0?'Approval로 처리':'대기 없음', pendingCur.length>0?'approval':'', pendingCur.length>0?'#d97706':'#4a7fc4') +
-      kpiCard('fa-users','', '', '대상 직원', visibleUserIds ? visibleUserIds.size : 0, '명', '소속 기준', '', '#6b95ce');
+      kpiCard('fa-hourglass-half','', '', '승인 대기', pendingCount, '건', pendingCount>0?'1차 승인대기 기준':'대기 없음', pendingCount>0?'approval':'', pendingCount>0?'#d97706':'#4a7fc4') +
+      kpiCard('fa-users','', '', '대상 직원', scopeUserIds.size, '명', '소속 기준', '', '#6b95ce');
 
     const sortedByMin = stats.slice().sort((a,b)=> (b.curMin||0)-(a.curMin||0));
     const top5 = sortedByMin.slice(0,5);
@@ -1052,10 +1108,8 @@ async function renderDirectorDashboard(session) {
     const cmp = _dashMonthCompareContext(new Date());
 
     const visibleUserIds = _getVisibleUserIdSetForDashboard(session, allUsers);
-    let scopedEntries = allEntriesRaw;
-    if (visibleUserIds) {
-      scopedEntries = allEntriesRaw.filter(e => visibleUserIds.has(String(e.user_id)));
-    }
+    const allowedUserIds = visibleUserIds || new Set();
+    const scopedEntries = allEntriesRaw.filter(e => allowedUserIds.has(String(e.user_id)));
     const scopeUserIds = _dashScopedTimesheetTargetIds(allUsers, visibleUserIds);
     const curEntriesAll  = scopedEntries.filter(e => _dashIsEntryInMonthUpToDay(e, cmp.curY, cmp.curM, cmp.today));
     const prevEntriesAll = scopedEntries.filter(e => _dashIsEntryInMonthUpToDay(e, cmp.prevY, cmp.prevM, cmp.prevLastDay));
@@ -1063,7 +1117,7 @@ async function renderDirectorDashboard(session) {
     const prevEffectiveDays = _dashEffectiveWorkDays(cmp.prevY, cmp.prevM, cmp.prevLastDay, scopeUserIds, prevEntriesAll, 1);
     const approvedCur  = curEntriesAll.filter(e => e.status === 'approved');
     const approvedPrev = prevEntriesAll.filter(e => e.status === 'approved');
-    const pendingCur   = curEntriesAll.filter(e => e.status === 'submitted');
+    const pendingCount = await _dashSyncedTimesheetPendingCount(session, allEntriesRaw);
 
     const stats = _buildLeaderMonthlyStats(approvedCur, approvedPrev);
     const clientRadar = _buildClientRadar(approvedCur, approvedPrev);
@@ -1078,15 +1132,20 @@ async function renderDirectorDashboard(session) {
     const dCnt = _fmtPctDelta(consultCntCur, consultCntPrev);
 
     // 대상 직원 수
-    const staffCount = (visibleUserIds ? visibleUserIds.size : allUsers.filter(u => u.role === 'staff').length);
+    const staffCount = allUsers.filter(
+      (u) =>
+        _dashIsActiveUser(u) &&
+        String(u.role || '').trim().toLowerCase() === 'staff' &&
+        scopeUserIds.has(String(u.id || '').trim())
+    ).length;
     const extraKpi = Auth.isAdmin(session)
-      ? kpiCard('fa-cog', '', '', '등록 직원', allUsers.filter(u=>u.is_active!==false).length, '명', `팀 ${allTeams.length}개`, '', '#6b95ce')
+      ? kpiCard('fa-cog', '', '', '등록 직원', allUsers.filter((u) => _dashIsActiveUser(u)).length, '명', `팀 ${allTeams.length}개`, '', '#6b95ce')
       : kpiCard('fa-users','', '', '대상 직원', staffCount, '명', '범위 기준', '', '#6b95ce');
 
     document.getElementById('kpi-grid').innerHTML =
       kpiCard('fa-clock', '', '', '당월 총 투입', (totalMinCur/60).toFixed(1), 'h', `전월 ${dTotal.label}`, '', '#1a2b45') +
       kpiCard('fa-briefcase','', '', '당월 자문(고객)', (consultMinCur/60).toFixed(1), 'h', `건수 ${consultCntCur}건 · 전월 ${dCnt.label}`, '', '#2d6bb5') +
-      kpiCard('fa-hourglass-half','', '', '승인 대기', pendingCur.length, '건', '당월 제출', pendingCur.length>0?'approval':'', pendingCur.length>0?'#d97706':'#4a7fc4') +
+      kpiCard('fa-hourglass-half','', '', '승인 대기', pendingCount, '건', pendingCount>0?'현재 검토대기':'대기 없음', pendingCount>0?'approval':'', pendingCount>0?'#d97706':'#4a7fc4') +
       extraKpi;
 
     const sortedByMin = stats.slice().sort((a,b)=> (b.curMin||0)-(a.curMin||0));

@@ -1006,6 +1006,25 @@ async function _scopeTimeEntriesForApproval(entries, session, orgFilter, userMap
   return entries.filter(e => String(e.approver_id) === myId);
 }
 
+function _approvalFilterSecondApproverPending(entries, session) {
+  if (!Auth.canApprove2nd(session)) return entries;
+  const myId = String(session.id || '');
+  const myNameNorm = String(session.name || '').toLowerCase().replace(/\s+/g, '').trim();
+  const hitByName = (e) =>
+    String(e.reviewer2_name || '').toLowerCase().replace(/\s+/g, '').trim() === myNameNorm ||
+    String(e.approver_name || '').toLowerCase().replace(/\s+/g, '').trim() === myNameNorm;
+  return (entries || []).filter((e) => {
+    const st = String(e && e.status || '').trim().toLowerCase();
+    if (!(st === 'submitted' || st === 'pre_approved')) return false;
+    return String(e.reviewer2_id || '') === myId || String(e.approver_id || '') === myId || hitByName(e);
+  });
+}
+
+function _approvalIsPendingStatus(st) {
+  const s = String(st || '').trim().toLowerCase();
+  return s === 'submitted' || s === 'pre_approved';
+}
+
 function _approvalIsCcbEntry(entry) {
   if (!entry) return false;
   const deptToken = [
@@ -1318,6 +1337,14 @@ async function loadApprovalList() {
       _approvalPaginateTimeEntries('status=eq.pre_approved'),
     ]);
     const pendingAll = _mergeTimeEntriesById([pendingSubmitted, pendingPre]);
+    const pendingScopedBase = await _scopeTimeEntriesForApproval(
+      pendingAll,
+      session,
+      { hq: '', team: '', hqScope: 'hq' },
+      usersById
+    );
+    const pendingScoped = _approvalFilterSecondApproverPending(pendingScopedBase, session);
+    const waitCountForMenu = pendingScoped.length;
 
     let allFetched;
     if (status === 'submitted') {
@@ -1351,8 +1378,13 @@ async function loadApprovalList() {
       // approver_id 매칭 없음: 정상 예외 조건 (승인자 미지정 등)
     }
 
+    // 승인대기 건은 기간과 무관하게 항상 보여야 승인자가 누락 없이 처리할 수 있다.
+    // 날짜 범위는 승인 완료/반려 등 히스토리성 상태에만 적용한다.
     if (dateFrom || dateTo) {
-      entries = entries.filter(e => _approvalEntryInDateRange(e, dateFrom, dateTo));
+      entries = entries.filter((e) => {
+        if (_approvalIsPendingStatus(e && e.status)) return true;
+        return _approvalEntryInDateRange(e, dateFrom, dateTo);
+      });
     }
 
     // Staff 이름 필터
@@ -1398,18 +1430,7 @@ async function loadApprovalList() {
     }
 
     // Approval 정책: 2차 승인자는 실제 승인대기 건(submitted/pre_approved)만 노출
-    if (Auth.canApprove2nd(session)) {
-      const myId = String(session.id);
-      const myNameNorm = String(session.name || '').toLowerCase().replace(/\s+/g, '').trim();
-      const hitByName = (e) =>
-        String(e.reviewer2_name || '').toLowerCase().replace(/\s+/g, '').trim() === myNameNorm ||
-        String(e.approver_name || '').toLowerCase().replace(/\s+/g, '').trim() === myNameNorm;
-      entries = entries.filter(e => {
-        const st = e.status;
-        if (!(st === 'submitted' || st === 'pre_approved')) return false;
-        return String(e.reviewer2_id || '') === myId || String(e.approver_id || '') === myId || hitByName(e);
-      });
-    }
+    entries = _approvalFilterSecondApproverPending(entries, session);
 
     // 정렬
     const _apvSortTs = (e) => {
@@ -1485,7 +1506,8 @@ async function loadApprovalList() {
       return st === 'submitted' || st === 'pre_approved';
     }).length;
     const badge = document.getElementById('approval-count-badge');
-    _approvalSetTabCountPartial('timesheet', waitCount);
+    // 메뉴/사이드바 배지는 조회필터 결과가 아닌 "전역 승인대기" 기준으로 유지한다.
+    _approvalSetTabCountPartial('timesheet', waitCountForMenu);
     if (badge) {
       if (waitCount > 0) {
         badge.className = 'badge badge-red';
