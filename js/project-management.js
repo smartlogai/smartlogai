@@ -45,6 +45,9 @@ const PM_STATE = {
   ntsAutoRunning: false,
   standardRateMasterRows: [],
   standardRateMasterLoadedAt: 0,
+  projectsLoadedAt: 0,
+  usersLoadedAt: 0,
+  progressExportRows: [],
 };
 const PM_LIFECYCLE = {
   contract_completed: { label: '계약완료', color: '#334155', bg: '#e2e8f0' },
@@ -2872,7 +2875,12 @@ function _pmEntryToWorkDate(entry) {
   return _pmTsToDateText(ts);
 }
 
-async function _pmLoadProjects() {
+async function _pmLoadProjects(opts = {}) {
+  const force = !!opts.force;
+  const now = Date.now();
+  if (!force && PM_STATE.projectsLoadedAt && (now - PM_STATE.projectsLoadedAt) < 120000 && PM_STATE.projects.length) {
+    return;
+  }
   const session = getSession ? getSession() : null;
   let rows = [];
   let codeTypes = [];
@@ -2896,9 +2904,15 @@ async function _pmLoadProjects() {
     const code = String(r.project_code || '').trim();
     if (code && !PM_STATE.projectByCode[code]) PM_STATE.projectByCode[code] = r;
   });
+  PM_STATE.projectsLoadedAt = Date.now();
 }
 
-async function _pmLoadUsers() {
+async function _pmLoadUsers(opts = {}) {
+  const force = !!opts.force;
+  const now = Date.now();
+  if (!force && PM_STATE.usersLoadedAt && (now - PM_STATE.usersLoadedAt) < 300000 && PM_STATE.users.length) {
+    return;
+  }
   try {
     PM_STATE.users = await Master.users();
   } catch (_) {
@@ -2908,6 +2922,7 @@ async function _pmLoadUsers() {
   PM_STATE.users.forEach((u) => {
     PM_STATE.usersById[String(u.id)] = u;
   });
+  PM_STATE.usersLoadedAt = Date.now();
 }
 
 function _pmProjectLabel(p) {
@@ -3718,6 +3733,7 @@ async function init_project_management() {
   if (!PM_STATE.initialized) {
     document.getElementById('pm-progress-refresh-btn')?.addEventListener('click', loadProjectMgmtProgress);
     document.getElementById('pm-progress-search-btn')?.addEventListener('click', loadProjectMgmtProgress);
+    document.getElementById('pm-progress-download-btn')?.addEventListener('click', pmDownloadProgressList);
     ['pm-progress-filter-dept','pm-progress-filter-hq','pm-progress-filter-csteam','pm-progress-filter-pm','pm-progress-filter-status']
       .forEach((id) => document.getElementById(id)?.addEventListener('change', loadProjectMgmtProgress));
     const progressClient = document.getElementById('pm-progress-filter-client');
@@ -3996,6 +4012,7 @@ async function init_project_management() {
 async function loadProjectMgmtProgress() {
   const body = document.getElementById('pm-progress-body');
   if (!body) return;
+  PM_STATE.progressExportRows = [];
   const session = getSession ? getSession() : null;
   const from = String(document.getElementById('pm-progress-date-from')?.value || '').trim();
   const to = String(document.getElementById('pm-progress-date-to')?.value || '').trim();
@@ -4116,6 +4133,7 @@ async function loadProjectMgmtProgress() {
     withMeta.forEach((x) => {
       PM_STATE.progressRowById[String(x.row.id || '')] = x.row;
     });
+    PM_STATE.progressExportRows = withMeta.slice();
 
     if (!withMeta.length) {
       body.innerHTML = '<tr><td colspan="8" class="table-empty"><i class="fas fa-inbox"></i><p>조건에 맞는 프로젝트가 없습니다.</p></td></tr>';
@@ -4150,8 +4168,51 @@ async function loadProjectMgmtProgress() {
     }).join('');
   } catch (e) {
     console.error(e);
+    PM_STATE.progressExportRows = [];
     body.innerHTML = '<tr><td colspan="8" class="table-empty"><i class="fas fa-exclamation-triangle"></i><p>진행현황 조회 실패</p></td></tr>';
   }
+}
+
+function _pmProgressStatusLabel(code) {
+  const key = String(code || '').trim();
+  return (PM_LIFECYCLE[key] && PM_LIFECYCLE[key].label) || key || '-';
+}
+
+async function pmDownloadProgressList() {
+  const rows = Array.isArray(PM_STATE.progressExportRows) ? PM_STATE.progressExportRows : [];
+  if (!rows.length) {
+    Toast.warning('다운로드할 진행현황 데이터가 없습니다. 먼저 조회하세요.');
+    return;
+  }
+  const ok = await _pmEnsureXlsx();
+  if (!ok || typeof XLSX === 'undefined') {
+    Toast.error('XLSX 라이브러리를 로드할 수 없습니다.');
+    return;
+  }
+  const from = String(document.getElementById('pm-progress-date-from')?.value || '').trim();
+  const to = String(document.getElementById('pm-progress-date-to')?.value || '').trim();
+  const range = `${from || '-'}_${to || '-'}`.replace(/[^\dA-Za-z가-힣_-]/g, '');
+  const exportRows = rows.map((x, idx) => {
+    const r = x.row || {};
+    const life = x.life || {};
+    return {
+      No: idx + 1,
+      등록승인일: String(x.approvedDate || '-'),
+      고객사: String(r.client_name || '-'),
+      프로젝트코드: String(r.project_code || ''),
+      프로젝트명: String(r.project_name || '-'),
+      상태: _pmProgressStatusLabel(life.code),
+      CPM: String(_pmResolveCpmName(r, PM_STATE.usersById || {}) || '-'),
+      사업부: String(r._dept_name || ''),
+      본부: String(r._hq_name || ''),
+      고객지원팀: String(r._cs_team_name || ''),
+      상태기준일: _pmTsToDateText(Number(life.basisTs || 0)) || '-',
+    };
+  });
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(exportRows);
+  XLSX.utils.book_append_sheet(wb, ws, '프로젝트진행현황');
+  await xlsxDownload(wb, `프로젝트진행현황_${range}.xlsx`);
 }
 
 function pmProgressDetailSwitchTab(tab) {

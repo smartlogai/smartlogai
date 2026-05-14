@@ -500,7 +500,7 @@ const PAGE_INIT_MAP = {
   'users': 'init_users',
   'permission-management': 'init_permission_management',
   'project-register': 'init_project_register',
-  'project-management': 'init_project_register',
+  'project-management': 'init_project_management',
 };
 
 // ─────────────────────────────────────────────

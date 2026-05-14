@@ -1165,13 +1165,8 @@ async function init_project_register() {
   await projRegLoadList();
   projRegInitProposalForm();
   projRegSwitchWorkflowTab('contract');
-  if (typeof init_project_management === 'function') {
-    await init_project_management();
-  } else {
-    const activePage = document.querySelector('.nav-item.active')?.dataset.page || '';
-    if (typeof applyProjectPageMode === 'function') {
-      applyProjectPageMode(activePage === 'project-management' ? 'manage' : 'register');
-    }
+  if (typeof applyProjectPageMode === 'function') {
+    applyProjectPageMode('register');
   }
 }
 
