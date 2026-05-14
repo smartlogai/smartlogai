@@ -752,9 +752,7 @@ function projRegUpdateFormFooter(session, editId, row) {
   if (st === 'approved') {
     if (btnAppr) btnAppr.style.display = 'inline-flex';
     projRegSetFormFieldsDisabled(false);
-    const typeSel = document.getElementById('proj-reg-code-type');
     const yymmEl = document.getElementById('proj-reg-yymm');
-    if (typeSel) typeSel.disabled = true;
     if (yymmEl) yymmEl.disabled = true;
     return;
   }
@@ -2462,6 +2460,119 @@ function _projRegTypeById(typeId) {
   return _projRegTypes.find((x) => String(x.id) === String(typeId)) || null;
 }
 
+function _projRegNormText(v) {
+  return String(v || '').trim();
+}
+
+function _projRegIsFinalApprovedTopMgr(session, row) {
+  const sid = _projRegNormText(session?.id || session?.user_id);
+  if (!sid || !row) return false;
+  const role = _projRegNormRole(session?.role || '');
+  if (role !== 'top_mgr') return false;
+  return sid === _projRegNormText(row.final_approved_by);
+}
+
+async function _projRegHasAnyByFilter(table, filter, limit = 5) {
+  try {
+    const r = await API.list(table, { filter, limit, page: 1, sort: 'updated_at' });
+    const rows = (r && Array.isArray(r.data)) ? r.data : [];
+    return rows.length > 0;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function _projRegHasDownstreamProgress(row) {
+  const code = _projRegNormText(row?.project_code);
+  const pid = _projRegNormText(row?.id);
+  if (!code && !pid) return false;
+  const encCode = encodeURIComponent(code);
+  const encPid = encodeURIComponent(pid);
+  const checks = [];
+  if (code) {
+    checks.push(_projRegHasAnyByFilter('time_entries', `project_code=eq.${encCode}`));
+    checks.push(_projRegHasAnyByFilter('project_outputs', `project_code=eq.${encCode}`));
+    checks.push(_projRegHasAnyByFilter('project_timecharge_lines', `project_code=eq.${encCode}`));
+    checks.push(_projRegHasAnyByFilter('project_expense_uploads', `project_code=eq.${encCode}`));
+    checks.push(_projRegHasAnyByFilter('project_cost_items', `project_code=eq.${encCode}`));
+    checks.push(_projRegHasAnyByFilter('project_invoices', `project_code=eq.${encCode}`));
+  }
+  if (pid) {
+    checks.push(_projRegHasAnyByFilter('project_cost_items', `project_id=eq.${encPid}`));
+    checks.push(_projRegHasAnyByFilter('project_invoices', `project_id=eq.${encPid}`));
+  }
+  const result = await Promise.allSettled(checks);
+  return result.some((x) => x.status === 'fulfilled' && x.value === true);
+}
+
+async function _projRegHasIssuedInvoice(row) {
+  const code = _projRegNormText(row?.project_code);
+  const pid = _projRegNormText(row?.id);
+  if (!code && !pid) return false;
+  const list = [];
+  const readRows = async (filter) => {
+    try {
+      const rows = await API.listAllPages('project_invoices', {
+        filter,
+        limit: 200,
+        maxPages: 5,
+        sort: 'updated_at',
+      });
+      list.push(...(rows || []));
+    } catch (_) {}
+  };
+  if (code) await readRows(`project_code=eq.${encodeURIComponent(code)}`);
+  if (pid) await readRows(`project_id=eq.${encodeURIComponent(pid)}`);
+  const seen = new Set();
+  const uniq = list.filter((r) => {
+    const id = _projRegNormText(r?.id);
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+  return uniq.some((r) => {
+    const issueDate = _projRegNormText(r?.issue_date);
+    const pay = _projRegNormText(r?.payment_status).toLowerCase();
+    return !!issueDate || ['issued', 'partially_paid', 'paid', 'overdue'].includes(pay);
+  });
+}
+
+function _projRegBillingAmountDueDigest(v) {
+  let data = v;
+  if (typeof data === 'string') {
+    try { data = JSON.parse(data); } catch (_) { data = null; }
+  }
+  if (!data || typeof data !== 'object') data = {};
+  const keys = ['down', 'interim', 'final', 'additional', 'success'];
+  const norm = {};
+  keys.forEach((k) => {
+    const block = data[k] || {};
+    const amount = Number(block.amount || 0);
+    const due = _projRegNormText(block.due_date || '');
+    norm[k] = {
+      amount: Number.isFinite(amount) ? Math.round(amount) : 0,
+      due_date: due,
+    };
+  });
+  return JSON.stringify(norm);
+}
+
+function _projRegBillingAmountOrDueChanged(prevBilling, nextBilling) {
+  return _projRegBillingAmountDueDigest(prevBilling) !== _projRegBillingAmountDueDigest(nextBilling);
+}
+
+async function _projRegBuildApprovedEditGuard(session, row) {
+  const hasDownstream = await _projRegHasDownstreamProgress(row);
+  const hasIssuedInvoice = await _projRegHasIssuedInvoice(row);
+  const isFinalApprovedTopMgr = _projRegIsFinalApprovedTopMgr(session, row);
+  return {
+    hasDownstream,
+    hasIssuedInvoice,
+    isFinalApprovedTopMgr,
+    canChangeCodeKey: isFinalApprovedTopMgr && !hasDownstream,
+  };
+}
+
 function _projRegRowMainCode(r) {
   const t = _projRegTypeById(r && r.project_code_type_id);
   return t ? String(t.main_code || '').trim() : '';
@@ -3171,9 +3282,13 @@ async function projRegShowForm(editId, opts) {
       yymmEl.value = yymm ? _projRegYymmToMonthValue(yymm) : '';
     }
 
-    const lockType = st === 'approved' || st === 'pending';
+    let approvedGuard = null;
+    if (st === 'approved') {
+      approvedGuard = await _projRegBuildApprovedEditGuard(session, row);
+    }
+    const lockType = (st === 'pending') || (st === 'approved' && !approvedGuard?.canChangeCodeKey);
     if (typeSel) typeSel.disabled = lockType;
-    if (yymmEl) yymmEl.disabled = lockType;
+    if (yymmEl) yymmEl.disabled = (st === 'approved') ? true : lockType;
 
     const showCode = !!(row.project_code && String(row.project_code).trim());
     if (codeWrap) codeWrap.style.display = showCode ? '' : 'none';
@@ -3819,6 +3934,27 @@ async function projRegSaveApproved() {
     return;
   }
   const f = _projRegReadFormCore(session);
+  const approvedGuard = await _projRegBuildApprovedEditGuard(session, prev);
+  const prevTypeId = _projRegNormText(prev.project_code_type_id);
+  const nextTypeId = _projRegNormText(f.typeId);
+  const prevName = _projRegNormText(prev.project_name);
+  const nextName = _projRegNormText(f.name);
+  const isCodeKeyChange = (prevTypeId !== nextTypeId) || (prevName !== nextName);
+  if (isCodeKeyChange) {
+    if (approvedGuard.hasDownstream) {
+      Toast.warning('프로젝트 진행중이므로 코드변경은 불가합니다');
+      return;
+    }
+    if (!approvedGuard.isFinalApprovedTopMgr) {
+      Toast.warning('코드유형/프로젝트명 변경은 해당 건을 최종 승인한 사업부장만 가능합니다.');
+      return;
+    }
+  }
+  const billingAmountDueChanged = _projRegBillingAmountOrDueChanged(prev.billing_schedule, f.billing);
+  if (billingAmountDueChanged && approvedGuard.hasIssuedInvoice) {
+    Toast.warning('이미 발행된 청구서가 있어 금액/청구일은 수정할 수 없습니다.');
+    return;
+  }
   if (f.typeId && !f.lockedTypeName) {
     Toast.warning('선택한 코드유형에 프로젝트명이 설정되어 있지 않습니다. 프로젝트 코드 마스터에서 프로젝트명(EN)을 설정하세요.');
     return;
@@ -3861,6 +3997,33 @@ async function projRegSaveApproved() {
     conditional_approval: isConditional,
     conditional_approved_at: isConditional ? (prev.conditional_approved_at || Date.now()) : null,
   };
+  if (isCodeKeyChange) {
+    const typeSel = document.getElementById('proj-reg-code-type');
+    const opt = typeSel?.selectedOptions?.[0];
+    const mainCode = _projRegNormText(opt?.dataset?.mainCode || '');
+    const subCode = _projRegNormText(opt?.dataset?.subCode || '');
+    const yymm = _projRegNormText(f.yymm || _projRegYymmFromCode(prev.project_code || ''));
+    if (!nextTypeId || !mainCode || !subCode || !yymm) {
+      Toast.warning('코드변경에 필요한 유형/연월 정보를 확인할 수 없습니다.');
+      return;
+    }
+    if (f.lockedTypeName) {
+      basePayload.project_name = f.lockedTypeName;
+      const nameEl = document.getElementById('proj-reg-name');
+      if (nameEl) nameEl.value = f.lockedTypeName;
+    }
+    const nextCode = await API.rpc('fn_allocate_project_code', {
+      p_main_code: mainCode,
+      p_sub_code: subCode,
+      p_yymm: yymm,
+    });
+    if (!nextCode || typeof nextCode !== 'string') {
+      Toast.error('프로젝트 코드 채번에 실패했습니다.');
+      return;
+    }
+    basePayload.project_code = String(nextCode).trim();
+    basePayload.project_code_type_id = nextTypeId;
+  }
   await _projRegApplyContractToPayload(basePayload, f.file, f.removeContractMeta, prev);
   await _projRegApplyEvidenceToPayload(basePayload, f.evidenceFile, f.removeEvidenceMeta, prev);
   await _projRegApplyRouteEvidenceToPayload(basePayload, f.routeEvidenceFile, f.removeRouteEvidenceMeta, prev);
