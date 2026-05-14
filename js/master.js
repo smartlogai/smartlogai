@@ -1462,7 +1462,10 @@ async function loadCategories() {
   Master.invalidate('categories');
   Master.invalidate('subcategories');
   const [cats, subs] = await Promise.all([Master.categories(), Master.subcategories()]);
-  renderCategoryTree(cats, subs);
+  const visibleCats = (cats || []).filter((c) => !_isProjectWorkCategoryName(c?.category_name));
+  const visibleCatIdSet = new Set(visibleCats.map((c) => String(c.id || '')));
+  const visibleSubs = (subs || []).filter((s) => visibleCatIdSet.has(String(s?.category_id || '')));
+  renderCategoryTree(visibleCats, visibleSubs);
 }
 
 function renderCategoryTree(cats, subs) {
@@ -1526,6 +1529,10 @@ function renderCategoryTree(cats, subs) {
 }
 
 function openCategoryModal(id='', name='', type='client', order=0) {
+  if (_isProjectWorkCategoryName(name)) {
+    Toast.warning('프로젝트업무 분류는 프로젝트코드 기준으로 자동 관리되어 여기서 수정할 수 없습니다.');
+    return;
+  }
   document.getElementById('category-edit-id').value        = id;
   document.getElementById('category-name-input').value     = name;
   document.getElementById('category-type-input').value     = type;
@@ -1543,6 +1550,17 @@ async function saveCategory() {
   const type  = document.getElementById('category-type-input').value;
   const order = parseInt(document.getElementById('category-order-input').value) || 0;
   if (!name) { Toast.warning('대분류명을 입력하세요.'); return; }
+  if (_isProjectWorkCategoryName(name)) {
+    Toast.warning('프로젝트업무 분류는 프로젝트코드 기준으로 자동 관리되어 저장할 수 없습니다.');
+    return;
+  }
+  if (id) {
+    const current = await API.get('work_categories', id).catch(() => null);
+    if (current && _isProjectWorkCategoryName(current.category_name)) {
+      Toast.warning('프로젝트업무 분류는 수정할 수 없습니다.');
+      return;
+    }
+  }
   try {
     const data = { category_name: name, category_type: type, sort_order: order };
     if (id) { await API.update('work_categories', id, data); Toast.success('수정되었습니다.'); }
@@ -1555,6 +1573,15 @@ async function saveCategory() {
 async function deleteCategory(id, name, subCount) {
   const session = getSession();
   if (!Auth.canManageMaster(session)) { Toast.warning('권한이 없습니다.'); return; }
+  if (_isProjectWorkCategoryName(name)) {
+    Toast.warning('프로젝트업무 분류는 삭제할 수 없습니다.');
+    return;
+  }
+  const current = await API.get('work_categories', id).catch(() => null);
+  if (current && _isProjectWorkCategoryName(current.category_name)) {
+    Toast.warning('프로젝트업무 분류는 삭제할 수 없습니다.');
+    return;
+  }
   if (subCount > 0) { Toast.warning(`소분류 ${subCount}개가 있습니다. 먼저 삭제해주세요.`); return; }
   if (!await Confirm.delete(name)) return;
   try {
@@ -1569,6 +1596,10 @@ async function deleteCategory(id, name, subCount) {
 }
 
 function openSubcategoryModal(id='', name='', parentId='', parentName='', order=0) {
+  if (_isProjectWorkCategoryName(parentName)) {
+    Toast.warning('프로젝트업무 소분류는 프로젝트코드 기준으로 자동 관리되어 수정할 수 없습니다.');
+    return;
+  }
   document.getElementById('subcategory-edit-id').value     = id;
   document.getElementById('subcategory-name-input').value  = name;
   document.getElementById('subcategory-parent-id').value   = parentId;
@@ -1588,6 +1619,21 @@ async function saveSubcategory() {
   const order    = parseInt(document.getElementById('subcategory-order-input').value) || 0;
   if (!name)     { Toast.warning('소분류명을 입력하세요.'); return; }
   if (!parentId) { Toast.warning('대분류 정보가 없습니다.'); return; }
+  const parentCat = await API.get('work_categories', parentId).catch(() => null);
+  if (parentCat && _isProjectWorkCategoryName(parentCat.category_name)) {
+    Toast.warning('프로젝트업무 소분류는 저장할 수 없습니다.');
+    return;
+  }
+  if (id) {
+    const currentSub = await API.get('work_subcategories', id).catch(() => null);
+    if (currentSub) {
+      const currentParent = await API.get('work_categories', currentSub.category_id).catch(() => null);
+      if (currentParent && _isProjectWorkCategoryName(currentParent.category_name)) {
+        Toast.warning('프로젝트업무 소분류는 수정할 수 없습니다.');
+        return;
+      }
+    }
+  }
   try {
     const data = { category_id: parentId, sub_category_name: name, sort_order: order };
     if (id) { await API.update('work_subcategories', id, data); Toast.success('수정되었습니다.'); }
@@ -1600,6 +1646,14 @@ async function saveSubcategory() {
 async function deleteSubcategory(id, name) {
   const session = getSession();
   if (!Auth.canManageMaster(session)) { Toast.warning('권한이 없습니다.'); return; }
+  const currentSub = await API.get('work_subcategories', id).catch(() => null);
+  if (currentSub) {
+    const currentParent = await API.get('work_categories', currentSub.category_id).catch(() => null);
+    if (currentParent && _isProjectWorkCategoryName(currentParent.category_name)) {
+      Toast.warning('프로젝트업무 소분류는 삭제할 수 없습니다.');
+      return;
+    }
+  }
   if (!await Confirm.delete(name)) return;
   try {
     await API.delete('work_subcategories', id);
@@ -1624,13 +1678,17 @@ async function uploadCategories() {
     const catNameMap = {};
     existing.forEach(c => { catNameMap[c.category_name] = c.id; });
     const existSubSet = new Set(existSubs.map(s => `${s.category_id}::${s.sub_category_name}`));
-    let added = 0, skipped = 0, order = existing.length;
+    let added = 0, skipped = 0, skippedProject = 0, order = existing.length;
     for (const row of data) {
       const catName = String(row['대분류'] || Object.values(row)[0] || '').trim();
       const subName = String(row['소분류'] || Object.values(row)[1] || '').trim();
       const typeRaw = String(row['유형']   || Object.values(row)[2] || 'client').trim().toLowerCase();
       const catType = typeRaw === 'internal' ? 'internal' : 'client';
       if (!catName) continue;
+      if (_isProjectWorkCategoryName(catName)) {
+        skippedProject++;
+        continue;
+      }
       if (!catNameMap[catName]) {
         const r = await API.create('work_categories', { category_name: catName, category_type: catType, sort_order: order++ });
         catNameMap[catName] = r.id;
@@ -1646,7 +1704,7 @@ async function uploadCategories() {
     }
     const result = document.getElementById('category-upload-result');
     result.style.display = '';
-    result.innerHTML = `<i class="fas fa-check-circle"></i> 추가 ${added}건 완료 / 중복 스킵 ${skipped}건`;
+    result.innerHTML = `<i class="fas fa-check-circle"></i> 추가 ${added}건 완료 / 중복 스킵 ${skipped}건 / 프로젝트업무 스킵 ${skippedProject}건`;
     await loadCategories();
   } catch (err) { Toast.error('업로드 실패: ' + err.message); }
 }
@@ -1679,7 +1737,7 @@ async function exportCategoriesToExcel() {
     if (typeof XLSX === 'undefined') await LibLoader.load('xlsx');
     const wb = XLSX.utils.book_new();
 
-    const sortedCats = [...(cats || [])].sort((a, b) => {
+    const sortedCats = [...(cats || [])].filter((c) => !_isProjectWorkCategoryName(c?.category_name)).sort((a, b) => {
       const oa = Number(a?.sort_order ?? 0);
       const ob = Number(b?.sort_order ?? 0);
       if (oa !== ob) return oa - ob;
@@ -1751,4 +1809,13 @@ async function exportCategoriesToExcel() {
 // ─────────────────────────────────────────────
 function esc(str) {
   return (str || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+function _normCategoryNameForGuard(v) {
+  return String(v || '').replace(/\s+/g, '').trim().toLowerCase();
+}
+
+function _isProjectWorkCategoryName(name) {
+  const n = _normCategoryNameForGuard(name);
+  return n === '프로젝트업무';
 }
