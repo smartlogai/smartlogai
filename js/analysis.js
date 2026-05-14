@@ -152,6 +152,37 @@ function _analysisApplyQuickRange(kind) {
   if (periodBadge) periodBadge.style.display = 'none';
 }
 
+function _analysisSyncStaffRangeButtons(active) {
+  document.querySelectorAll('.staff-quick-range-btn').forEach((btn) => {
+    btn.classList.toggle('is-active', btn.dataset.staffRange === active);
+  });
+}
+
+function _analysisApplyStaffQuickRange(kind) {
+  const fromEl = document.getElementById('filter-staff-date-from');
+  const toEl = document.getElementById('filter-staff-date-to');
+  if (!fromEl || !toEl) return;
+  const today = new Date();
+  let from = '';
+  let to = '';
+  if (kind === 'this_month') {
+    from = _analysisDateText(new Date(today.getFullYear(), today.getMonth(), 1));
+    to = _analysisDateText(today);
+  } else if (kind === 'last_3m') {
+    from = _analysisDateText(_analysisAddMonths(today, -3));
+    to = _analysisDateText(today);
+  } else if (kind === 'last_6m') {
+    from = _analysisDateText(_analysisAddMonths(today, -6));
+    to = _analysisDateText(today);
+  } else if (kind === 'last_1y') {
+    from = _analysisDateText(_analysisAddMonths(today, -12));
+    to = _analysisDateText(today);
+  }
+  fromEl.value = from;
+  toEl.value = to;
+  _analysisSyncStaffRangeButtons(kind);
+}
+
 
 function _getVisibleUserIdSetForAnalysis(session, allUsers) {
   const s = session || {};
@@ -329,16 +360,8 @@ async function init_analysis() {
   const periodBadge = document.getElementById('analysis-period-badge');
   if (periodBadge) periodBadge.style.display = 'none';
 
-  // 고과분석(staff) 탭: From=올해 1/1, To=빈칸 (To 미입력 시 올해 누적은 loadStaffAnalysis에서 처리)
-  const now = new Date();
-  const y = now.getFullYear();
-  const firstDay = `${y}-01-01`;
-  ['filter-staff-date-from'].forEach(id => {
-    const el = document.getElementById(id); if (el) el.value = firstDay;
-  });
-  ['filter-staff-date-to'].forEach(id => {
-    const el = document.getElementById(id); if (el) el.value = '';
-  });
+  // 고과분석(staff) 기간 프리셋 기본값: 당월
+  _analysisApplyStaffQuickRange('this_month');
 
   // ── 마스터 데이터 로드 ★ Master 캐시 활용 (중복 API 호출 제거) ──────────
   const [teams, clients, allUsers, deptRes, csTeamRes] = await Promise.all([
@@ -452,6 +475,16 @@ async function init_analysis() {
   _fillDept('filter-staff-department');
   _fillCsTeam('filter-staff-csteam');
   _initStaffSearch('filter-staff-staff-wrap', '', '');
+  const staffFromEl = document.getElementById('filter-staff-date-from');
+  const staffToEl = document.getElementById('filter-staff-date-to');
+  if (staffFromEl && !staffFromEl.dataset.rangeBind) {
+    staffFromEl.dataset.rangeBind = '1';
+    staffFromEl.addEventListener('change', () => _analysisSyncStaffRangeButtons(''));
+  }
+  if (staffToEl && !staffToEl.dataset.rangeBind) {
+    staffToEl.dataset.rangeBind = '1';
+    staffToEl.addEventListener('change', () => _analysisSyncStaffRangeButtons(''));
+  }
 
   // ── 인건비 분석 필터 세팅 ─────────────────────────────────
   _fillDept('filter-labor-department');
@@ -901,13 +934,15 @@ function resetPerfWeights() {
 }
 
 function resetStaffFilter() {
-  const now = new Date();
-  const y = now.getFullYear();
-  document.getElementById('filter-staff-date-from').value = `${y}-01-01`;
-  document.getElementById('filter-staff-date-to').value = '';
+  _analysisApplyStaffQuickRange('this_month');
   const ids = ['filter-staff-department','filter-staff-csteam'];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   if (typeof UserSearchSelect !== 'undefined') UserSearchSelect.clear('filter-staff-staff-wrap');
+  loadStaffAnalysis();
+}
+
+function onStaffQuickRange(kind) {
+  _analysisApplyStaffQuickRange(kind);
   loadStaffAnalysis();
 }
 
@@ -1045,11 +1080,15 @@ async function loadStaffAnalysis() {
     let filteredAllEntries = [...periodEntriesAll];
 
     if (deptFilter || csTeamFilter) {
+      const deptNorm = _analysisNormText(deptFilter);
+      const csNorm = _analysisNormText(csTeamFilter);
       const matchedUserIds = new Set(
-        safeUsers.filter(u =>
-          (!deptFilter   || u.department   === deptFilter) &&
-          (!csTeamFilter || u.cs_team_name === csTeamFilter)
-        ).map(u => String(u.id))
+        safeUsers
+          .filter((u) =>
+            (!deptNorm || _analysisNormText(_analysisUserDept(u)) === deptNorm) &&
+            (!csNorm || _analysisNormText(_analysisUserCsTeam(u)) === csNorm)
+          )
+          .map((u) => String(u.id))
       );
       benchmarkEntries = benchmarkEntries.filter(e => matchedUserIds.has(e.user_id));
       filteredEntries = filteredEntries.filter(e => matchedUserIds.has(e.user_id));
@@ -1113,8 +1152,8 @@ async function loadStaffAnalysis() {
       )
       .map(u => ({ ...u, id: String(u.id || '') }));
 
-    if (deptFilter)    targetUsers = targetUsers.filter(u => u.department   === deptFilter);
-    if (csTeamFilter)  targetUsers = targetUsers.filter(u => u.cs_team_name === csTeamFilter);
+    if (deptFilter)    targetUsers = targetUsers.filter((u) => _analysisNormText(_analysisUserDept(u)) === _analysisNormText(deptFilter));
+    if (csTeamFilter)  targetUsers = targetUsers.filter((u) => _analysisNormText(_analysisUserCsTeam(u)) === _analysisNormText(csTeamFilter));
     if (staffFilter)  targetUsers = targetUsers.filter(u => String(u.id) === String(staffFilter));
 
     // 근무시간 대비 타임시트 기록률 (사업부/팀/개인)
@@ -1157,8 +1196,8 @@ async function loadStaffAnalysis() {
     const userMetaById = new Map(targetUsers.map((u) => [String(u.id || ''), u]));
     const grouped = {};
     const scopeLabel = (u, uid, fallbackName = '') => {
-      if (_staffWorklogScope === 'dept') return String(u?.department || u?.dept_name || '').trim() || '미지정 사업부';
-      if (_staffWorklogScope === 'team') return String(u?.cs_team_name || u?.team_name || '').trim() || '미지정 팀';
+      if (_staffWorklogScope === 'dept') return _analysisUserDept(u) || '미지정 사업부';
+      if (_staffWorklogScope === 'team') return _analysisUserCsTeam(u) || '미지정 팀';
       return String(u?.name || fallbackName || uid || '').trim() || '미지정 담당자';
     };
 
@@ -1927,11 +1966,15 @@ async function exportPerformanceYearlyExcel() {
     // 조직 필터(사업부/팀) 반영
     let scopeEntries = allEntries.filter(e => e.status === 'approved' && e.work_start_at);
     if (deptFilter || csTeamFilter) {
+      const deptNorm = _analysisNormText(deptFilter);
+      const csNorm = _analysisNormText(csTeamFilter);
       const matchedUserIds = new Set(
-        allUsers.filter(u =>
-          (!deptFilter   || u.department   === deptFilter) &&
-          (!csTeamFilter || u.cs_team_name === csTeamFilter)
-        ).map(u => String(u.id))
+        allUsers
+          .filter((u) =>
+            (!deptNorm || _analysisNormText(_analysisUserDept(u)) === deptNorm) &&
+            (!csNorm || _analysisNormText(_analysisUserCsTeam(u)) === csNorm)
+          )
+          .map((u) => String(u.id))
       );
       scopeEntries = scopeEntries.filter(e => matchedUserIds.has(String(e.user_id)));
     }
@@ -1945,8 +1988,8 @@ async function exportPerformanceYearlyExcel() {
         (u.role === 'manager' ? true : (u.approver_id && String(u.approver_id).trim() !== ''))
       )
       .map(u => ({ ...u, id: String(u.id||'') }));
-    if (deptFilter) targetUsers = targetUsers.filter(u => u.department === deptFilter);
-    if (csTeamFilter) targetUsers = targetUsers.filter(u => u.cs_team_name === csTeamFilter);
+    if (deptFilter) targetUsers = targetUsers.filter((u) => _analysisNormText(_analysisUserDept(u)) === _analysisNormText(deptFilter));
+    if (csTeamFilter) targetUsers = targetUsers.filter((u) => _analysisNormText(_analysisUserCsTeam(u)) === _analysisNormText(csTeamFilter));
     if (staffFilter) targetUsers = targetUsers.filter(u => String(u.id) === String(staffFilter));
 
     const _calcBench = (entries, range) => {

@@ -26,7 +26,7 @@
   <script src="https://cdn.jsdelivr.net/npm/turndown/dist/turndown.js" defer></script>
   <!-- turndown-plugin-gfm: 테이블 등 GFM 확장 지원 -->
   <script src="https://cdn.jsdelivr.net/npm/turndown-plugin-gfm/dist/turndown-plugin-gfm.js" defer></script>
-  <link rel="stylesheet" href="css/style.css?v=20260514analysisQuickRange5" />
+  <link rel="stylesheet" href="css/style.css?v=20260514staffQuickRange3" />
   <!-- Chart.js: 대시보드/분석에서 사용 → defer로 DOM 파싱 차단 방지 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
   <!-- ★ 무거운 라이브러리는 필요한 시점에 동적으로 로드 (초기 blocking 제거) -->
@@ -1655,14 +1655,20 @@
 
           <!-- 필터 바 -->
           <div style="background:#fff;border:1px solid var(--border-light);border-radius:10px;padding:12px 16px;margin-bottom:16px;">
-            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 16px;align-items:end;">
+            <div class="staff-analysis-filter-grid">
               <!-- 기간 -->
-              <div class="filter-group" style="grid-column:span 2">
+              <div class="filter-group staff-period-group">
                 <span class="filter-label">기간</span>
                 <div style="display:flex;align-items:center;gap:4px">
                   <input type="date" class="filter-control" id="filter-staff-date-from" />
                   <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">~</span>
                   <input type="date" class="filter-control" id="filter-staff-date-to" />
+                </div>
+                <div class="staff-quick-range-group">
+                  <button type="button" class="staff-quick-range-btn" data-staff-range="this_month" onclick="onStaffQuickRange('this_month')">당월</button>
+                  <button type="button" class="staff-quick-range-btn" data-staff-range="last_3m" onclick="onStaffQuickRange('last_3m')">최근 3개월</button>
+                  <button type="button" class="staff-quick-range-btn" data-staff-range="last_6m" onclick="onStaffQuickRange('last_6m')">최근 6개월</button>
+                  <button type="button" class="staff-quick-range-btn" data-staff-range="last_1y" onclick="onStaffQuickRange('last_1y')">최근 1년</button>
                 </div>
               </div>
               <!-- 사업부 -->
@@ -1688,9 +1694,8 @@
                 </select>
                 <div id="filter-staff-staff-wrap"></div>
               </div>
-              <!-- 버튼 -->
-              <div class="filter-actions" style="display:flex;gap:6px;align-items:flex-end;padding-top:16px">
-                <button class="btn btn-primary btn-sm" onclick="loadStaffAnalysis()"><i class="fas fa-user-chart"></i> 분석</button>
+              <div class="staff-filter-actions-group">
+                <button class="btn btn-primary btn-sm staff-analysis-main-btn" onclick="loadStaffAnalysis()"><i class="fas fa-user-chart"></i> 분석</button>
                 <button class="btn btn-ghost btn-sm" onclick="resetStaffFilter()" title="초기화"><i class="fas fa-redo"></i></button>
                 <button class="btn btn-ghost btn-sm" onclick="openPerfWeightsModal()" title="가중치"><i class="fas fa-sliders-h"></i> 가중치</button>
                 <button class="btn btn-ghost btn-sm" onclick="exportPerformanceYearlyExcel()" title="연간 리포트 다운로드"><i class="fas fa-file-excel"></i> 연간리포트</button>
@@ -5794,7 +5799,7 @@
 <script src="js/entry.js?v=20260514entryPaginationCallbackFix1"></script>
 <script src="js/daily-module.js?v=20260419dailyModePlan1"></script>
 <script src="js/approval.js?v=20260514approvalPendingNoDate1"></script>
-<script src="js/analysis.js?v=20260514analysisQuickRange1"></script>
+<script src="js/analysis.js?v=20260514staffQuickRange1"></script>
 <script src="js/archive.js?v=20260410d"></script>
 <script src="js/project-management.js?v=20260514pmProgressDownload1"></script>
 <script src="js/project-dashboard-v2.js?v=20260514excludeInactiveUsers1"></script>
