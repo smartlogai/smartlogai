@@ -4717,6 +4717,61 @@ input[type=date].filter-control {
   box-shadow: 0 0 0 1px rgba(59,130,246,.12);
 }
 
+#page-analysis .analysis-quick-range-group {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  height: 32px;
+}
+#page-analysis .analysis-work-filter-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 1.45fr) repeat(3, minmax(170px, 1fr));
+  gap: 10px 16px;
+  align-items: end;
+}
+#page-analysis .analysis-period-group {
+  grid-column: span 1;
+  grid-row: span 2;
+}
+#page-analysis .analysis-quick-range-btn {
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 12px;
+  cursor: pointer;
+}
+#page-analysis .analysis-quick-range-btn.is-active {
+  color: #1d4ed8;
+  border-color: #93c5fd;
+  background: #eff6ff;
+  box-shadow: 0 0 0 1px rgba(59,130,246,.12);
+}
+#page-analysis .analysis-period-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  align-items: center;
+}
+#page-analysis .analysis-period-actions .analysis-action-btn {
+  min-width: 104px;
+  justify-content: center;
+  font-weight: 700;
+}
+
+@media (max-width: 1360px) {
+  #page-analysis .analysis-work-filter-grid {
+    grid-template-columns: repeat(3, minmax(170px, 1fr));
+  }
+  #page-analysis .analysis-period-group {
+    grid-column: span 3;
+    grid-row: auto;
+  }
+}
+
 @media (max-width: 1024px) {
   #page-my-entries .filter-bar {
     display: flex;

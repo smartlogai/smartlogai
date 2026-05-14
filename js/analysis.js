@@ -97,6 +97,61 @@ function _analysisIsActiveUser(u) {
   return true;
 }
 
+function _analysisUserDept(u) {
+  return String((u && (u.department || u.dept_name || u.department_name)) || '').trim();
+}
+
+function _analysisUserCsTeam(u) {
+  return String((u && (u.cs_team_name || u.team_name)) || '').trim();
+}
+
+function _analysisNormText(v) {
+  return String(v || '').replace(/\s+/g, '').trim().toLowerCase();
+}
+
+function _analysisDateText(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function _analysisAddMonths(base, delta) {
+  const d = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+  d.setMonth(d.getMonth() + delta);
+  return d;
+}
+
+function _analysisSyncRangeButtons(active) {
+  document.querySelectorAll('.analysis-quick-range-btn').forEach((btn) => {
+    btn.classList.toggle('is-active', btn.dataset.analysisRange === active);
+  });
+}
+
+function _analysisApplyQuickRange(kind) {
+  const fromEl = document.getElementById('filter-analysis-date-from');
+  const toEl = document.getElementById('filter-analysis-date-to');
+  if (!fromEl || !toEl) return;
+  const today = new Date();
+  let from = '';
+  let to = '';
+  if (kind === 'this_month') {
+    from = _analysisDateText(new Date(today.getFullYear(), today.getMonth(), 1));
+    to = _analysisDateText(today);
+  } else if (kind === 'last_3m') {
+    from = _analysisDateText(_analysisAddMonths(today, -3));
+    to = _analysisDateText(today);
+  } else if (kind === 'last_6m') {
+    from = _analysisDateText(_analysisAddMonths(today, -6));
+    to = _analysisDateText(today);
+  } else if (kind === 'last_1y') {
+    from = _analysisDateText(_analysisAddMonths(today, -12));
+    to = _analysisDateText(today);
+  }
+  fromEl.value = from;
+  toEl.value = to;
+  _analysisSyncRangeButtons(kind);
+  const periodBadge = document.getElementById('analysis-period-badge');
+  if (periodBadge) periodBadge.style.display = 'none';
+}
+
 
 function _getVisibleUserIdSetForAnalysis(session, allUsers) {
   const s = session || {};
@@ -311,9 +366,10 @@ async function init_analysis() {
     el.innerHTML = `<option value="">전체 사업부</option>`;
     // departments 테이블에 데이터 없으면 users의 department 필드로 수집
     const names = deptList.length > 0
-      ? deptList.map(d => d.department_name || d.name).filter(Boolean)
-      : [...new Set(allUsers.map(u => u.department).filter(Boolean))].sort();
-    names.forEach(n => {
+      ? deptList.map(d => String(d.department_name || d.dept_name || d.name || '').trim()).filter(Boolean)
+      : allUsers.map((u) => _analysisUserDept(u)).filter(Boolean);
+    const uniqNames = [...new Set(names)].sort();
+    uniqNames.forEach(n => {
       const opt = document.createElement('option');
       opt.value = n; opt.textContent = n;
       el.appendChild(opt);
@@ -322,16 +378,26 @@ async function init_analysis() {
   function _fillCsTeam(elId, deptValue) {
     const el = document.getElementById(elId); if (!el) return;
     el.innerHTML = `<option value="">전체 팀</option>`;
-    let names;
+    const deptNorm = _analysisNormText(deptValue);
+    let names = [];
     if (csTeamList.length > 0) {
       names = csTeamList
-        .filter(t => !deptValue || t.department_name === deptValue || t.department === deptValue)
-        .map(t => t.cs_team_name || t.name).filter(Boolean);
-    } else {
-      names = [...new Set(
-        allUsers.filter(u => !deptValue || u.department === deptValue)
-          .map(u => u.cs_team_name).filter(Boolean)
-      )].sort();
+        .filter((t) => {
+          if (!deptNorm) return true;
+          const tDeptNorm = _analysisNormText(t.department_name || t.dept_name || t.department);
+          return tDeptNorm === deptNorm;
+        })
+        .map((t) => String(t.cs_team_name || t.name || '').trim())
+        .filter(Boolean);
+    }
+    // cs_teams 마스터와 users 간 표기 차이 대비: users 기반 후보를 합쳐서 누락 방지
+    const userNames = allUsers
+      .filter((u) => !deptNorm || _analysisNormText(_analysisUserDept(u)) === deptNorm)
+      .map((u) => _analysisUserCsTeam(u))
+      .filter(Boolean);
+    names = [...new Set([...names, ...userNames])].sort();
+    if (!names.length && !deptNorm) {
+      names = [...new Set(allUsers.map((u) => _analysisUserCsTeam(u)).filter(Boolean))].sort();
     }
     names.forEach(n => {
       const opt = document.createElement('option');
@@ -340,9 +406,11 @@ async function init_analysis() {
     });
   }
   function _initStaffSearch(wrapId, deptValue, csTeamValue, keepSelection = true) {
+    const deptNorm = _analysisNormText(deptValue);
+    const csNorm = _analysisNormText(csTeamValue);
     const list = staffs
-      .filter(u => (!deptValue  || u.department   === deptValue)
-               && (!csTeamValue || u.cs_team_name === csTeamValue))
+      .filter((u) => (!deptNorm || _analysisNormText(_analysisUserDept(u)) === deptNorm)
+        && (!csNorm || _analysisNormText(_analysisUserCsTeam(u)) === csNorm))
       .map(u => ({ id: String(u.id), name: u.name || '' }))
       .filter(u => u.id && u.name);
 
@@ -359,6 +427,17 @@ async function init_analysis() {
   }
 
   // ── 업무분석 필터 세팅 ───────────────────────────────────
+  _analysisApplyQuickRange('this_month');
+  const analysisFromEl = document.getElementById('filter-analysis-date-from');
+  const analysisToEl = document.getElementById('filter-analysis-date-to');
+  if (analysisFromEl && !analysisFromEl.dataset.rangeBind) {
+    analysisFromEl.dataset.rangeBind = '1';
+    analysisFromEl.addEventListener('change', () => _analysisSyncRangeButtons(''));
+  }
+  if (analysisToEl && !analysisToEl.dataset.rangeBind) {
+    analysisToEl.dataset.rangeBind = '1';
+    analysisToEl.addEventListener('change', () => _analysisSyncRangeButtons(''));
+  }
   _fillDept('filter-analysis-department');
   _fillCsTeam('filter-analysis-csteam');
   _initStaffSearch('filter-analysis-staff-wrap', '', '');
@@ -623,12 +702,20 @@ async function loadAnalysis() {
 
     // 사업부 필터: 담당자(user)의 department 필드로 필터
     if (deptFilter) {
-      const userIdsInDept = new Set(allUsers.filter(u => u.department === deptFilter).map(u => u.id));
+      const userIdsInDept = new Set(
+        allUsers
+          .filter((u) => _analysisUserDept(u) === deptFilter)
+          .map((u) => u.id)
+      );
       entries = entries.filter(e => userIdsInDept.has(e.user_id));
     }
     // 고객지원팀 필터: 담당자의 cs_team_name 필드로 필터
     if (csTeamFilter) {
-      const userIdsInCsTeam = new Set(allUsers.filter(u => u.cs_team_name === csTeamFilter).map(u => u.id));
+      const userIdsInCsTeam = new Set(
+        allUsers
+          .filter((u) => _analysisUserCsTeam(u) === csTeamFilter)
+          .map((u) => u.id)
+      );
       entries = entries.filter(e => userIdsInCsTeam.has(e.user_id));
     }
     // 담당자(Staff) 필터
@@ -695,17 +782,17 @@ async function loadAnalysis() {
 }
 
 function resetAnalysisFilter() {
-  const now = new Date();
-  const y = now.getFullYear(), mo = now.getMonth();
-  document.getElementById('filter-analysis-date-from').value =
-    `${y}-${String(mo+1).padStart(2,'0')}-01`;
-  document.getElementById('filter-analysis-date-to').value =
-    `${y}-${String(mo+1).padStart(2,'0')}-${String(new Date(y,mo+1,0).getDate()).padStart(2,'0')}`;
+  _analysisApplyQuickRange('this_month');
   const ids = ['filter-analysis-department','filter-analysis-csteam',
                'filter-analysis-category','filter-analysis-subcategory'];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   if (typeof UserSearchSelect !== 'undefined') UserSearchSelect.clear('filter-analysis-staff-wrap');
   if (typeof ClientSearchSelect !== 'undefined') ClientSearchSelect.clear('filter-analysis-client-wrap');
+  loadAnalysis();
+}
+
+function onAnalysisQuickRange(kind) {
+  _analysisApplyQuickRange(kind);
   loadAnalysis();
 }
 
@@ -3193,11 +3280,19 @@ async function exportAnalysisExcel() {
 
     // 사업부/팀(고객지원팀)/담당자/고객사/대분류/소분류 필터
     if (deptFilter) {
-      const userIdsInDept = new Set(allUsers.filter(u => u.department === deptFilter).map(u => String(u.id)));
+      const userIdsInDept = new Set(
+        allUsers
+          .filter((u) => _analysisUserDept(u) === deptFilter)
+          .map((u) => String(u.id))
+      );
       entries = entries.filter(e => userIdsInDept.has(String(e.user_id)));
     }
     if (csTeamFilter) {
-      const userIdsInCsTeam = new Set(allUsers.filter(u => u.cs_team_name === csTeamFilter).map(u => String(u.id)));
+      const userIdsInCsTeam = new Set(
+        allUsers
+          .filter((u) => _analysisUserCsTeam(u) === csTeamFilter)
+          .map((u) => String(u.id))
+      );
       entries = entries.filter(e => userIdsInCsTeam.has(String(e.user_id)));
     }
     if (staffFilter)  entries = entries.filter(e => String(e.user_id) === String(staffFilter));
