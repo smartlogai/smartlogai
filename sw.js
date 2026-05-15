@@ -1,4 +1,4 @@
-const CACHE_NAME = 'smartlog-mobile-approval-v2';
+const CACHE_NAME = 'smartlog-mobile-approval-v3';
 const STATIC_ASSETS = [
   './',
   './main.html',
