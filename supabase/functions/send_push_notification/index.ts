@@ -187,6 +187,12 @@ serve(async (req: Request) => {
         }), { status: 500, headers: { ...cors, "Content-Type": "application/json" } });
       }
 
+      const { count: unreadCount } = await sb
+        .from("notifications")
+        .select("id", { count: "exact", head: true })
+        .eq("to_user_id", toUserId)
+        .eq("is_read", false);
+
       const title = `Smart Log AI · ${TYPE_LABEL[String(payload.type || "")] || "알림"}`;
       const body = String(payload.message || "").trim() || "새 알림이 도착했습니다.";
       const pushData = {
@@ -196,6 +202,7 @@ serve(async (req: Request) => {
         url: "/main.html",
         target_menu: String(payload.target_menu || "").trim(),
         entry_id: String(payload.entry_id || "").trim(),
+        badge_count: Number(unreadCount || 0),
       };
 
       const list = Array.isArray(subs) ? subs : [];

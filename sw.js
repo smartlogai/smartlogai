@@ -10,6 +10,19 @@ const STATIC_ASSETS = [
   './js/main.js',
 ];
 
+async function _setAppBadgeFromCount(count) {
+  try {
+    const n = Number(count || 0);
+    if (!Number.isFinite(n)) return;
+    if (self.navigator && typeof self.navigator.setAppBadge === 'function') {
+      if (n > 0) await self.navigator.setAppBadge(n);
+      else if (typeof self.navigator.clearAppBadge === 'function') await self.navigator.clearAppBadge();
+    }
+  } catch (_) {
+    // 일부 브라우저/OS는 Badging API 미지원
+  }
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS)).catch(() => {})
@@ -69,9 +82,13 @@ self.addEventListener('push', (event) => {
       url,
       target_menu: String(payload.target_menu || ''),
       entry_id: String(payload.entry_id || ''),
+      badge_count: Number(payload.badge_count || 0),
     },
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(title, options),
+    _setAppBadgeFromCount(payload.badge_count),
+  ]));
 });
 
 self.addEventListener('notificationclick', (event) => {
