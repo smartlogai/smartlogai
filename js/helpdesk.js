@@ -593,10 +593,8 @@ async function init_helpdesk() {
   if (scopeEl) {
     if (HD_STATE.canManage) {
       scopeEl.disabled = false;
-      // 지정 관리자(hshan)는 항상 기본을 '내 담당'으로 고정해 신규 접수를 즉시 보게 한다.
-      // 그 외 관리권한 사용자는 기본을 '전체'로 열어 누락 오인(메일은 왔는데 목록 미노출) 가능성을 줄인다.
-      if (_hdIsDesignatedMaintainer(session || {})) scopeEl.value = 'assigned';
-      else scopeEl.value = 'all';
+      // 관리권한 사용자는 기본을 '전체'로 열어 목록 누락 오인을 방지한다.
+      scopeEl.value = 'all';
     } else {
       scopeEl.value = 'mine';
       scopeEl.disabled = true;
