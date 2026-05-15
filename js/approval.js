@@ -2821,6 +2821,155 @@ async function processApproval2nd(decision) {
   }
 }
 
+/**
+ * 모바일 승인 전용 처리 함수 (승인 화면 로직 재사용)
+ * @param {string} entryId
+ * @param {'approved'|'rejected'} decision
+ * @param {{ comment?: string, qualityRating?: string, performanceType?: string }} options
+ */
+async function approvalProcessMobile(entryId, decision, options = {}) {
+  const session = getSession();
+  if (!session) throw new Error('세션이 유효하지 않습니다.');
+  const id = String(entryId || '').trim();
+  if (!id) throw new Error('승인 대상이 없습니다.');
+  const act = decision === 'rejected' ? 'rejected' : 'approved';
+  const comment = String(options.comment || '').trim();
+  if (act === 'rejected' && !comment) throw new Error('반려 사유를 입력해주세요.');
+
+  const entry = await API.get('time_entries', id);
+  if (!entry) throw new Error('대상 데이터를 찾을 수 없습니다.');
+
+  const canFirst = _approvalCanDoFirst(session, entry);
+  const canSecond = Auth.canApprove2nd(session) && _approvalFilterSecondApproverPending([entry], session).length > 0;
+  if (!canFirst && !canSecond) throw new Error('승인 권한이 없습니다.');
+
+  const nowTs = Date.now();
+  const needs2nd = needsSecondApproval(entry);
+  const nextStatus = act === 'rejected'
+    ? 'rejected'
+    : (canFirst ? (needs2nd ? 'pre_approved' : 'approved') : 'approved');
+
+  let patchData = {
+    status: nextStatus,
+    reviewer_comment: comment,
+    reviewed_at: nowTs,
+    reviewer_id: session.id,
+    reviewer_name: session.name || '',
+  };
+
+  if (nextStatus === 'pre_approved') {
+    const perfType = String(options.performanceType || '').trim() || (isDailySheetEntry(entry) ? 'independent' : 'independent');
+    patchData = {
+      ...patchData,
+      pre_approver_id: session.id,
+      pre_approver_name: session.name || '',
+      pre_approved_at: nowTs,
+      performance_type: perfType,
+    };
+  }
+
+  if (nextStatus === 'approved' && canSecond) {
+    const requireQuality = needsSecondApprovalQuality(entry);
+    const qualityRating = String(options.qualityRating || '').trim();
+    const perfType = String(options.performanceType || '').trim()
+      || String(entry.performance_type || '').trim()
+      || (isDailySheetEntry(entry) ? 'independent' : '');
+    if (requireQuality && !qualityRating) {
+      throw new Error('최종 승인에는 품질 평가가 필요합니다.');
+    }
+    if (requireQuality && !perfType) {
+      throw new Error('최종 승인에는 수행방식 선택이 필요합니다.');
+    }
+    if (requireQuality) {
+      const qualityStars = RATING_STARS[qualityRating] || 0;
+      const comp = calcCompetency(qualityRating, perfType);
+      patchData = {
+        ...patchData,
+        quality_rating: qualityRating,
+        quality_stars: qualityStars,
+        competency_rating: comp.competency_rating,
+        competency_stars: comp.competency_stars,
+        performance_type: perfType,
+        is_archived: false,
+      };
+    }
+    if (String(entry.status || '') === 'submitted') {
+      patchData = {
+        ...patchData,
+        pre_approver_id: session.id,
+        pre_approver_name: session.name || '',
+        pre_approved_at: nowTs,
+      };
+    }
+  }
+
+  await API.patch('time_entries', id, patchData);
+
+  if (typeof createNotification === 'function') {
+    const summary = `${entry.client_name || entry.work_category_name} | ${entry.work_subcategory_name || ''}`;
+    if (nextStatus === 'rejected') {
+      createNotification({
+        toUserId: entry.user_id,
+        toUserName: entry.user_name,
+        fromUserId: session.id,
+        fromUserName: session.name,
+        type: 'rejected',
+        entryId: entry.id,
+        entrySummary: summary,
+        message: `${session.name}님이 타임시트를 반려했습니다. 사유를 확인하고 수정 후 재제출해주세요.`,
+        targetMenu: 'my-entries',
+      });
+    } else if (nextStatus === 'pre_approved') {
+      createNotification({
+        toUserId: entry.user_id,
+        toUserName: entry.user_name,
+        fromUserId: session.id,
+        fromUserName: session.name,
+        type: 'pre_approved',
+        entryId: entry.id,
+        entrySummary: summary,
+        message: `${session.name}님이 타임시트를 1차 승인했습니다. 본부장 최종 승인 대기 중입니다.`,
+        targetMenu: 'my-entries',
+      });
+      if (entry.reviewer2_id) {
+        createNotification({
+          toUserId: entry.reviewer2_id,
+          toUserName: entry.reviewer2_name,
+          fromUserId: session.id,
+          fromUserName: session.name,
+          type: 'submitted',
+          entryId: entry.id,
+          entrySummary: summary,
+          message: `${entry.user_name}님의 타임시트가 1차 승인되어 최종 승인을 기다리고 있습니다.`,
+          targetMenu: 'approval',
+        });
+      }
+    } else if (nextStatus === 'approved') {
+      createNotification({
+        toUserId: entry.user_id,
+        toUserName: entry.user_name,
+        fromUserId: session.id,
+        fromUserName: session.name,
+        type: 'approved',
+        entryId: entry.id,
+        entrySummary: summary,
+        message: `${session.name}님이 타임시트를 승인했습니다. 🎉`,
+        targetMenu: 'my-entries',
+      });
+    }
+  }
+
+  Cache.invalidate('time_entries_list');
+  Cache.invalidate('time_entries_badge_' + session.id);
+  Cache.invalidate('time_entries_badge_admin_sub');
+  Cache.invalidate('time_entries_badge_admin_pre');
+  Cache.invalidate('dash_time_entries');
+  Cache.invalidate('dash_archive_stars');
+  window._dashNeedsRefresh = true;
+  await updateApprovalBadge(session, true);
+  return { status: nextStatus, entryId: id };
+}
+
 /* ──────────────────────────────────────────
    (레거시 openApprovalModal / processApproval 블록 제거됨)
    현재 사용 함수: openApprovalModal (line ~394), processApproval1st, processApproval2nd

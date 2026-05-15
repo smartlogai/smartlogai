@@ -11,6 +11,7 @@
 const NOTIFY_POLL_MS  = 30_000;   // 폴링 간격 30초
 const NOTIFY_MAX_LIST = 30;       // 드롭다운 최대 표시 건수
 const NOTIFY_EMAIL_FUNCTION = 'send_notification_email';
+const NOTIFY_PUSH_FUNCTION = 'send_push_notification';
 const NOTIFY_EMAIL_TYPES = new Set([
   'project_registered_final_approved', // 5
   'project_output_publish_request',     // 9
@@ -19,11 +20,28 @@ const NOTIFY_EMAIL_TYPES = new Set([
   'project_clearance_notice',           // 13
   'helpdesk_new_ticket',                // 14
 ]);
+const NOTIFY_PUSH_TYPES = new Set([
+  'submitted',
+  'pre_approved',
+  'approved',
+  'rejected',
+  'project_registered_final_approved',
+  'helpdesk_new_ticket',
+  'helpdesk_status_updated',
+  'helpdesk_comment',
+  'project_output_publish_request',
+  'project_output_access_request',
+  'project_output_access_decision',
+  'project_output_bulk_access_alert',
+  'project_clearance_notice',
+  'project_invoice_request',
+]);
 
 // ── 상태 ────────────────────────────────────────────────────
 let _notifyTimer    = null;   // setInterval 핸들
 let _notifyOpen     = false;  // 드롭다운 열림 여부
 let _notifyList     = [];     // 마지막으로 로드된 알림 목록
+let _notifyPushInitPromise = null;
 
 // ── 알림 유형 설정 ───────────────────────────────────────────
 const NOTIFY_META = {
@@ -55,6 +73,9 @@ function initNotify() {
 
   if (_notifyTimer) clearInterval(_notifyTimer);
   _notifyTimer = setInterval(_pollNotify, NOTIFY_POLL_MS);
+  if (!_notifyPushInitPromise) {
+    _notifyPushInitPromise = _initPushSubscription().catch(() => null);
+  }
 }
 
 /** 로그아웃 시 폴링 정지 */
@@ -83,11 +104,74 @@ async function _pollNotify() {
 
     const unread = all.filter(n => !n.is_read).length;
     _setBadge(unread);
+    _syncAppBadge(unread);
 
     // 드롭다운이 열려있으면 목록 갱신
     if (_notifyOpen) _renderNotifyList();
   } catch (e) {
     // 폴링 실패 — 조용히 무시
+  }
+}
+
+function _syncAppBadge(count) {
+  if (typeof navigator === 'undefined') return;
+  if (typeof navigator.setAppBadge === 'function') {
+    navigator.setAppBadge(Number(count || 0)).catch(() => {});
+    return;
+  }
+  if (typeof navigator.clearAppBadge === 'function' && !count) {
+    navigator.clearAppBadge().catch(() => {});
+  }
+}
+
+function _notifyUrlBase64ToUint8Array(base64String) {
+  const pad = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + pad).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+
+async function _initPushSubscription() {
+  try {
+    const session = (typeof getSession === 'function') ? getSession() : null;
+    if (!session || !session.id) return;
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') return;
+    if (!window.isSecureContext) return;
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
+
+    let perm = Notification.permission;
+    if (perm === 'default') {
+      const asked = localStorage.getItem('smartlog_push_permission_asked') === '1';
+      if (!asked) {
+        localStorage.setItem('smartlog_push_permission_asked', '1');
+        perm = await Notification.requestPermission();
+      }
+    }
+    if (perm !== 'granted') return;
+
+    const cfg = await API.invokeFunction(NOTIFY_PUSH_FUNCTION, { action: 'config' }).catch(() => null);
+    const vapidPublicKey = String(cfg?.vapid_public_key || '').trim();
+    if (!vapidPublicKey) return;
+
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: _notifyUrlBase64ToUint8Array(vapidPublicKey),
+      });
+    }
+    const subJson = subscription.toJSON();
+    await API.invokeFunction(NOTIFY_PUSH_FUNCTION, {
+      action: 'register_subscription',
+      to_user_id: String(session.id || ''),
+      subscription: subJson,
+      user_agent: navigator.userAgent || '',
+    }).catch(() => null);
+  } catch (e) {
+    console.warn('[notify-push] init failed:', e?.message || e);
   }
 }
 
@@ -347,6 +431,18 @@ async function createNotification({
       message,
       targetMenu: targetMenu || (NOTIFY_META[type]?.target || 'my-entries'),
     });
+    _notifySendPushForSelectedTypes({
+      createdId: String((created && created.id) || ''),
+      toUserId,
+      toUserName,
+      fromUserId,
+      fromUserName,
+      type,
+      entryId,
+      entrySummary,
+      message,
+      targetMenu: targetMenu || (NOTIFY_META[type]?.target || 'my-entries'),
+    });
   } catch (e) {
     console.warn('알림 생성 실패:', e);
   }
@@ -370,6 +466,28 @@ function _notifySendEmailForSelectedTypes(payload) {
     channel: 'email',
   }).catch((err) => {
     console.warn(`[notify-email] ${type} 메일 발송 실패:`, err?.message || err);
+  });
+}
+
+function _notifySendPushForSelectedTypes(payload) {
+  const type = String(payload?.type || '').trim();
+  if (!NOTIFY_PUSH_TYPES.has(type)) return;
+  if (!API || typeof API.invokeFunction !== 'function') return;
+  API.invokeFunction(NOTIFY_PUSH_FUNCTION, {
+    action: 'send',
+    notification_id: String(payload?.createdId || ''),
+    to_user_id: String(payload?.toUserId || ''),
+    to_user_name: String(payload?.toUserName || ''),
+    from_user_id: String(payload?.fromUserId || ''),
+    from_user_name: String(payload?.fromUserName || ''),
+    type,
+    entry_id: String(payload?.entryId || ''),
+    entry_summary: String(payload?.entrySummary || ''),
+    message: String(payload?.message || ''),
+    target_menu: String(payload?.targetMenu || ''),
+    channel: 'push',
+  }).catch((err) => {
+    console.warn(`[notify-push] ${type} 푸시 발송 실패:`, err?.message || err);
   });
 }
 

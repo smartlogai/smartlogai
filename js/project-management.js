@@ -2437,7 +2437,7 @@ async function pmOpenInvoiceProjectDetail(projectCode) {
 }
 
 function _pmTodayDateText() {
-  return new Date().toISOString().slice(0, 10);
+  return _pmTsToDateText(Date.now());
 }
 
 function _pmApplyProgressPreset(kind) {
@@ -4059,7 +4059,7 @@ async function loadProjectMgmtProgress() {
       };
     });
     _pmBuildProgressFilters(rows);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = _pmTodayDateText();
     const lifecycle = (r) => {
       const code = String(r.project_code || '').trim();
       const inv = invByCode[code] || { outstanding: 0, hasInvoice: false };
@@ -4234,9 +4234,8 @@ function pmProgressDetailSwitchTab(tab) {
 function _pmProgressDetailFmtDate(ms) {
   const n = Number(ms || 0);
   if (!n) return '-';
-  const d = new Date(n);
-  if (Number.isNaN(d.getTime())) return '-';
-  return d.toISOString().slice(0, 10);
+  const txt = _pmTsToDateText(n);
+  return txt || '-';
 }
 
 function _pmProgressDetailSafeSegment(v) {
@@ -4699,7 +4698,7 @@ function _pmProgressDetailFillOpsForm(row) {
   const startEl = document.getElementById('pm-detail-start-date');
   if (startEl) {
     const ts = Number((row && row.execution_started_at) || 0);
-    startEl.value = ts ? new Date(ts).toISOString().slice(0, 10) : '';
+    startEl.value = ts ? _pmTsToDateText(ts) : '';
   }
 }
 

@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#1a2b45" />
   <title>Smart Log AI</title>
+  <link rel="manifest" href="manifest.webmanifest" />
 
   <!-- ══ 보안 메타 태그 ══ -->
   <!-- 민감 데이터 페이지: 뒤로가기 복원 방지 (no-store 유지) -->
@@ -26,7 +28,7 @@
   <script src="https://cdn.jsdelivr.net/npm/turndown/dist/turndown.js" defer></script>
   <!-- turndown-plugin-gfm: 테이블 등 GFM 확장 지원 -->
   <script src="https://cdn.jsdelivr.net/npm/turndown-plugin-gfm/dist/turndown-plugin-gfm.js" defer></script>
-  <link rel="stylesheet" href="css/style.css?v=20260514staffQuickRange3" />
+  <link rel="stylesheet" href="css/style.css?v=20260514mobileApprovalMvp1" />
   <!-- Chart.js: 대시보드/분석에서 사용 → defer로 DOM 파싱 차단 방지 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
   <!-- ★ 무거운 라이브러리는 필요한 시점에 동적으로 로드 (초기 blocking 제거) -->
@@ -181,6 +183,9 @@
       <div class="nav-item" id="menu-approval" data-page="approval" onclick="navigateTo('approval')" style="display:none">
         <i class="fas fa-check-double nav-icon"></i> Approval
         <span class="nav-badge" id="approval-badge" style="display:none">0</span>
+      </div>
+      <div class="nav-item nav-item-mobile-only" id="menu-mobile-approval" data-page="mobile-approval" onclick="navigateTo('mobile-approval')" style="display:none">
+        <i class="fas fa-mobile-screen-button nav-icon"></i> Mobile Approval
       </div>
       <div class="nav-item" id="menu-project-management" data-page="project-management" onclick="navigateTo('project-management')" style="display:none">
         <i class="fas fa-clipboard-list nav-icon"></i> Project Management
@@ -1450,6 +1455,74 @@
                     <tr><td colspan="9" class="table-empty"><i class="fas fa-inbox"></i><p>탭을 선택하면 목록을 불러옵니다.</p></td></tr>
                   </tbody>
                 </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ──────────────────────────
+           모바일 승인(MVP)
+      ────────────────────────── -->
+      <section class="page-section" id="page-mobile-approval">
+        <div class="card mobile-approval-shell">
+          <div class="card-header">
+            <h2><i class="fas fa-mobile-screen-button"></i>&nbsp; 모바일 승인센터</h2>
+            <div class="card-actions">
+              <button type="button" class="btn btn-sm btn-ghost" id="mobile-approval-refresh-btn"><i class="fas fa-rotate-right"></i></button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="mobile-approval-filters">
+              <select id="mobile-approval-kind" class="form-control">
+                <option value="all">전체 구분</option>
+                <option value="timesheet">타임시트</option>
+                <option value="project">프로젝트 등록</option>
+              </select>
+              <select id="mobile-approval-status" class="form-control">
+                <option value="pending">승인대기 전체</option>
+                <option value="submitted">1차 검토 대기</option>
+                <option value="pre_approved">최종 승인 대기</option>
+                <option value="all">전체(히스토리 포함)</option>
+              </select>
+              <input type="date" id="mobile-approval-date-from" class="form-control" />
+              <input type="date" id="mobile-approval-date-to" class="form-control" />
+              <input type="text" id="mobile-approval-search" class="form-control" placeholder="작성자/고객/카테고리/프로젝트 검색" />
+            </div>
+            <div class="mobile-approval-summary" id="mobile-approval-summary">총 0건 · 승인대기 0건</div>
+            <div class="mobile-approval-list" id="mobile-approval-list"></div>
+            <div class="mobile-approval-detail-wrap" id="mobile-approval-detail-wrap">
+              <div class="mobile-approval-detail-empty" id="mobile-approval-detail-empty">목록에서 승인 건을 선택하세요.</div>
+              <div class="mobile-approval-detail-card" id="mobile-approval-detail-card" style="display:none">
+                <div class="mobile-approval-detail-grid">
+                  <div><span class="k">작성자</span><span class="v" id="mobile-approval-detail-writer">—</span></div>
+                  <div><span class="k">대분류</span><span class="v" id="mobile-approval-detail-category">—</span></div>
+                  <div><span class="k">소분류</span><span class="v" id="mobile-approval-detail-sub">—</span></div>
+                  <div><span class="k">기간</span><span class="v" id="mobile-approval-detail-period">—</span></div>
+                  <div><span class="k">소요시간</span><span class="v" id="mobile-approval-detail-duration">—</span></div>
+                  <div><span class="k">프로젝트</span><span class="v" id="mobile-approval-detail-project">—</span></div>
+                </div>
+                <div class="mobile-approval-desc" id="mobile-approval-detail-desc">—</div>
+                <div class="mobile-approval-project-meta" id="mobile-approval-project-meta" style="display:none"></div>
+                <div class="mobile-approval-quality-wrap" id="mobile-approval-quality-wrap" style="display:none">
+                  <select id="mobile-approval-quality" class="form-control">
+                    <option value="">품질 평가 선택</option>
+                    <option value="normal">참고 (★)</option>
+                    <option value="satisfied">우수 (★★)</option>
+                    <option value="very_satisfied">매우우수 (★★★)</option>
+                  </select>
+                  <select id="mobile-approval-performance" class="form-control">
+                    <option value="">수행방식 선택</option>
+                    <option value="independent">독립수행</option>
+                    <option value="guided">지도수행</option>
+                    <option value="supervised">감독수행</option>
+                  </select>
+                </div>
+                <textarea id="mobile-approval-comment" class="form-control" rows="3" placeholder="코멘트(반려 시 필수)"></textarea>
+                <div class="mobile-approval-actions">
+                  <button type="button" class="btn btn-danger" id="mobile-approval-btn-reject" onclick="mobileApprovalProcess('rejected')"><i class="fas fa-rotate-left"></i> 반려</button>
+                  <button type="button" class="btn btn-primary" id="mobile-approval-btn-approve" onclick="mobileApprovalProcess('approved')"><i class="fas fa-check"></i> 승인</button>
+                </div>
               </div>
             </div>
           </div>
@@ -5791,20 +5864,21 @@
 </div>
 
 <!-- JS 파일들 -->
-<script src="js/app.js?v=20260514approvalBadgeSync2"></script>
+<script src="js/app.js?v=20260514mobileApprovalMvp1"></script>
 <script src="js/kw-example-maps.js?v=20260407a"></script>
 <script src="js/llm-proxy.js?v=20260409a"></script>
 <script src="js/notify.js?v=20260419invoiceDueRemind2"></script>
 <script src="js/dashboard.js?v=20260514dashboardPendingSync4"></script>
 <script src="js/entry.js?v=20260514entryPaginationCallbackFix1"></script>
 <script src="js/daily-module.js?v=20260419dailyModePlan1"></script>
-<script src="js/approval.js?v=20260514approvalPendingNoDate1"></script>
+<script src="js/approval.js?v=20260514mobileApprovalMvp1"></script>
+<script src="js/mobile-approval.js?v=20260514mobileApprovalMvp1"></script>
 <script src="js/analysis.js?v=20260514staffQuickRange1"></script>
 <script src="js/archive.js?v=20260410d"></script>
 <script src="js/project-management.js?v=20260514pmProgressDownload1"></script>
 <script src="js/project-dashboard-v2.js?v=20260514excludeInactiveUsers1"></script>
 <!-- master.js / users.js: Settings 메뉴 진입 시 동적 로드 (초기 81KB 절감) -->
-<script src="js/main.js?v=20260514perfInitHotfix1"></script>
+<script src="js/main.js?v=20260514mobileApprovalMvp1"></script>
 
 
 </body>

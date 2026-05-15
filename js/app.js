@@ -328,6 +328,8 @@ function _legacyCanReadMenuByPage(session, page) {
       return _canReadAnalysisEntry(session, Auth.canViewAnalysis(session));
     case 'approval':
       return !!((Auth.canApprove(session) || Auth.canViewDeptScope(session)) && !Auth.canViewAll(session));
+    case 'mobile-approval':
+      return !!(Auth.canApprove(session) || Auth.canViewDeptScope(session));
     case 'archive':
       return true;
     case 'project-deliverables':
@@ -2388,6 +2390,7 @@ function _applyPolicyToMenuVisibility(session) {
   if (mgmtSection) {
     const hasMgmtMenus = (
       isVisible(document.getElementById('menu-approval')) ||
+      isVisible(document.getElementById('menu-mobile-approval')) ||
       isVisible(document.getElementById('menu-project-management')) ||
       isVisible(document.getElementById('menu-analysis')) ||
       isVisible(document.getElementById('menu-admin-all-entries'))
@@ -2521,11 +2524,15 @@ function setupMenuByRole(session) {
   const showMgmt = canApprove || canViewDeptScope || canProjectReg;
   if (mgmtSection) mgmtSection.style.display = showMgmt ? '' : 'none';
 
-  // ── Approval: manager + director / Admin은 Staff 업무 기록으로 조회 ────
+  // ── Approval: manager + director / Mobile Approval은 관리자도 허용 ────
   const approvalMenu = document.getElementById('menu-approval');
+  const mobileApprovalMenu = document.getElementById('menu-mobile-approval');
+  const showApprovalMenus = (canApprove || canViewDeptScope) && !canViewAll;
+  const showMobileApprovalMenu = canApprove || canViewDeptScope;
   if (approvalMenu) {
-    approvalMenu.style.display = (canApprove || canViewDeptScope) && !canViewAll ? '' : 'none';
+    approvalMenu.style.display = showApprovalMenus ? '' : 'none';
   }
+  if (mobileApprovalMenu) mobileApprovalMenu.style.display = showMobileApprovalMenu ? '' : 'none';
   const adminAllEntries = document.getElementById('menu-admin-all-entries');
   // top_mgr는 Settings를 제외한 운영 메뉴를 모두 보이도록 Staff 업무 기록 메뉴를 허용
   if (adminAllEntries) adminAllEntries.style.display = canViewStaffRecords ? '' : 'none';
@@ -3073,6 +3080,22 @@ const GlobalBusy = (() => {
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
   else run();
+})();
+
+(function _bootPwaServiceWorker() {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+  const run = () => {
+    const isLocal = /^(localhost|127\.0\.0\.1)$/i.test(String(location.hostname || ''));
+    if (!window.isSecureContext && !isLocal) return;
+    navigator.serviceWorker.register('sw.js').catch((err) => {
+      console.warn('[pwa] service worker registration failed', err);
+    });
+  };
+  if (document.readyState === 'loading') {
+    window.addEventListener('load', run, { once: true });
+  } else {
+    run();
+  }
 })();
 
 async function migrateDirectorsToAdmin() {

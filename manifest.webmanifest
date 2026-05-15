@@ -1,0 +1,18 @@
+{
+  "name": "Smart Log AI Mobile Approval",
+  "short_name": "SL Approval",
+  "description": "본부장/사업부장/팀장 모바일 승인 전용",
+  "start_url": "./main.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f0f4f8",
+  "theme_color": "#1a2b45",
+  "lang": "ko",
+  "icons": [
+    {
+      "src": "favicon.ico",
+      "sizes": "64x64",
+      "type": "image/x-icon"
+    }
+  ]
+}
