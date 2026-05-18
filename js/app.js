@@ -10,10 +10,11 @@ const SESSION_TTL = 8 * 60 * 60 * 1000; // 8시간
 function normalizeRoleName(role) {
   const raw = String(role || '').trim().toLowerCase();
   if (!raw) return '';
+  // 권한설정/엑셀 업로드/레거시 데이터에서 들어오는 별칭 통합
   if (raw === 'admin' || raw === 'administrator') return 'admin';
-  if (raw === 'director') return 'director';
-  if (raw === 'top_mgr' || raw === 'topmgr' || raw === 'top-manager' || raw === 'top manager' || raw === '경영') return 'top_mgr';
-  if (raw === 'manager') return 'manager';
+  if (raw === 'director' || raw === '본부장' || raw === '책임자' || raw === 'division_head' || raw === 'hq_manager') return 'director';
+  if (raw === 'top_mgr' || raw === 'topmgr' || raw === 'top-manager' || raw === 'top manager' || raw === '경영' || raw === '사업부장' || raw === '대표') return 'top_mgr';
+  if (raw === 'manager' || raw === '팀장' || raw === 'team_lead' || raw === 'team_manager') return 'manager';
   if (raw === 'staff') return 'staff';
   return raw;
 }
