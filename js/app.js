@@ -234,15 +234,40 @@ const Auth = {
   canManageMaster: (s) => s && Auth.isAdmin(s),
 
   // 기준정보 관리 (고객사·업무분류):
-  // 역할(admin/director/top_mgr/manager) + 직책 기반 예외(본부장/팀장)
-  canManageRefData: (s) => s && (
-    Auth.isAdmin(s) ||
-    Auth.isDirector(s) ||
-    Auth.isTopMgr(s) ||
-    Auth.isManager(s) ||
-    Auth.isDivisionHeadTitle(s) ||
-    Auth.isTeamLeadTitle(s)
-  ),
+  // 1) 역할(admin/director/top_mgr/manager) + 직책 기반 예외(본부장/팀장)
+  // 2) 권한정책(권한설정 체크박스) 허용값 fallback
+  canManageRefData: (s) => {
+    if (!s) return false;
+    if (
+      Auth.isAdmin(s) ||
+      Auth.isDirector(s) ||
+      Auth.isTopMgr(s) ||
+      Auth.isManager(s) ||
+      Auth.isDivisionHeadTitle(s) ||
+      Auth.isTeamLeadTitle(s)
+    ) return true;
+
+    // 권한정책 fallback: master-categories/master-clients 메뉴에 write 계열 허용이 있으면 통과
+    try {
+      if (typeof _permResolveAllow === 'function') {
+        const keys = ['master-categories', 'master-clients', 'registration-data'];
+        const actions = ['write', 'create', 'update', 'delete', 'upload', 'read'];
+        for (const k of keys) {
+          for (const a of actions) {
+            const hit = _permResolveAllow(s, k, a);
+            if (hit === true) return true;
+          }
+        }
+      }
+      if (typeof _authCanReadMenuSync === 'function') {
+        if (_authCanReadMenuSync(s, 'master-categories', false)) return true;
+        if (_authCanReadMenuSync(s, 'registration-data', false)) return true;
+      }
+    } catch (_) {
+      // 정책 조회 실패 시 기본 권한 규칙(role/title)만 적용
+    }
+    return false;
+  },
 
   // 고객사 등록 요청: staff 포함 전 역할 접근 허용 (수정/삭제/업로드는 별도 권한)
   canRequestClient: (s) => !!(s && (
