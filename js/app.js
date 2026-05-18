@@ -19,6 +19,17 @@ function normalizeRoleName(role) {
   return raw;
 }
 
+function normalizeJobTitleName(title) {
+  const raw = String(title || '').trim().toLowerCase();
+  if (!raw) return '';
+  if (raw === 'division_head' || raw === '본부장' || raw === '책임자') return 'division_head';
+  if (raw === 'team_lead' || raw === 'team_manager' || raw === '팀장') return 'team_lead';
+  if (raw === 'bu_head' || raw === '사업부장') return 'bu_head';
+  if (raw === 'ceo' || raw === '대표') return 'ceo';
+  if (raw === 'mgmt_support' || raw === '경영지원팀장') return 'mgmt_support';
+  return raw;
+}
+
 const Session = {
   get() {
     try {
@@ -139,11 +150,14 @@ const ROLE_COLOR = {
 
 const Auth = {
   roleOf:     (s) => normalizeRoleName(s && s.role),
+  titleOf:    (s) => normalizeJobTitleName(s && s.job_title),
   isAdmin:    (s) => s && Auth.roleOf(s) === 'admin',
   isDirector: (s) => s && Auth.roleOf(s) === 'director',
   isTopMgr:   (s) => s && Auth.roleOf(s) === 'top_mgr',
   isManager:  (s) => s && Auth.roleOf(s) === 'manager',
   isStaff:    (s) => s && Auth.roleOf(s) === 'staff',
+  isDivisionHeadTitle: (s) => s && Auth.titleOf(s) === 'division_head',
+  isTeamLeadTitle: (s) => s && Auth.titleOf(s) === 'team_lead',
 
   /** 프로젝트 산출물 열람 (DB can_view_project_deliverables + 세션) */
   canViewProjectDeliverables: (s) => !!(s && s.can_view_project_deliverables),
@@ -219,8 +233,16 @@ const Auth = {
   // 마스터 관리 (조직구성·직원): admin만
   canManageMaster: (s) => s && Auth.isAdmin(s),
 
-  // 기준정보 관리 (고객사·업무분류): admin + director + top_mgr + manager
-  canManageRefData: (s) => s && (Auth.isAdmin(s) || Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isManager(s)),
+  // 기준정보 관리 (고객사·업무분류):
+  // 역할(admin/director/top_mgr/manager) + 직책 기반 예외(본부장/팀장)
+  canManageRefData: (s) => s && (
+    Auth.isAdmin(s) ||
+    Auth.isDirector(s) ||
+    Auth.isTopMgr(s) ||
+    Auth.isManager(s) ||
+    Auth.isDivisionHeadTitle(s) ||
+    Auth.isTeamLeadTitle(s)
+  ),
 
   // 고객사 등록 요청: staff 포함 전 역할 접근 허용 (수정/삭제/업로드는 별도 권한)
   canRequestClient: (s) => !!(s && (
@@ -1743,8 +1765,8 @@ function setupMenuByRole(session) {
   });
 
   // ── 등록정보 (Time Sheet 아래): 고객등록 / 업무분류등록 / 프로젝트 등록 ─────
-  // 업무분류등록: 1차 승인자(manager) 이상(상위 권한 포함)에게만 노출
-  const canCategoryReg = Auth.canApprove1st(session) || Auth.isDirector(session) || Auth.isTopMgr(session) || Auth.isAdmin(session);
+  // 업무분류등록: 기준정보 권한 함수와 동일 기준 사용 (역할 + 직책 기반 예외)
+  const canCategoryReg = Auth.canManageRefData(session);
   const refLabel = document.getElementById('nav-ref-data-ts-label');
   const clientsMenu = document.querySelector('.nav-item[data-page="master-clients"]');
   const categoriesMenu = document.querySelector('.nav-item[data-page="master-categories"]');
