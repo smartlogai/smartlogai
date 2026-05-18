@@ -454,11 +454,12 @@ function _initQuill() {
       e.stopImmediatePropagation(); // Quill 내부 리스너도 차단
 
       _quillPasteLock = true;
+      const sel = _quill.getSelection(true) || { index: _quill.getLength(), length: 0 };
 
       // 표 + 본문 앞단 Word 헤더 동시 제거 후 표 모드
       const cleanedMail = _entryCleanDescHtmlForEdit(htmlData);
       const cleanHtml = _injectDescTableStyle(cleanedMail);
-      _entrySwitchToRich(cleanHtml);
+      _entrySwitchToRichInsertAtCursor(cleanHtml, sel.index);
 
       // hidden input 동기화 + 글자수 업데이트
       setTimeout(() => {
@@ -482,9 +483,10 @@ function _initQuill() {
         e.stopPropagation();
         e.stopImmediatePropagation();
         _quillPasteLock = true;
+        const sel = _quill.getSelection(true) || { index: _quill.getLength(), length: 0 };
 
         const cleanHtml = _injectDescTableStyle(tableHtml);
-        _entrySwitchToRich(cleanHtml);
+        _entrySwitchToRichInsertAtCursor(cleanHtml, sel.index);
 
         setTimeout(() => {
           _quillPasteLock = false;
@@ -508,8 +510,9 @@ function _initQuill() {
       if (!tableHtml) return;
 
       _quillPasteLock = true;
+      const sel = _quill.getSelection(true) || { index: _quill.getLength(), length: 0 };
       const cleanHtml = _injectDescTableStyle(tableHtml);
-      _entrySwitchToRich(cleanHtml);
+      _entrySwitchToRichInsertAtCursor(cleanHtml, sel.index);
 
       setTimeout(() => {
         _quillPasteLock = false;
@@ -589,6 +592,68 @@ function _entrySwitchToRich(html) {
     if (html !== undefined) richEl.innerHTML = html;
   }
   if (badge) badge.style.display = 'flex';
+}
+
+function _entrySetCaretByTextOffset(root, offset) {
+  if (!root) return false;
+  const safeOffset = Math.max(0, Number(offset || 0));
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+  let node = walker.nextNode();
+  let acc = 0;
+  while (node) {
+    const len = (node.nodeValue || '').length;
+    if (safeOffset <= acc + len) {
+      const pos = Math.max(0, Math.min(len, safeOffset - acc));
+      const range = document.createRange();
+      range.setStart(node, pos);
+      range.collapse(true);
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      return true;
+    }
+    acc += len;
+    node = walker.nextNode();
+  }
+  return false;
+}
+
+function _entrySwitchToRichInsertAtCursor(insertHtml, quillIndex) {
+  const quillWrap = document.getElementById('quill-editor');
+  const richEl = document.getElementById('entry-rich-editor');
+  const badge = document.getElementById('entry-editor-mode-badge');
+  const baseHtml = _entryCleanDescHtmlForEdit((_quill && _quill.root && _quill.root.innerHTML) || '');
+
+  _entryUseRich = true;
+  if (quillWrap) quillWrap.style.display = 'none';
+  if (badge) badge.style.display = 'flex';
+  if (!richEl) return;
+
+  richEl.style.display = 'block';
+  richEl.innerHTML = baseHtml || '<p><br></p>';
+  richEl.focus();
+
+  const placed = _entrySetCaretByTextOffset(richEl, quillIndex);
+  if (!placed) {
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(richEl);
+      range.collapse(false);
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    } catch {}
+  }
+
+  try {
+    document.execCommand('insertHTML', false, insertHtml || '');
+  } catch {
+    richEl.innerHTML = (richEl.innerHTML || '') + (insertHtml || '');
+  }
 }
 
 function entrySwitchToQuill() {
