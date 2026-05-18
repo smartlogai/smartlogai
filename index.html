@@ -826,7 +826,7 @@
       } else {
         sessionStorage.setItem('wt_session', JSON.stringify(sessionData));
       }
-      window.location.href = 'main.html?v=20260509ceoTimesheetMenuFix1';
+      window.location.href = 'main.html?v=20260518refDataPolicyFallback1';
     }
 
     // ─────────────────────────────────────────
@@ -1209,7 +1209,7 @@
           // 세션 유효성 + TTL(8시간) 동시 검사
           const TTL = 8 * 60 * 60 * 1000;
           if (s && s.id && s.loggedInAt && (Date.now() - s.loggedInAt < TTL)) {
-            window.location.href = 'main.html?v=20260509ceoTimesheetMenuFix1';
+            window.location.href = 'main.html?v=20260518refDataPolicyFallback1';
             return true;
           } else {
             // 만료된 세션은 즉시 삭제
