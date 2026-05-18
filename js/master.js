@@ -1450,9 +1450,10 @@ async function downloadClientTemplate() {
 // ─────────────────────────────────────────────
 async function init_master_categories() {
   const session = getSession();
-  if (!Auth.canManageMaster(session)) {
+  // 업무분류는 조직/직원 마스터(admin 전용)가 아니라 기준정보 권한으로 제어한다.
+  if (!Auth.canManageRefData(session)) {
     navigateTo('dashboard');
-    Toast.warning('업무분류 설정 권한이 없습니다.');
+    Toast.warning('업무분류 관리 권한이 없습니다.');
     return;
   }
   await loadCategories();
