@@ -19,6 +19,17 @@ function normalizeRoleName(role) {
   return raw;
 }
 
+function normalizeJobTitleName(title) {
+  const raw = String(title || '').trim().toLowerCase();
+  if (!raw) return '';
+  if (raw === 'division_head' || raw === '본부장' || raw === '책임자') return 'division_head';
+  if (raw === 'team_lead' || raw === 'team_manager' || raw === '팀장') return 'team_lead';
+  if (raw === 'bu_head' || raw === '사업부장') return 'bu_head';
+  if (raw === 'ceo' || raw === '대표') return 'ceo';
+  if (raw === 'mgmt_support' || raw === '경영지원팀장') return 'mgmt_support';
+  return raw;
+}
+
 const Session = {
   get() {
     try {
@@ -438,6 +449,7 @@ function _isCcbDivisionUser(session) {
 
 const Auth = {
   roleOf:     (s) => normalizeRoleName(s && s.role),
+  titleOf:    (s) => normalizeJobTitleName(s && s.job_title),
   isAdmin:    (s) => s && Auth.roleOf(s) === 'admin',
   isDirector: (s) => s && Auth.roleOf(s) === 'director',
   isTopMgr:   (s) => s && Auth.roleOf(s) === 'top_mgr',
@@ -446,6 +458,8 @@ const Auth = {
   isCeo:      (s) => _isCeoSession(s),
   isFinanceSupport: (s) => _isFinanceSupportUser(s),
   isCcbDivision: (s) => _isCcbDivisionUser(s),
+  isDivisionHeadTitle: (s) => s && Auth.titleOf(s) === 'division_head',
+  isTeamLeadTitle: (s) => s && Auth.titleOf(s) === 'team_lead',
 
   /** 프로젝트 산출물 열람: 권한정책 우선, 레거시 사용자 플래그 fallback */
   canViewProjectDeliverables: (s) => {
@@ -562,8 +576,16 @@ const Auth = {
   // 마스터 관리 (조직구성·직원): admin만
   canManageMaster: (s) => s && Auth.isAdmin(s),
 
-  // 기준정보 관리 (고객사·업무분류): admin + director + top_mgr + manager
-  canManageRefData: (s) => s && (Auth.isAdmin(s) || Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isManager(s)),
+  // 기준정보 관리 (고객사·업무분류):
+  // 역할(admin/director/top_mgr/manager) + 직책 기반 예외(본부장/팀장)
+  canManageRefData: (s) => s && (
+    Auth.isAdmin(s) ||
+    Auth.isDirector(s) ||
+    Auth.isTopMgr(s) ||
+    Auth.isManager(s) ||
+    Auth.isDivisionHeadTitle(s) ||
+    Auth.isTeamLeadTitle(s)
+  ),
   // 업무분류 설정: admin only
   canManageCategories: (s) => s && Auth.isAdmin(s),
 
@@ -2576,8 +2598,8 @@ function setupMenuByRole(session) {
   });
 
   // ── 등록정보 (Time Sheet 아래): 고객등록 / 업무분류등록 / 프로젝트 등록 ─────
-  // 업무분류등록: admin 전용
-  const canCategoryReg = Auth.isAdmin(session);
+  // 업무분류등록: 기준정보 권한 함수와 동일 기준 사용 (역할 + 직책 기반 예외)
+  const canCategoryReg = Auth.canManageRefData(session);
   const refLabel = document.getElementById('nav-ref-data-ts-label');
   const clientsMenu = document.querySelector('.nav-item[data-page="master-clients"]');
   const categoriesMenu = document.querySelector('.nav-item[data-page="master-categories"]');
