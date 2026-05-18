@@ -1012,10 +1012,10 @@ async function openArchiveDetail(refId) {
 
     document.getElementById('archiveDetailTitle').textContent = modalTitle;
     document.getElementById('archiveDetailBody').innerHTML = `
-      <div style="display:flex;flex-direction:column;gap:16px">
+      <div id="arch-detail-layout" style="display:flex;flex-direction:column;gap:16px">
 
         <!-- ① 배지 + 메타 -->
-        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 16px;
+        <div class="arch-detail-meta-section" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 16px;
                     background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
           ${bizBadgeHtml}
           ${starBadgeHtml}
@@ -1024,7 +1024,7 @@ async function openArchiveDetail(refId) {
         </div>
 
         <!-- ② 담당자 정보 (직접등록이면 과거참고사례 배지만, 아니면 작성자/승인자 표시) -->
-        <div style="display:flex;flex-wrap:wrap;gap:16px 24px;font-size:13px;
+        <div class="arch-detail-meta-section" style="display:flex;flex-wrap:wrap;gap:16px 24px;font-size:13px;
                     padding:10px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
           ${isManual ? `
           <div style="display:flex;align-items:center;gap:8px">
@@ -1055,7 +1055,7 @@ async function openArchiveDetail(refId) {
         </div>
 
         <!-- ③ 핵심키워드 -->
-        <div>
+        <div class="arch-detail-meta-section">
           <div style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:.05em;margin-bottom:6px">
             <i class="fas fa-tags" style="color:#6366f1;margin-right:5px"></i>핵심키워드
           </div>
@@ -1063,7 +1063,7 @@ async function openArchiveDetail(refId) {
         </div>
 
         <!-- ④ 관련법령 -->
-        <div>
+        <div class="arch-detail-meta-section">
           <div style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:.05em;margin-bottom:6px">
             <i class="fas fa-gavel" style="color:#d97706;margin-right:5px"></i>관련법령
           </div>
@@ -1071,7 +1071,7 @@ async function openArchiveDetail(refId) {
         </div>
 
         <!-- ⑤ 판단사유 -->
-        <div>
+        <div class="arch-detail-meta-section">
           <div style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:.05em;margin-bottom:6px">
             <i class="fas fa-balance-scale" style="color:#059669;margin-right:5px"></i>판단사유
           </div>
@@ -1080,7 +1080,7 @@ async function openArchiveDetail(refId) {
 
         ${utilNote ? `
         <!-- ⑥ 활용포인트 -->
-        <div style="padding:10px 14px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;
+        <div class="arch-detail-meta-section" style="padding:10px 14px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;
                     font-size:13px;color:#78350f;line-height:1.6">
           <div style="font-size:11px;font-weight:700;color:#92400e;margin-bottom:4px">
             <i class="fas fa-lightbulb" style="margin-right:5px"></i>활용포인트
@@ -1089,22 +1089,35 @@ async function openArchiveDetail(refId) {
         </div>` : ''}
 
         <!-- ⑦ 자문내용(수행내역) -->
-        <div>
+        <div class="arch-detail-content-section">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
             <div style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:.05em">
               <i class="fas fa-align-left" style="color:#4f46e5;margin-right:5px"></i>자문내용
             </div>
-            <button class="arch-util-btn"
-                    onclick='_archCopyDesc(${_archJsLitId(ref.id)}, this)'
-                    ${contentText ? '' : 'disabled'}
-                    title="자문내용 복사">
-              <i class="fas fa-copy"></i> 복사
-            </button>
+            <div style="display:flex;align-items:center;gap:6px">
+              <button class="arch-util-btn" type="button"
+                      onclick='openArchiveContentFullscreen(${_archJsLitId(ref.id)})'
+                      ${contentHtml ? '' : 'disabled'}
+                      title="자문내용 전체화면 보기">
+                <i class="fas fa-expand"></i> 전체화면
+              </button>
+              <button class="arch-util-btn" type="button"
+                      onclick="closeModal('archiveDetailModal')"
+                      title="내용보기 닫기">
+                <i class="fas fa-times"></i> 닫기
+              </button>
+              <button class="arch-util-btn"
+                      onclick='_archCopyDesc(${_archJsLitId(ref.id)}, this)'
+                      ${contentText ? '' : 'disabled'}
+                      title="자문내용 복사">
+                <i class="fas fa-copy"></i> 복사
+              </button>
+            </div>
           </div>
           <div id="arch-desc-view-${String(ref.id)}"
                class="arch-text-box${contentHtml ? ' arch-text-box--rich arch-desc-view' : ''}"
                style="max-height:320px;overflow-y:auto;overflow-x:auto;line-height:1.7;user-select:text;-webkit-user-select:text">${contentHtml
-                 ? `<div class="arch-desc-content">${contentHtml}</div>`
+                ? `<div class="arch-desc-content">${contentHtml}</div>`
                  : '<span style="color:#94a3b8;font-size:12px">(등록된 자문내용이 없습니다)</span>'}</div>
           ${contentHtml && /<table[\s>]/i.test(contentHtml)
             ? `<div style="margin-top:8px;font-size:11px;color:#92400e;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 10px">
@@ -1115,7 +1128,7 @@ async function openArchiveDetail(refId) {
 
         <!-- ⑧ 첨부 파일 -->
         ${docs.length ? `
-        <div>
+        <div class="arch-detail-meta-section">
           <div style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:.05em;margin-bottom:8px">
             <i class="fas fa-paperclip" style="margin-right:5px"></i>첨부 파일 (${docs.length}개)
           </div>
@@ -1150,6 +1163,34 @@ async function openArchiveDetail(refId) {
   }
 }
 
+function openArchiveContentFullscreen(refId) {
+  try {
+    const cache = window._archDescMap && window._archDescMap[refId];
+    const html = (cache && cache.html) || '';
+    const titleEl = document.getElementById('archiveDetailTitle');
+    const fsModalEl = document.getElementById('archiveContentModal');
+    const fsTitleEl = document.getElementById('archiveContentTitle');
+    const fsBodyEl = document.getElementById('archiveContentBody');
+    if (!fsModalEl || !fsTitleEl || !fsBodyEl) return;
+    fsModalEl.dataset.refId = String(refId || '');
+    fsTitleEl.textContent = (titleEl && titleEl.textContent) ? `${titleEl.textContent} · 자문내용` : '자문내용 전체보기';
+    fsBodyEl.innerHTML = html
+      ? `<div class="arch-content-only-view arch-desc-view arch-text-box--rich"><div class="arch-desc-content">${html}</div></div>`
+      : '<div class="arch-content-only-empty">(등록된 자문내용이 없습니다)</div>';
+    openModal('archiveContentModal');
+  } catch (e) {
+    console.error('openArchiveContentFullscreen error', e);
+    Toast.error('자문내용 전체보기를 여는 중 오류가 발생했습니다.');
+  }
+}
+
+function archCopyFullscreenDesc(btnEl) {
+  const fsModalEl = document.getElementById('archiveContentModal');
+  const refId = fsModalEl && fsModalEl.dataset ? fsModalEl.dataset.refId : '';
+  if (!refId) { Toast.warning('복사할 자문내용을 찾을 수 없습니다.'); return; }
+  _archCopyDesc(refId, btnEl);
+}
+
 /** 첨부파일 카드 HTML 빌더 (기존 로직 분리) */
 function _buildDocsHtml(docs) {
   if (!docs.length) return '';
@@ -1158,6 +1199,7 @@ function _buildDocsHtml(docs) {
     const textId   = `file-text-${d.id}`;
     const isPdf    = d.file_type === 'pdf';
     const hasValidContent = !!(d.file_content && d.file_content.startsWith('data:') && d.file_content.length > 50);
+    const isImageContent = hasValidContent && /^data:image\//i.test(String(d.file_content || ''));
     const hasPdfEmbed = isPdf && hasValidContent;
     const hasContent  = hasValidContent;
     const hasUrl      = !!(d.file_url);
@@ -1190,6 +1232,17 @@ function _buildDocsHtml(docs) {
         </div>
         <div style="padding:10px 14px 14px"><iframe src="${d.file_content}" style="width:100%;height:480px;border:1px solid #e2e8f0;border-radius:6px;display:block"></iframe></div>
         ${hasText?`<div style="padding:0 14px 14px"><div style="display:flex;justify-content:space-between;margin-bottom:6px"><span style="font-size:11px;font-weight:700;color:#64748b"><i class="fas fa-align-left" style="margin-right:4px"></i>PDF 본문</span><button class="arch-util-btn" onclick="${copyFn}"><i class="fas fa-copy"></i> 복사</button></div><div id="${textId}" class="arch-text-box" style="user-select:text;-webkit-user-select:text">${Utils.escHtml(d.extracted_text||'')}</div></div>`:''}
+      </div>`;
+    } else if (isImageContent) {
+      const imgId = `file-img-${d.id}`;
+      viewerHtml = `<div id="${viewerId}" style="display:none;border-top:1px solid #e2e8f0;padding:12px 14px 14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:11px;font-weight:700;color:#64748b"><i class="fas fa-image" style="margin-right:4px"></i>이미지 미리보기</span>
+          <button class="arch-util-btn" onclick="archDownloadFile('${d.id}','${Utils.escHtml(d.file_name||'파일')}')"><i class="fas fa-download"></i> 다운로드</button>
+        </div>
+        <div class="arch-image-viewer-viewport">
+          <img id="${imgId}" src="${d.file_content}" class="arch-image-viewer-img" alt="${Utils.escHtml(d.file_name || 'image')}" />
+        </div>
       </div>`;
     } else if (hasText) {
       viewerHtml = `<div id="${viewerId}" style="display:none;border-top:1px solid #e2e8f0;padding:12px 14px 14px">

@@ -1232,6 +1232,22 @@ textarea.form-control {
   justify-content: center;
   gap: 8px;
 }
+.arch-image-viewer-viewport {
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fafc;
+  height: 480px;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+}
+.arch-image-viewer-img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
 
 /* ============================================
    자문내용 전체보기 모달 (arch-content-modal) — 하위호환 유지
@@ -3552,6 +3568,118 @@ input[type=date].filter-control {
   justify-content: flex-end;
   gap: 10px;
   flex-shrink: 0;
+}
+
+#archiveContentModal .arch-content-full-modal {
+  width: 100vw;
+  max-width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  border-radius: 0;
+}
+#archiveContentModal .modal-header {
+  padding: 12px 16px;
+}
+#archiveContentModal .modal-header .btn-close {
+  margin-left: auto;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+#archiveContentModal .modal-header .btn-close:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+#archiveContentModal .modal-header .btn-close:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+#archiveContentModal .arch-content-full-body {
+  padding: 12px 16px 16px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+#archiveContentModal .arch-content-only-view {
+  flex: 1;
+  min-height: 0;
+  max-height: none !important;
+  height: 100%;
+  overflow: auto;
+  background: #fff;
+}
+#archiveContentModal .arch-content-only-empty {
+  color: #94a3b8;
+  font-size: 13px;
+  padding: 16px;
+}
+
+#archiveDetailModal.arch-detail-focus .modal {
+  max-width: 100vw;
+  width: 100vw;
+  max-height: 100dvh;
+  height: 100dvh;
+  border-radius: 0;
+}
+#archiveDetailModal.arch-detail-focus .modal-header,
+#archiveDetailModal.arch-detail-focus .modal-footer,
+#archiveDetailModal.arch-detail-focus .arch-detail-meta-section {
+  display: none;
+}
+#archiveDetailModal.arch-detail-focus .modal-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+#archiveDetailModal.arch-detail-focus #archiveDetailBody > #arch-detail-layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+#archiveDetailModal.arch-detail-focus .arch-detail-content-section {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+#archiveDetailModal.arch-detail-focus .arch-detail-content-section > div:first-child {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #fff;
+  padding: 8px 0;
+}
+#archiveDetailModal.arch-detail-focus .arch-desc-view {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  max-height: none !important;
+}
+
+#archiveDetailBody > #arch-detail-layout {
+  min-height: 100%;
+}
+#archiveDetailBody .arch-detail-content-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+#archiveDetailModal:not(.arch-detail-focus) #archiveDetailBody .arch-detail-content-section .arch-desc-view {
+  max-height: min(70vh, 760px) !important;
 }
 
 /* ============================================
