@@ -28,7 +28,7 @@
   <script src="https://cdn.jsdelivr.net/npm/turndown/dist/turndown.js" defer></script>
   <!-- turndown-plugin-gfm: 테이블 등 GFM 확장 지원 -->
   <script src="https://cdn.jsdelivr.net/npm/turndown-plugin-gfm/dist/turndown-plugin-gfm.js" defer></script>
-  <link rel="stylesheet" href="css/style.css?v=20260514mobileApprovalMvp1" />
+  <link rel="stylesheet" href="css/style.css?v=20260518archiveContentFullModal1" />
   <!-- Chart.js: 대시보드/분석에서 사용 → defer로 DOM 파싱 차단 방지 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
   <!-- ★ 무거운 라이브러리는 필요한 시점에 동적으로 로드 (초기 blocking 제거) -->
@@ -5222,6 +5222,20 @@
   </div>
 </div>
 
+<!-- 자문내용 전용 전체화면 모달 -->
+<div class="modal-overlay" id="archiveContentModal">
+  <div class="modal arch-content-full-modal">
+    <div class="modal-header">
+      <h3 id="archiveContentTitle">자문내용 전체보기</h3>
+      <button class="arch-util-btn" type="button" onclick="archCopyFullscreenDesc(this)" title="자문내용 복사">
+        <i class="fas fa-copy"></i> 복사
+      </button>
+      <button class="btn-close" onclick="closeModal('archiveContentModal')">×</button>
+    </div>
+    <div class="modal-body arch-content-full-body" id="archiveContentBody"></div>
+  </div>
+</div>
+
 <!-- 자문 자료 직접 등록 모달 (초기 데이터 입력 전용) -->
 <div class="modal-overlay" id="archiveNewModal">
   <div class="modal modal-lg">
@@ -5874,7 +5888,7 @@
 <script src="js/approval.js?v=20260514mobileApprovalMvp1"></script>
 <script src="js/mobile-approval.js?v=20260514mobileApprovalMvp1"></script>
 <script src="js/analysis.js?v=20260514staffQuickRange1"></script>
-<script src="js/archive.js?v=20260410d"></script>
+<script src="js/archive.js?v=20260518archiveContentFullModal1"></script>
 <script src="js/project-management.js?v=20260514pmProgressDownload1"></script>
 <script src="js/project-dashboard-v2.js?v=20260514excludeInactiveUsers1"></script>
 <!-- master.js / users.js: Settings 메뉴 진입 시 동적 로드 (초기 81KB 절감) -->
