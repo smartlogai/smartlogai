@@ -764,6 +764,35 @@ const API = {
     });
   },
 
+  /**
+   * Supabase Edge Function 호출 호환 레이어
+   * - notify.js / project-management.js 등에서 사용하는 레거시 API.invokeFunction 대응
+   */
+  async invokeFunction(fn, body = {}) {
+    const name = String(fn || '').trim();
+    if (!name) throw new Error('Function name is required');
+    const url = `${SUPABASE_URL}/functions/v1/${encodeURIComponent(name)}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+      },
+      body: JSON.stringify(body || {}),
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      throw new Error(`Function ${name} failed: HTTP ${res.status}${txt ? ` - ${txt}` : ''}`);
+    }
+    const ctype = String(res.headers.get('content-type') || '').toLowerCase();
+    if (ctype.includes('application/json')) {
+      return res.json().catch(() => ({}));
+    }
+    const text = await res.text().catch(() => '');
+    return { ok: true, text };
+  },
+
   _encodeStoragePath(path) {
     return String(path || '')
       .split('/')
