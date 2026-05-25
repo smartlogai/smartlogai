@@ -22,6 +22,7 @@ let _approvalListLoading = false;
 let _approvalMutationInFlight = false;
 let _approvalBatchDetails = [];
 let _approvalBatchRole = 'readonly'; // first | second | readonly
+let _approvalListSort = { key: '', dir: 'asc' };
 
 function _approvalIsPageActive() {
   const page = document.getElementById('page-approval');
@@ -122,6 +123,74 @@ function _approvalSetTabCountPartial(kind, count) {
   }
   _approvalAutoActivateSinglePendingTab(next);
 }
+
+function _approvalSortStatusText(st) {
+  const s = String(st || '').trim();
+  if (s === 'submitted') return '1차검토중';
+  if (s === 'pre_approved') return '2차검토중';
+  if (s === 'approved') return '최종승인';
+  if (s === 'rejected') return '반려';
+  return s || '기타';
+}
+
+function _approvalSortValue(e, key) {
+  if (!e) return '';
+  if (key === 'consultant') return String(e.user_name || '').trim().toLowerCase();
+  if (key === 'client') return String(e.client_name || '').trim().toLowerCase();
+  if (key === 'category') return String(e.work_category_name || '').trim().toLowerCase();
+  if (key === 'subcategory') {
+    const isProj = String(e.work_category_name || '').trim() === '프로젝트업무';
+    const sub = isProj
+      ? String(e._project_subcategory_label || e.work_subcategory_name || '').trim()
+      : String(e.work_subcategory_name || '').trim();
+    return sub.toLowerCase();
+  }
+  if (key === 'status') return _approvalSortStatusText(e.status);
+  return '';
+}
+
+function _approvalApplyListSort(entries) {
+  const list = Array.isArray(entries) ? entries : [];
+  const key = String(_approvalListSort.key || '').trim();
+  if (!key) return list;
+  const dir = _approvalListSort.dir === 'desc' ? -1 : 1;
+  list.sort((a, b) => {
+    const av = _approvalSortValue(a, key);
+    const bv = _approvalSortValue(b, key);
+    const cmp = String(av).localeCompare(String(bv), 'ko');
+    if (cmp !== 0) return cmp * dir;
+    const ta = Number(a && a.work_start_at || a && a.created_at || 0);
+    const tb = Number(b && b.work_start_at || b && b.created_at || 0);
+    if (ta !== tb) return (tb - ta);
+    return String(a && a.id || '').localeCompare(String(b && b.id || ''));
+  });
+  return list;
+}
+
+function _approvalRenderSortHeaders() {
+  document.querySelectorAll('[data-approval-sort]').forEach((th) => {
+    const key = String(th.getAttribute('data-approval-sort') || '').trim();
+    const label = String(th.getAttribute('data-approval-sort-label') || th.textContent || '').trim();
+    const active = key && key === _approvalListSort.key;
+    const arrow = !active ? '↕' : (_approvalListSort.dir === 'desc' ? '▼' : '▲');
+    th.innerHTML = `${Utils.escHtml(label)} <span style="font-size:11px;color:${active ? 'var(--primary)' : '#94a3b8'}">${arrow}</span>`;
+  });
+}
+
+function toggleApprovalListSort(key) {
+  const nextKey = String(key || '').trim();
+  if (!nextKey) return;
+  if (_approvalListSort.key === nextKey) {
+    _approvalListSort.dir = _approvalListSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _approvalListSort.key = nextKey;
+    _approvalListSort.dir = 'asc';
+  }
+  _approvalPage = 1;
+  _approvalRenderSortHeaders();
+  loadApprovalList();
+}
+window.toggleApprovalListSort = toggleApprovalListSort;
 
 function _approvalAutoActivateSinglePendingTab(split) {
   const data = split || window.__approvalBadgeSplit || { timesheet: 0, batch: 0, project: 0 };
@@ -1357,6 +1426,7 @@ async function init_approval() {
   } else {
     _approvalSetTabCountPartial('project', 0);
   }
+  _approvalRenderSortHeaders();
   _approvalAutoActivateSinglePendingTab(window.__approvalBadgeSplit);
 }
 
@@ -1569,6 +1639,9 @@ async function loadApprovalList() {
         return _apvSortTs(b) - _apvSortTs(a);
       });
     }
+
+    // 사용자가 선택한 컬럼 정렬(엑셀식 오름/내림 토글)
+    _approvalApplyListSort(entries);
 
     // ★ waitCount: 역할 범위 전체 기준 계산 (배치 제외, 일반자문 건만)
     const session2 = getSession();

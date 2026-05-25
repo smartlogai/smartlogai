@@ -1265,7 +1265,7 @@
                 <thead>
                   <tr>
                     <th style="text-align:center">No</th>
-                    <th>컨설턴트</th>
+                    <th data-approval-sort="consultant" data-approval-sort-label="컨설턴트" onclick="toggleApprovalListSort('consultant')" style="cursor:pointer;user-select:none">컨설턴트</th>
                     <th>소속(본부/팀)</th>
                     <th style="text-align:center">총건수</th>
                     <th style="text-align:center">독립수행율</th>
@@ -1459,13 +1459,13 @@
                     <th>작성일자</th>
                     <th>컨설턴트</th>
                     <th>소속(본부)</th>
-                    <th>고객사</th>
-                    <th>대분류</th>
-                    <th>소분류</th>
+                    <th data-approval-sort="client" data-approval-sort-label="고객사" onclick="toggleApprovalListSort('client')" style="cursor:pointer;user-select:none">고객사</th>
+                    <th data-approval-sort="category" data-approval-sort-label="대분류" onclick="toggleApprovalListSort('category')" style="cursor:pointer;user-select:none">대분류</th>
+                    <th data-approval-sort="subcategory" data-approval-sort-label="소분류" onclick="toggleApprovalListSort('subcategory')" style="cursor:pointer;user-select:none">소분류</th>
                     <th style="text-align:center">시작일시</th>
                     <th style="text-align:center">종료일시</th>
                     <th style="text-align:center">업무시간</th>
-                    <th style="text-align:center">상태</th>
+                    <th data-approval-sort="status" data-approval-sort-label="상태" onclick="toggleApprovalListSort('status')" style="text-align:center;cursor:pointer;user-select:none">상태</th>
                     <th style="text-align:center">관리</th>
                   </tr>
                 </thead>
