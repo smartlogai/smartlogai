@@ -1350,7 +1350,12 @@ function _entryBatchSubOptionsHtml(catId, selectedSubId) {
   const curSubId = String(selectedSubId || '');
   const opts = ['<option value="">소분류</option>'];
   (_allSubcategories || [])
-    .filter((s) => String(s.category_id || '') === curCatId)
+    .filter((s) => {
+      if (String(s.category_id || '') !== curCatId) return false;
+      const isActive = s && s.is_active_for_entry !== false;
+      // 신규 입력에서는 활성 항목만, 수정 시 현재 선택값은 비활성이라도 표시
+      return isActive || String(s.id || '') === curSubId;
+    })
     .forEach((s) => {
       const id = String(s.id || '').trim();
       const name = Utils.escHtml(String(s.sub_category_name || '').trim());
@@ -3034,7 +3039,11 @@ async function onCategoryChange() {
     else if (catNm === '프로젝트업무' || catNm === '회사내부업무') _currentCategoryType = 'internal';
   }
 
-  const subs = _allSubcategories.filter(s => String(s.category_id) === String(catId));
+  const subs = _allSubcategories.filter((s) =>
+    String(s.category_id) === String(catId) &&
+    // 신규 입력 드롭다운은 활성 소분류만 노출
+    (s && s.is_active_for_entry !== false)
+  );
   const subEl = document.getElementById('entry-subcategory');
   subEl.innerHTML = '<option value="">소분류 선택</option>';
   if (catNm === '프로젝트업무' && entryFormSheetType() !== 'daily') {
@@ -7717,6 +7726,14 @@ async function editEntry(id) {
     } else {
       const wantSubId = entry.work_subcategory_id || '';
       if (wantSubId && [...subEl.options].some((o) => String(o.value) === String(wantSubId))) {
+        subEl.value = wantSubId;
+      } else if (wantSubId && String(entry.work_subcategory_name || '').trim()) {
+        // 수정 화면 호환: 기존 기록의 비활성 소분류는 선택 가능하도록 임시 옵션을 주입
+        const legacyName = String(entry.work_subcategory_name || '').trim();
+        const legacyOpt = document.createElement('option');
+        legacyOpt.value = String(wantSubId);
+        legacyOpt.textContent = `${legacyName} (기존)`;
+        subEl.appendChild(legacyOpt);
         subEl.value = wantSubId;
       } else if (subEl.options.length > 1) {
         subEl.selectedIndex = 1;
