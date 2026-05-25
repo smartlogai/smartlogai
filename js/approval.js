@@ -1595,8 +1595,26 @@ async function loadApprovalList() {
         String(e.approver_id) === myId2
       ).length;
     }
+    // 초기 진입 시에도 개별기록/일괄기록 카운트를 동시에 맞춘다.
+    const pendingScopedBatch = pendingAllScoped.filter(e => _approvalIsBatchEntry(e));
+    let batchWaitCount = 0;
+    if (Auth.isAdmin(session2)) {
+      batchWaitCount = pendingScopedBatch.length;
+    } else if (Auth.canApprove1st(session2) || Auth.canApprove2nd(session2)) {
+      batchWaitCount = pendingScopedBatch.filter(e =>
+        e.status === 'submitted' &&
+        String(e.approver_id) === myId2
+      ).length;
+    } else {
+      batchWaitCount = pendingScopedBatch.filter(e =>
+        e.status === 'submitted' &&
+        String(e.approver_id) === myId2
+      ).length;
+    }
+
     const badge = document.getElementById('approval-count-badge');
     _approvalSetTabCountPartial('timesheet', waitCount);
+    _approvalSetTabCountPartial('batch', batchWaitCount);
     if (waitCount > 0) {
       badge.className = 'badge badge-red';
       badge.style = '';
