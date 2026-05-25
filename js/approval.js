@@ -1565,8 +1565,8 @@ async function loadApprovalList() {
     const session2 = getSession();
     const myId2 = String(session2.id);
     let waitCount = 0;
-    const pendingScoped = await _scopeTimeEntriesForApproval(pendingAll, session2, '');
-    const pendingScopedNonBatch = pendingScoped.filter(e => !_approvalIsBatchEntry(e));
+    const pendingAllScoped = await _scopeTimeEntriesForApproval(pendingAll, session2, '');
+    const pendingScopedNonBatch = pendingAllScoped.filter(e => !_approvalIsBatchEntry(e));
     if (Auth.isAdmin(session2)) {
       waitCount = pendingScopedNonBatch.length;
     } else if (Auth.canApprove1st(session2)) {
