@@ -7628,14 +7628,18 @@ async function editEntry(id) {
         try { sessionStorage.setItem('entry_hourly_mode', 'by_batch'); } catch (_) {}
       }
       onDailyPeriodModeChange();
-      const dRows = await API.listAllPages('time_entry_details', {
+      const dRowsRaw = await API.listAllPages('time_entry_details', {
         filter: `entry_id=eq.${encodeURIComponent(id)}`,
         limit: 200,
         maxPages: 20,
         sort: 'row_order',
       }).catch(() => []);
-      // from_at 오름차순 정렬 → 시간 순서대로 표시
-      const dRowsSorted = (dRows || []).slice().sort((a, b) => Number(a.from_at || 0) - Number(b.from_at || 0));
+      const dRows = Array.isArray(dRowsRaw) ? dRowsRaw : (Array.isArray(dRowsRaw?.data) ? dRowsRaw.data : []);
+      // from_at 오름차순 + row_order 오름차순 정렬 → 시간 순서대로 표시
+      const dRowsSorted = dRows.slice().sort(
+        (a, b) => (Number(a.from_at || 0) - Number(b.from_at || 0))
+          || (Number(a.row_order || 0) - Number(b.row_order || 0))
+      );
       _entryBatchRows = dRowsSorted.map((r) => ({
         rowId: `b_${r.id || Math.random().toString(36).slice(2, 8)}`,
         category_id: String(r.work_category_id || '').trim(),
@@ -7652,11 +7656,14 @@ async function editEntry(id) {
         from_at: _entryBatchToInputValue(Number(r.from_at || entry.work_start_at || Date.now())),
         to_at: _entryBatchToInputValue(Number(r.to_at || entry.work_end_at || Date.now())),
         duration_minutes: Number(r.duration_minutes || 0),
-        confirmed: true, // 저장된 행 = 이미 확정된 상태로 로드
+        // 수정 진입 시에는 기존 행이 자동 접히지 않도록 미확정 상태로 로드
+        // (3건 이상일 때 일부 행이 누락된 것처럼 보이는 UX 문제 방지)
+        confirmed: false,
       }));
       if (!_entryBatchRows.length) {
         _entryBatchRows = [_entryBatchRowDefault()];
       }
+      _entryBatchExpandedRowIds.clear();
       _entryBatchSelectedRowIdx = 0;
       _entryBatchTimelineDate = _entryBatchResolveTimelineDate();
       _entryBatchRenderRows();
