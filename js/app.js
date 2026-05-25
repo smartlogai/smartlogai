@@ -2246,10 +2246,13 @@ async function updateApprovalBadge(session, force = false) {
     }, 120000);
     if (r && r.data) {
       let tsCount = 0;
+      let batchCount = 0;
       if (Auth.canApprove1st(session)) {
-        tsCount = r.data.filter(e =>
+        const mineSubmitted = r.data.filter(e =>
           e.status === 'submitted' && String(e.approver_id) === String(session.id)
-        ).length;
+        );
+        tsCount = mineSubmitted.filter(e => String(e.entry_mode || '') !== 'batch').length;
+        batchCount = mineSubmitted.filter(e => String(e.entry_mode || '') === 'batch').length;
       } else if (Auth.canApprove2nd(session)) {
         const allUsers = await Master.users();
         const scopeIds = new Set(allUsers.filter(u => Auth.scopeMatch(session, u)).map(u => String(u.id)));
@@ -2264,20 +2267,22 @@ async function updateApprovalBadge(session, force = false) {
           String(e.reviewer2_id || '') === String(session.id)
         ).length;
         // Director(본부장) 배지:
-        // - 일반자문·프로젝트업무 2차 대기 (preApproved + directSecond)
-        // - 배치(일괄기록) 1차 대기 (팀장 제출분 등 본인이 approver_id인 건)
+        // - 개별기록(일반자문/프로젝트업무) 2차 대기 = preApproved + directSecond
+        // - 일괄기록 1차 대기 = batchPending
         const batchPending = r.data.filter(e =>
           e.status === 'submitted' &&
           String(e.entry_mode || '') === 'batch' &&
           String(e.approver_id) === String(session.id)
         ).length;
-        tsCount = preApproved + directSecond + batchPending;
+        tsCount = preApproved + directSecond;
+        batchCount = batchPending;
       } else {
         tsCount = 0;
+        batchCount = 0;
       }
       const pjCount = await _countProjectApprovalBadge(session);
-      const count = tsCount + pjCount;
-      window.__approvalBadgeSplit = { timesheet: tsCount, project: pjCount, total: count };
+      const count = tsCount + batchCount + pjCount;
+      window.__approvalBadgeSplit = { timesheet: tsCount, batch: batchCount, project: pjCount, total: count };
       const badge = document.getElementById('approval-badge');
       if (badge) {
         badge.textContent = count;

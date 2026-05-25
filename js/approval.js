@@ -99,7 +99,7 @@ function _approvalApplyTabCountLabels(counts) {
   const tsBtn = document.getElementById('approval-tab-timesheet');
   const btBtn = document.getElementById('approval-tab-batch');
   const pjBtn = document.getElementById('approval-tab-project');
-  if (tsBtn) tsBtn.innerHTML = `<i class="fas fa-clock"></i> 일반자문 승인 (${tsCount})`;
+  if (tsBtn) tsBtn.innerHTML = `<i class="fas fa-clock"></i> 개별기록 승인 (${tsCount})`;
   if (btBtn) btBtn.innerHTML = `<i class="fas fa-list-alt"></i> 일괄기록 승인 (${btCount})`;
   if (pjBtn) pjBtn.innerHTML = `<i class="fas fa-folder-open"></i> 프로젝트 승인 (${pjCount})`;
 }
