@@ -135,6 +135,7 @@ function _approvalSortStatusText(st) {
 
 function _approvalSortValue(e, key) {
   if (!e) return '';
+  if (key === 'written_at') return Number(e.created_at || e.work_start_at || 0) || 0;
   if (key === 'consultant') return String(e.user_name || '').trim().toLowerCase();
   if (key === 'client') return String(e.client_name || '').trim().toLowerCase();
   if (key === 'category') return String(e.work_category_name || '').trim().toLowerCase();
@@ -157,8 +158,12 @@ function _approvalApplyListSort(entries) {
   list.sort((a, b) => {
     const av = _approvalSortValue(a, key);
     const bv = _approvalSortValue(b, key);
-    const cmp = String(av).localeCompare(String(bv), 'ko');
-    if (cmp !== 0) return cmp * dir;
+    if (typeof av === 'number' && typeof bv === 'number') {
+      if (av !== bv) return (av - bv) * dir;
+    } else {
+      const cmp = String(av).localeCompare(String(bv), 'ko');
+      if (cmp !== 0) return cmp * dir;
+    }
     const ta = Number(a && a.work_start_at || a && a.created_at || 0);
     const tb = Number(b && b.work_start_at || b && b.created_at || 0);
     if (ta !== tb) return (tb - ta);
@@ -173,7 +178,12 @@ function _approvalRenderSortHeaders() {
     const label = String(th.getAttribute('data-approval-sort-label') || th.textContent || '').trim();
     const active = key && key === _approvalListSort.key;
     const arrow = !active ? '↕' : (_approvalListSort.dir === 'desc' ? '▼' : '▲');
-    th.innerHTML = `${Utils.escHtml(label)} <span style="font-size:11px;color:${active ? 'var(--primary)' : '#94a3b8'}">${arrow}</span>`;
+    const arrowColor = active ? '#1d4ed8' : '#94a3b8';
+    const arrowBg = active ? '#dbeafe' : '#f1f5f9';
+    th.innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px">
+      <span>${Utils.escHtml(label)}</span>
+      <span style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 4px;border-radius:999px;background:${arrowBg};color:${arrowColor};font-size:11px;font-weight:700;line-height:1">${arrow}</span>
+    </span>`;
   });
 }
 
