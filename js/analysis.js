@@ -317,7 +317,7 @@ let _categoryMap = {}; // { 대분류명: Set(소분류명) }
 async function _loadCategoryFilters() {
   try {
     // ★ 대시보드 캐시 재사용 (Master 캐시와 공유)
-    const entries = await Cache.get('dash_time_entries', () => API.fetchAllTimeEntriesForDash(), 180000);
+    const entries = await Cache.get('dash_time_entries', () => API.fetchAllTimeRowsForDash(), 180000);
     _categoryMap = {};
     entries.forEach(e => {
       const cat = e.work_category_name || '미분류';
@@ -506,7 +506,7 @@ async function loadAnalysis() {
     }
 
     // ★ 캐시된 time_entries 재사용
-    let entries = await Cache.get('dash_time_entries', () => API.fetchAllTimeEntriesForDash(), 180000);
+    let entries = await Cache.get('dash_time_entries', () => API.fetchAllTimeRowsForDash(), 180000);
 
     // 역할별 범위 제한 (승인자/소속 기준으로 통일)
     const allUsers = (window._analysisAllUsers || await Master.users());
@@ -809,7 +809,7 @@ async function loadStaffAnalysis() {
 
     // ── 데이터 로드 ★ Master/캐시 활용 ────────────────────
     const [allEntries_raw, allUsers, archiveItems] = await Promise.all([
-      Cache.get('dash_time_entries', () => API.fetchAllTimeEntriesForDash(), 180000),
+      Cache.get('dash_time_entries', () => API.fetchAllTimeRowsForDash(), 180000),
       Master.users(),
       Cache.get('dash_archive_stars', async () => {
         const r = await API.list('archive_items', { limit: 2000 });
@@ -1552,7 +1552,7 @@ async function exportPerformanceYearlyExcel() {
 
     // 데이터 로드 (화면과 동일 캐시/스코프)
     const [allEntries_raw, allUsers, archiveItems] = await Promise.all([
-      Cache.get('dash_time_entries', () => API.fetchAllTimeEntriesForDash(), 180000),
+      Cache.get('dash_time_entries', () => API.fetchAllTimeRowsForDash(), 180000),
       Master.users(),
       Cache.get('dash_archive_stars', async () => {
         const r = await API.list('archive_items', { limit: 2000 });
@@ -2931,7 +2931,7 @@ async function exportAnalysisExcel() {
     }
 
     // ★ 화면 분석과 동일한 데이터 기준으로 필터링 (approved만)
-    let entries = await Cache.get('dash_time_entries', () => API.fetchAllTimeEntriesForDash(), 180000);
+    let entries = await Cache.get('dash_time_entries', () => API.fetchAllTimeRowsForDash(), 180000);
 
     // 역할별 범위 제한 (승인자/소속 기준으로 통일)
     const allUsers = (window._analysisAllUsers || await Master.users());

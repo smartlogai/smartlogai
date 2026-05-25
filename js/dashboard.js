@@ -80,7 +80,7 @@ function _overloadWorkloadCardTitle(session) {
 // 대시보드 재진입 시 동일 데이터 재활용
 // ─────────────────────────────────────────────
 async function _getCachedEntries() {
-  return Cache.get('dash_time_entries', () => API.fetchAllTimeEntriesForDash(), 60000); // 1분 TTL (승인 직후 반영)
+  return Cache.get('dash_time_entries', () => API.fetchAllTimeRowsForDash(), 60000); // 1분 TTL (승인 직후 반영)
 }
 
 async function init_dashboard() {

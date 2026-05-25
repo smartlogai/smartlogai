@@ -7,6 +7,18 @@
 // ─────────────────────────────────────────────
 const SESSION_TTL = 8 * 60 * 60 * 1000; // 8시간
 
+function _isCeoSession(session) {
+  if (!session) return false;
+  const email = String(session.email || '').trim().toLowerCase();
+  const name = String(session.name || '').trim();
+  const roleRaw = String(session.role || '').trim().toLowerCase();
+  const roleNorm = normalizeRoleName(session.role);
+  const jobTitle = String(session.job_title || '').trim().toLowerCase();
+  if (email === 'hshan@hjcustoms.co.kr') return true;
+  if (name === '서휘창') return true;
+  return roleRaw === 'ceo' || roleNorm === 'ceo' || jobTitle === 'ceo';
+}
+
 function normalizeRoleName(role) {
   const raw = String(role || '').trim().toLowerCase();
   if (!raw) return '';
@@ -156,6 +168,7 @@ const Auth = {
   isTopMgr:   (s) => s && Auth.roleOf(s) === 'top_mgr',
   isManager:  (s) => s && Auth.roleOf(s) === 'manager',
   isStaff:    (s) => s && Auth.roleOf(s) === 'staff',
+  isCeo:      (s) => _isCeoSession(s),
   isDivisionHeadTitle: (s) => s && Auth.titleOf(s) === 'division_head',
   isTeamLeadTitle: (s) => s && Auth.titleOf(s) === 'team_lead',
 
@@ -178,6 +191,7 @@ const Auth = {
   // 타임시트 작성: 승인자 지정 + 타임시트 대상 staff OR 타임시트 대상 manager
   canWriteEntry: (s) => {
     if (!s) return false;
+    if (Auth.isCeo(s)) return s.is_timesheet_target !== false;
     const isDailyDept = Auth.preferredSheetType(s) === 'daily';
     if (Auth.isStaff(s)) return !!(s.approver_id) && (isDailyDept || s.is_timesheet_target !== false);
     if (Auth.isManager(s)) return isDailyDept || s.is_timesheet_target !== false;
@@ -191,11 +205,13 @@ const Auth = {
   timesheetHourlyEnabled: (s) => {
     if (!s) return false;
     if (s.is_timesheet_target === false) return false;
+    if (Auth.isCeo(s)) return s.timesheet_hourly !== false;
     return Auth.preferredSheetType(s) === 'hourly';
   },
   /** Daily 시트 메뉴·진입 (소속 기반 sheet_type + 타임시트 대상) */
   timesheetDailyEnabled: (s) => {
     if (!s) return false;
+    if (Auth.isCeo(s)) return s.is_timesheet_target !== false && s.timesheet_daily === true;
     if (Auth.preferredSheetType(s) !== 'daily') return false;
     if (Auth.isStaff(s)) return !!s.approver_id;
     return Auth.isManager(s) || Auth.isDirector(s);
@@ -209,6 +225,15 @@ const Auth = {
   /** 사용자 기본 시트 타입 (소속 우선, 없으면 users.sheet_type 사용) */
   preferredSheetType: (s) => {
     if (!s) return 'hourly';
+    if (Auth.isCeo(s)) {
+      // CEO: timesheet_daily/hourly 플래그로 결정. 둘 다 허용이면 daily 우선
+      const allowDaily = s.timesheet_daily === true;
+      const allowHourly = s.timesheet_hourly !== false;
+      if (allowDaily && !allowHourly) return 'daily';
+      if (!allowDaily && allowHourly) return 'hourly';
+      if (allowDaily) return 'daily';
+      return 'hourly';
+    }
     const deptBased = Auth.sheetTypeByDeptName(s.dept_name || '');
     if (deptBased) return deptBased;
     const st = String(s.sheet_type || '').toLowerCase();
@@ -267,6 +292,34 @@ const Auth = {
       // 정책 조회 실패 시 기본 권한 규칙(role/title)만 적용
     }
     return false;
+  },
+
+  // 하위 호환: 메뉴 읽기 권한 조회 (권한정책 스크립트 누락 시에도 안전 동작)
+  canReadMenu: (s, menuKey, allowDefault = false) => {
+    try {
+      if (typeof _authCanReadMenuSync === 'function') {
+        return !!_authCanReadMenuSync(s, menuKey, allowDefault);
+      }
+    } catch (_) {}
+
+    const key = String(menuKey || '').trim();
+    if (key === 'my-entries') {
+      return !!(s && (
+        Auth.canViewAll(s) ||
+        Auth.canViewDeptScope(s) ||
+        Auth.canWriteEntry(s) ||
+        Auth.isStaff(s)
+      ));
+    }
+    if (key === 'approval') {
+      return !!(s && (
+        Auth.canApprove1st(s) ||
+        Auth.canApprove2nd(s) ||
+        Auth.isTopMgr(s) ||
+        Auth.isAdmin(s)
+      ));
+    }
+    return !!allowDefault;
   },
 
   // 고객사 등록 요청: staff 포함 전 역할 접근 허용 (수정/삭제/업로드는 별도 권한)
@@ -378,6 +431,30 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
   } catch (_) {}
   throw new Error('Smartlog Supabase config missing');
 }
+
+// ─────────────────────────────────────────────
+// 로컬 개발 안정화: 과거 서비스워커/캐시가 남아 구버전 JS를 재주입하는 현상 방지
+// ─────────────────────────────────────────────
+async function clearLocalServiceWorkerCache() {
+  try {
+    const host = String(location.hostname || '').toLowerCase();
+    const isLocal = host === 'localhost' || host === '127.0.0.1';
+    if (!isLocal) return;
+
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all((regs || []).map((r) => r.unregister().catch(() => false)));
+    }
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all((keys || []).map((k) => caches.delete(k).catch(() => false)));
+    }
+    console.info('[dev] local service workers/caches cleared');
+  } catch (err) {
+    console.warn('[dev] failed to clear local service worker/cache:', err);
+  }
+}
+clearLocalServiceWorkerCache();
 
 // ─────────────────────────────────────────────
 // API 헬퍼 (Supabase 호환 레이어)
@@ -534,6 +611,76 @@ const API = {
       const r = await this.list('time_entries', { limit: 2000, sort: 'updated_at' });
       return (r && r.data) ? r.data : [];
     }
+  },
+
+  /** 일괄기록 상세행 전량 (테이블 미구성 시 빈 배열) */
+  async fetchAllTimeEntryDetailsForDash() {
+    try {
+      return await this.listAllPages('time_entry_details', { limit: 500, maxPages: 200, sort: 'updated_at' });
+    } catch (e) {
+      console.warn('[API] fetchAllTimeEntryDetailsForDash failed:', e?.message || e);
+      return [];
+    }
+  },
+
+  /**
+   * 분석/대시보드 공통 집계행:
+   * - 일반 기록: time_entries 1행
+   * - 일괄기록: details를 펼쳐 상세행으로 집계
+   * - 중복방지: details가 있는 batch 헤더는 집계행에서 제외
+   */
+  async fetchAllTimeRowsForDash() {
+    const entries = await this.fetchAllTimeEntriesForDash();
+    const details = await this.fetchAllTimeEntryDetailsForDash();
+    if (!Array.isArray(entries) || entries.length === 0) return [];
+    if (!Array.isArray(details) || details.length === 0) return entries;
+
+    const entryById = new Map();
+    entries.forEach((e) => { if (e && e.id) entryById.set(String(e.id), e); });
+    const detailByEntryId = new Map();
+    details.forEach((d) => {
+      const eid = String(d && d.entry_id || '').trim();
+      if (!eid) return;
+      if (!detailByEntryId.has(eid)) detailByEntryId.set(eid, []);
+      detailByEntryId.get(eid).push(d);
+    });
+
+    const out = [];
+    entries.forEach((e) => {
+      const eid = String(e && e.id || '').trim();
+      const dRows = eid ? (detailByEntryId.get(eid) || []) : [];
+      const isBatchHeader = String(e && e.entry_mode || '').trim() === 'batch'
+        || String(e && e.work_description || '').startsWith('[일괄기록]');
+      if (!isBatchHeader || dRows.length === 0) {
+        out.push(e);
+        return;
+      }
+      dRows.forEach((d) => {
+        out.push({
+          ...e,
+          id: `${e.id}::${d.id || d.row_order || 'row'}`,
+          parent_entry_id: e.id,
+          row_order: d.row_order,
+          work_category_id: d.work_category_id || e.work_category_id,
+          work_category_name: d.work_category_name || e.work_category_name,
+          work_subcategory_id: d.work_subcategory_id || e.work_subcategory_id,
+          work_subcategory_name: d.work_subcategory_name || e.work_subcategory_name,
+          client_id: d.client_id || '',
+          client_name: d.client_name || '',
+          team_id: d.team_id || e.team_id || '',
+          team_name: d.team_name || e.team_name || '',
+          project_code: d.project_code || '',
+          project_name: d.project_name || '',
+          time_category: d.client_id ? 'client' : 'internal',
+          work_start_at: d.from_at != null ? d.from_at : e.work_start_at,
+          work_end_at: d.to_at != null ? d.to_at : e.work_end_at,
+          duration_minutes: Number(d.duration_minutes || 0),
+          work_description: d.work_note || e.work_description || '',
+          work_description_md: d.work_note || e.work_description_md || '',
+        });
+      });
+    });
+    return out;
   },
 
   // 단건 조회 (GET)
@@ -1709,13 +1856,15 @@ function setupMenuByRole(session) {
   const canRequestClient     = Auth.canRequestClient(session);
 
   // ── Time Sheet 섹션 ────────────────────────────────────────
+  const isCeo = Auth.isCeo(session);
   const isManagerTimesheetTarget = Auth.isManager(session) && (
     Auth.preferredSheetType(session) === 'daily' || session.is_timesheet_target !== false
   );
   const isDirectorTimesheetTarget = Auth.isDirector(session)
     && session.is_timesheet_target !== false
     && Auth.preferredSheetType(session) === 'daily';
-  const baseTs = (isStaffWithApprover && isStaffTimesheetTarget) || isManagerTimesheetTarget || isDirectorTimesheetTarget;
+  const isCeoTimesheetTarget = isCeo && session.is_timesheet_target !== false;
+  const baseTs = (isStaffWithApprover && isStaffTimesheetTarget) || isManagerTimesheetTarget || isDirectorTimesheetTarget || isCeoTimesheetTarget;
   const hourlyOk = Auth.timesheetHourlyEnabled(session);
   const dailyOk = Auth.timesheetDailyEnabled(session);
   const preferredSheet = Auth.preferredSheetType(session);
@@ -1732,6 +1881,11 @@ function setupMenuByRole(session) {
   if (showTS) {
     if (preferredSheet === 'daily' && dailyOk) showHourlyMenu = false;
     if (preferredSheet === 'hourly' && hourlyOk) showDailyMenu = false;
+    // CEO 등 양쪽 모두 허용된 경우 preferredSheet 기준으로 하나만 표시
+    if (showHourlyMenu && showDailyMenu) {
+      if (preferredSheet === 'daily') showHourlyMenu = false;
+      else showDailyMenu = false;
+    }
   }
   if (mHourlyNew) mHourlyNew.style.display = showHourlyMenu ? '' : 'none';
   if (mDailyNew) mDailyNew.style.display = showDailyMenu ? '' : 'none';
@@ -1752,6 +1906,11 @@ function setupMenuByRole(session) {
   const approvalMenu = document.getElementById('menu-approval');
   if (approvalMenu) {
     approvalMenu.style.display = (canApprove || canViewDeptScope) && !canViewAll ? '' : 'none';
+  }
+  // ── Mobile Approval: 승인 권한자에게만 표시 (CSS로 모바일 전용 처리) ────
+  const mobileApprovalMenu = document.getElementById('menu-mobile-approval');
+  if (mobileApprovalMenu) {
+    mobileApprovalMenu.style.display = (canApprove || canViewDeptScope) ? '' : 'none';
   }
   const adminAllEntries = document.getElementById('menu-admin-all-entries');
   // top_mgr는 Settings를 제외한 운영 메뉴를 모두 보이도록 Staff 업무 기록 메뉴를 허용
@@ -2055,18 +2214,22 @@ async function updateApprovalBadge(session, force = false) {
         const preApproved = r.data.filter(e =>
           e.status === 'pre_approved' && scopeIds.has(String(e.user_id)) && _needsSecondApprovalByCategory(e)
         ).length;
-        const ccbFirst = r.data.filter(e =>
+        const directSecond = r.data.filter(e =>
           e.status === 'submitted' &&
-          String(e.approver_id) === String(session.id) &&
-          String(e && e.dept_name || '').trim().toUpperCase().includes('CCB')
-        ).length;
-        const managerDirect = r.data.filter(e =>
-          e.status === 'submitted' &&
-          String(e.approver_id) === String(session.id) &&
           _needsSecondApprovalByCategory(e) &&
-          !String(e && e.dept_name || '').trim().toUpperCase().includes('CCB')
+          String(e.approver_id || '') &&
+          String(e.approver_id || '') === String(e.reviewer2_id || '') &&
+          String(e.reviewer2_id || '') === String(session.id)
         ).length;
-        tsCount = preApproved + managerDirect + ccbFirst;
+        // Director(본부장) 배지:
+        // - 일반자문·프로젝트업무 2차 대기 (preApproved + directSecond)
+        // - 배치(일괄기록) 1차 대기 (팀장 제출분 등 본인이 approver_id인 건)
+        const batchPending = r.data.filter(e =>
+          e.status === 'submitted' &&
+          String(e.entry_mode || '') === 'batch' &&
+          String(e.approver_id) === String(session.id)
+        ).length;
+        tsCount = preApproved + directSecond + batchPending;
       } else {
         tsCount = 0;
       }

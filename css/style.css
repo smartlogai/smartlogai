@@ -152,6 +152,15 @@ body {
   font-size: 12px;
   color: rgba(255,255,255,0.6);
 }
+/* 모바일 전용 메뉴: 데스크톱에서는 숨기고 모바일에서만 표시 */
+.nav-item-mobile-only {
+  display: none !important;
+}
+@media (max-width: 768px) {
+  .nav-item-mobile-only {
+    display: flex !important;
+  }
+}
 
 /* 조직 관리 배지 */
 .org-badge {
@@ -3331,6 +3340,57 @@ input[type=date].filter-control {
   background: #eff6ff;
   box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.12);
 }
+/* ── 일괄기록 승인 필터 — 완전 1행 레이아웃 ── */
+#approval-panel-batch .filter-bar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  flex-wrap: nowrap;
+}
+/* 날짜 input */
+#approval-panel-batch .batch-filter-date {
+  flex-shrink: 0;
+  width: 130px;
+  height: 34px;
+  box-sizing: border-box;
+}
+/* ~ 구분 텍스트 */
+#approval-panel-batch .batch-filter-sep {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+/* 빠른기간 버튼 묶음 */
+#approval-panel-batch .batch-filter-quick {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+/* 수직 구분선 */
+#approval-panel-batch .batch-filter-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--border-light);
+  flex-shrink: 0;
+  margin: 0 4px;
+}
+/* 이름 검색 input — 남은 공간 전부 사용 */
+#approval-panel-batch .batch-filter-staff {
+  flex: 1;
+  height: 34px;
+  min-width: 100px;
+  box-sizing: border-box;
+}
+/* 상태 select */
+#approval-panel-batch .batch-filter-status {
+  flex-shrink: 0;
+  width: 150px;
+  height: 34px;
+  box-sizing: border-box;
+}
+
 #page-approval .approval-quick-range-group {
   display: flex;
   gap: 8px;
@@ -3402,6 +3462,23 @@ input[type=date].filter-control {
   }
   #page-approval .approval-quick-range-group {
     flex-wrap: wrap;
+  }
+  /* 배치 필터 모바일 */
+  #approval-panel-batch .filter-bar {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  #approval-panel-batch .batch-filter-date {
+    width: 120px;
+  }
+  #approval-panel-batch .batch-filter-divider {
+    display: none;
+  }
+  #approval-panel-batch .batch-filter-staff {
+    flex: 1 1 120px;
+  }
+  #approval-panel-batch .batch-filter-status {
+    width: 140px;
   }
 }
 
