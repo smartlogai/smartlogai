@@ -1,4 +1,4 @@
-/* mobile-approval.js — 모바일 승인 전용 MVP */
+﻿/* mobile-approval.js — 모바일 승인 전용 MVP */
 
 let _mobileApprovalEntries = [];
 let _mobileApprovalSelectedId = '';
@@ -74,8 +74,18 @@ function _mobileApprovalIsProjectEntry(entry) {
   return String(entry && entry._mobile_kind || '') === 'project';
 }
 
+function _mobileApprovalIsBatchEntry(entry) {
+  return !_mobileApprovalIsProjectEntry(entry) && String(entry && entry.entry_mode || '') === 'batch';
+}
+
 function _mobileApprovalIsPending(entry) {
   if (_mobileApprovalIsProjectEntry(entry)) return String(entry && entry.status || '') === 'pending';
+  if (_mobileApprovalIsBatchEntry(entry)) {
+    const session = getSession();
+    if (!session) return false;
+    return String(entry.status || '') === 'submitted' &&
+           String(entry.approver_id || '') === String(session.id);
+  }
   return _approvalIsPendingStatus(entry && entry.status);
 }
 
@@ -158,6 +168,7 @@ function _mobileApprovalRenderList() {
 
 function _mobileApprovalDetailRequiresQuality(entry) {
   if (_mobileApprovalIsProjectEntry(entry)) return false;
+  if (_mobileApprovalIsBatchEntry(entry)) return false; // 배치: 품질 평가 없음
   const session = getSession();
   if (!entry || !session) return false;
   const canSecond = Auth.canApprove2nd(session) && _approvalFilterSecondApproverPending([entry], session).length > 0;
@@ -168,6 +179,11 @@ function _mobileApprovalCanAct(entry) {
   if (_mobileApprovalIsProjectEntry(entry)) return !!entry._canAct;
   const session = getSession();
   if (!entry || !session) return false;
+  if (_mobileApprovalIsBatchEntry(entry)) {
+    // 배치: 1차 승인으로 종결 — approver_id로 지정된 사람이면 승인 가능
+    return String(entry.status || '') === 'submitted' &&
+           String(entry.approver_id || '') === String(session.id);
+  }
   if (_approvalCanDoFirst(session, entry)) return true;
   if (Auth.canApprove2nd(session) && _approvalFilterSecondApproverPending([entry], session).length > 0) return true;
   return false;
@@ -218,6 +234,25 @@ function _mobileApprovalRenderDetail() {
       projectMetaEl.style.display = '';
     }
     if (commentEl) commentEl.placeholder = '반려 시 사유 입력(필수)';
+  } else if (_mobileApprovalIsBatchEntry(entry)) {
+    // ── 일괄기록 상세 ──────────────────────────────
+    if (writerEl) writerEl.textContent = entry.user_name || '—';
+    if (catEl) catEl.textContent = '일괄기록';
+    if (subEl) subEl.textContent = `${entry.doc_no || '—'}`;
+    if (periodEl) periodEl.textContent = Utils.formatDate ? Utils.formatDate(entry.work_start_at) : _mobileApprovalFmtDateTime(entry.work_start_at).slice(0, 10);
+    if (durationEl) durationEl.textContent = Utils.formatDuration(entry.duration_minutes || 0);
+    if (projEl) projEl.textContent = Utils.statusBadge ? '' : entry.status;
+    if (projectMetaEl) { projectMetaEl.style.display = 'none'; projectMetaEl.innerHTML = ''; }
+    if (commentEl) commentEl.placeholder = '코멘트(반려 시 필수)';
+    // 배치 상세행 비동기 로드
+    if (descEl) {
+      descEl.innerHTML = '<span style="color:var(--text-muted);font-size:12px"><i class="fas fa-spinner fa-spin"></i> 상세 내역 로드 중...</span>';
+      _mobileApprovalLoadBatchDetails(entry.id).then((details) => {
+        descEl.innerHTML = _mobileApprovalBatchDetailTable(details);
+      }).catch(() => {
+        descEl.textContent = '상세 내역을 불러올 수 없습니다.';
+      });
+    }
   } else {
     if (writerEl) writerEl.textContent = entry.user_name || '—';
     if (catEl) catEl.textContent = entry.work_category_name || '—';
@@ -236,6 +271,101 @@ function _mobileApprovalRenderDetail() {
   if (approveBtn) approveBtn.disabled = !canAct;
   if (rejectBtn) rejectBtn.disabled = !canAct;
   if (commentEl && !canAct) commentEl.value = '';
+}
+
+async function _mobileApprovalLoadBatchDetails(entryId) {
+  const rows = await API.listAllPages('time_entry_details', {
+    filter: `entry_id=eq.${encodeURIComponent(String(entryId || ''))}`,
+    sort: 'row_order',
+    limit: 200,
+    maxPages: 20,
+  }).catch(() => []);
+  const CAT_ORDER = ['일반통관업무', '프로젝트업무', '기타 고객업무', '회사내부업무'];
+  const CLIENT_CATS = new Set(['일반통관업무', '프로젝트업무', '기타 고객업무']);
+  rows.sort((a, b) => {
+    const pA = CAT_ORDER.indexOf(String(a.work_category_name || ''));
+    const pB = CAT_ORDER.indexOf(String(b.work_category_name || ''));
+    const pa = pA === -1 ? CAT_ORDER.length : pA;
+    const pb = pB === -1 ? CAT_ORDER.length : pB;
+    if (pa !== pb) return pa - pb;
+    return (Number(a.row_order) || 0) - (Number(b.row_order) || 0);
+  });
+  return { rows, clientCats: CLIENT_CATS };
+}
+
+function _mobileApprovalBatchDetailTable({ rows, clientCats }) {
+  if (!rows || !rows.length) return '<div style="color:var(--text-muted);font-size:12px;padding:8px 0">상세 내역이 없습니다.</div>';
+  const th = 'padding:6px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);background:#f8fafc;border-bottom:1px solid var(--border-light);white-space:nowrap;text-align:center';
+  const td = 'padding:6px 8px;font-size:11px;border-bottom:1px solid var(--border-light);white-space:nowrap';
+  const rowsHtml = rows.map((r, i) => {
+    const isProject = String(r.work_category_name || '') === '프로젝트업무';
+    const sub = isProject ? (r.project_code || r.work_subcategory_name || '—') : (r.work_subcategory_name || '—');
+    const client = clientCats.has(String(r.work_category_name || ''))
+      ? Utils.escHtml(r.client_name || '—')
+      : '<span style="color:var(--text-muted)">—</span>';
+    const dur = r.duration_minutes ? `${r.duration_minutes}분` : '—';
+    const rowBg = i % 2 === 1 ? 'background:#f8fafc' : '';
+    return `<tr style="${rowBg}">
+      <td style="${td};text-align:center;color:var(--text-muted)">${i + 1}</td>
+      <td style="${td}">${Utils.escHtml(r.work_category_name || '—')}</td>
+      <td style="${td}">${Utils.escHtml(sub)}</td>
+      <td style="${td}">${client}</td>
+      <td style="${td};max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:normal;line-height:1.4">${Utils.escHtml(r.work_note || '')}</td>
+      <td style="${td};text-align:center;font-weight:600;color:var(--primary)">${dur}</td>
+    </tr>`;
+  }).join('');
+  return `<div style="overflow-x:auto;margin-top:8px;border:1px solid var(--border-light);border-radius:8px">
+    <table style="width:100%;border-collapse:collapse;min-width:400px">
+      <thead><tr>
+        <th style="${th}">No</th>
+        <th style="${th}">대분류</th>
+        <th style="${th}">소분류</th>
+        <th style="${th}">고객사</th>
+        <th style="${th}">업무내용</th>
+        <th style="${th}">소요시간</th>
+      </tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+  </div>`;
+}
+
+// 모바일용 일반자문 승인 처리 (기존 modal DOM 불필요 버전)
+async function approvalProcessMobile(entryId, decision, opts = {}) {
+  const session = getSession();
+  const { comment = '', qualityRating = '', performanceType = '' } = opts;
+  const entry = _mobileApprovalEntries.find((e) => String(e.id || '') === String(entryId));
+  if (!entry) throw new Error('승인 대상을 찾을 수 없습니다.');
+  const isApprove = decision !== 'rejected';
+  if (!isApprove && !comment) throw new Error('반려 사유를 입력해주세요.');
+  const is2nd = Auth.canApprove2nd(session) && needsSecondApproval(entry) &&
+    entry.status === 'pre_approved' && String(entry.reviewer2_id || '') === String(session.id);
+  const needs2nd = needsSecondApproval(entry);
+  const nextStatus = isApprove ? (needs2nd && !is2nd ? 'pre_approved' : 'approved') : 'rejected';
+  const patchData = {
+    status: nextStatus,
+    reviewer_comment: comment,
+    reviewed_at: Date.now(),
+    reviewer_id: session.id,
+    reviewer_name: session.name || '',
+  };
+  if (qualityRating) patchData.quality_rating = qualityRating;
+  if (performanceType) patchData.performance_type = performanceType;
+  await API.patch('time_entries', entryId, patchData);
+  if (typeof createNotification === 'function') {
+    createNotification({
+      toUserId: entry.user_id, toUserName: entry.user_name,
+      fromUserId: session.id, fromUserName: session.name,
+      type: isApprove ? (nextStatus === 'pre_approved' ? 'pre_approved' : 'approved') : 'rejected',
+      entryId, message: comment,
+    }).catch(() => {});
+    if (nextStatus === 'pre_approved' && entry.reviewer2_id) {
+      createNotification({
+        toUserId: entry.reviewer2_id, toUserName: entry.reviewer2_name || '',
+        fromUserId: session.id, fromUserName: session.name,
+        type: 'review_requested', entryId,
+      }).catch(() => {});
+    }
+  }
 }
 
 async function openMobileApprovalDetail(entryId) {
@@ -341,17 +471,28 @@ async function loadMobileApprovalList() {
       fetched = _mergeTimeEntriesById([submitted, pre]);
     }
 
-    let entries = await _scopeTimeEntriesForApproval(
+    let allFetched = await _scopeTimeEntriesForApproval(
       fetched,
       session,
       { hq: '', team: '', hqScope: 'hq' },
       usersById
     );
 
+    // 배치와 일반자문 분리
+    let batchEntries = allFetched.filter((e) => _mobileApprovalIsBatchEntry(e));
+    let entries = allFetched.filter((e) => !_mobileApprovalIsBatchEntry(e));
+
+    // 배치: 1차 승인 전용 — approver_id가 본인인 submitted 건만 노출
+    batchEntries = batchEntries.filter((e) => {
+      if (String(e.status || '') !== 'submitted') return statusMode === 'all';
+      return String(e.approver_id || '') === String(session.id);
+    });
+
     if (statusMode === 'pending') {
       entries = _approvalFilterSecondApproverPending(entries, session);
     } else if (statusMode === 'submitted' || statusMode === 'pre_approved') {
       entries = _approvalFilterSecondApproverPending(entries, session).filter((e) => String(e.status || '') === statusMode);
+      batchEntries = batchEntries.filter((e) => String(e.status || '') === statusMode);
     }
 
     let projectEntries = await _mobileApprovalLoadProjectEntries(session, statusMode);
@@ -383,6 +524,11 @@ async function loadMobileApprovalList() {
         ].map((v) => String(v || '').toLowerCase()).join(' ');
         return blob.includes(searchKw);
       });
+      batchEntries = batchEntries.filter((e) => {
+        const blob = [e.user_name, e.team_name, e.work_description, e.doc_no]
+          .map((v) => String(v || '').toLowerCase()).join(' ');
+        return blob.includes(searchKw);
+      });
       projectEntries = projectEntries.filter((e) => {
         const blob = [
           e.user_name, e.client_name, e.work_category_name, e.work_subcategory_name,
@@ -400,8 +546,9 @@ async function loadMobileApprovalList() {
       for (const e of entries) await _apvAttachProjectSubcategory(e);
     }
 
-    let combined = entries.concat(projectEntries);
+    let combined = entries.concat(batchEntries).concat(projectEntries);
     if (kindMode === 'timesheet') combined = entries;
+    else if (kindMode === 'batch') combined = batchEntries;
     else if (kindMode === 'project') combined = projectEntries;
 
     combined.sort((a, b) => {
@@ -468,6 +615,28 @@ async function mobileApprovalProcess(decision) {
           window.prompt = originalPrompt;
         }
       }
+    } else if (_mobileApprovalIsBatchEntry(entry)) {
+      // 배치: 1차 승인으로 종결 (pre_approved 없음)
+      const session = getSession();
+      const isApprove = decision === 'approved';
+      const comment = commentEl ? commentEl.value.trim() : '';
+      if (!isApprove && !comment) throw new Error('반려 사유를 입력해주세요.');
+      const nextStatus = isApprove ? 'approved' : 'rejected';
+      await API.patch('time_entries', entry.id, {
+        status: nextStatus,
+        reviewer_comment: comment,
+        reviewed_at: Date.now(),
+        reviewer_id: session.id,
+        reviewer_name: session.name || '',
+      });
+      if (typeof createNotification === 'function') {
+        createNotification({
+          toUserId: entry.user_id, toUserName: entry.user_name,
+          fromUserId: session.id, fromUserName: session.name,
+          type: nextStatus, entryId: entry.id, message: comment,
+        }).catch(() => {});
+      }
+      Toast.success(isApprove ? '일괄기록이 승인되었습니다.' : '반려 처리되었습니다.');
     } else {
       await approvalProcessMobile(entry.id, decision, {
         comment: commentEl ? commentEl.value : '',

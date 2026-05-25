@@ -19,6 +19,8 @@ let _approvalScopeUserIdSet = new Set();
 let _approvalListReqSeq = 0;
 let _approvalListLoading = false;
 let _approvalMutationInFlight = false;
+let _approvalBatchDetails = [];
+let _approvalBatchRole = 'readonly'; // first | second | readonly
 
 function _approvalIsPageActive() {
   const page = document.getElementById('page-approval');
@@ -91,20 +93,24 @@ function _approvalPatchProjectRegRuntime(P) {
 function _approvalApplyTabCountLabels(counts) {
   const data = counts || window.__approvalBadgeSplit || {};
   const tsCount = Number(data.timesheet) || 0;
+  const btCount = Number(data.batch) || 0;
   const pjCount = Number(data.project) || 0;
   const tsBtn = document.getElementById('approval-tab-timesheet');
+  const btBtn = document.getElementById('approval-tab-batch');
   const pjBtn = document.getElementById('approval-tab-project');
-  if (tsBtn) tsBtn.innerHTML = `<i class="fas fa-clock"></i> 타임시트 승인 (${tsCount})`;
+  if (tsBtn) tsBtn.innerHTML = `<i class="fas fa-clock"></i> 일반자문 승인 (${tsCount})`;
+  if (btBtn) btBtn.innerHTML = `<i class="fas fa-list-alt"></i> 일괄기록 승인 (${btCount})`;
   if (pjBtn) pjBtn.innerHTML = `<i class="fas fa-folder-open"></i> 프로젝트 승인 (${pjCount})`;
 }
 
 function _approvalSetTabCountPartial(kind, count) {
-  const prev = window.__approvalBadgeSplit || { timesheet: 0, project: 0, total: 0 };
+  const prev = window.__approvalBadgeSplit || { timesheet: 0, batch: 0, project: 0, total: 0 };
   const next = {
     timesheet: kind === 'timesheet' ? (Number(count) || 0) : (Number(prev.timesheet) || 0),
+    batch: kind === 'batch' ? (Number(count) || 0) : (Number(prev.batch) || 0),
     project: kind === 'project' ? (Number(count) || 0) : (Number(prev.project) || 0),
   };
-  next.total = next.timesheet + next.project;
+  next.total = next.timesheet + next.batch + next.project;
   window.__approvalBadgeSplit = next;
   _approvalApplyTabCountLabels(next);
   // Approval 화면에서 탭 카운트가 갱신될 때 좌측 사이드바 배지도 동일 값으로 동기화
@@ -135,22 +141,22 @@ function _approvalAutoActivateSinglePendingTab(split) {
 }
 
 function _approvalSetMainTabVisual(tab) {
-  _approvalMainTab = tab === 'project' ? 'project' : 'timesheet';
+  _approvalMainTab = ['project', 'batch'].includes(tab) ? tab : 'timesheet';
   const isTs = _approvalMainTab === 'timesheet';
+  const isBt = _approvalMainTab === 'batch';
+  const isPj = _approvalMainTab === 'project';
   const tsBtn = document.getElementById('approval-tab-timesheet');
+  const btBtn = document.getElementById('approval-tab-batch');
   const pjBtn = document.getElementById('approval-tab-project');
   const tsPanel = document.getElementById('approval-panel-timesheet');
+  const btPanel = document.getElementById('approval-panel-batch');
   const pjPanel = document.getElementById('approval-panel-project');
-  if (tsBtn) {
-    tsBtn.classList.toggle('is-active', isTs);
-    tsBtn.setAttribute('aria-selected', isTs ? 'true' : 'false');
-  }
-  if (pjBtn) {
-    pjBtn.classList.toggle('is-active', !isTs);
-    pjBtn.setAttribute('aria-selected', !isTs ? 'true' : 'false');
-  }
+  if (tsBtn) { tsBtn.classList.toggle('is-active', isTs); tsBtn.setAttribute('aria-selected', String(isTs)); }
+  if (btBtn) { btBtn.classList.toggle('is-active', isBt); btBtn.setAttribute('aria-selected', String(isBt)); }
+  if (pjBtn) { pjBtn.classList.toggle('is-active', isPj); pjBtn.setAttribute('aria-selected', String(isPj)); }
   if (tsPanel) tsPanel.style.display = isTs ? '' : 'none';
-  if (pjPanel) pjPanel.style.display = isTs ? 'none' : '';
+  if (btPanel) btPanel.style.display = isBt ? '' : 'none';
+  if (pjPanel) pjPanel.style.display = isPj ? '' : 'none';
 }
 
 async function _approvalEnsureProjRegScript() {
@@ -189,9 +195,10 @@ async function _approvalEnsureProjRegScript() {
 }
 
 async function switchApprovalMainTab(tab) {
-  if (tab !== 'project' && tab !== 'timesheet') return;
+  if (tab !== 'project' && tab !== 'timesheet' && tab !== 'batch') return;
   _approvalSetMainTabVisual(tab);
   if (tab === 'timesheet') await loadApprovalList();
+  else if (tab === 'batch') await loadApprovalBatchList();
   else await loadApprovalProjectList();
 }
 
@@ -1052,9 +1059,18 @@ function _approvalCanDoFirst(session, entry) {
   const myId = String(session.id || '');
   if (!myId || entry.status !== 'submitted') return false;
   if (String(entry.approver_id || '') !== myId) return false;
-  if (Auth.canApprove1st(session)) return true;
-  // CCB 소속은 Director도 1차 승인자로 지정/처리 가능
-  return Auth.isDirector(session) && _approvalIsCcbEntry(entry);
+  // 1차 승인자(manager)만 1차 처리 가능
+  // Director(본부장)는 일반자문업무·프로젝트업무의 2차 승인만 담당
+  return Auth.canApprove1st(session);
+}
+
+function _approvalIsDirectSecondRoute(entry) {
+  if (!entry) return false;
+  if (!needsSecondApproval(entry)) return false;
+  if (String(entry.status || '') !== 'submitted') return false;
+  const approverId = String(entry.approver_id || '').trim();
+  const reviewer2Id = String(entry.reviewer2_id || '').trim();
+  return !!approverId && approverId === reviewer2Id;
 }
 
 /** 상태 필터 동기화 */
@@ -1292,9 +1308,39 @@ async function init_approval() {
     );
     pjTabBtn.style.display = canProjectApproval ? '' : 'none';
   }
+  try {
+    await updateApprovalBadge(session, true);
+  } catch (_) {}
+  _approvalApplyTabCountLabels();
+  // 일괄기록 탭 기간 초기값 설정
+  const batchFromEl = document.getElementById('filter-approval-batch-date-from');
+  const batchToEl   = document.getElementById('filter-approval-batch-date-to');
+  if (batchFromEl) batchFromEl.value = firstDay;
+  if (batchToEl)   batchToEl.value   = lastDay;
+
+  // 일괄기록 탭 빠른 기간 버튼 바인딩
+  document.querySelectorAll('[data-approval-batch-range]').forEach((btn) => {
+    if (btn.dataset.batchRangeBind) return;
+    btn.dataset.batchRangeBind = '1';
+    btn.addEventListener('click', () => {
+      const { from, to } = _approvalQuickRangeDates(btn.dataset.approvalBatchRange);
+      if (batchFromEl) batchFromEl.value = from;
+      if (batchToEl)   batchToEl.value   = to;
+      _approvalBatchPage = 1;
+      _approvalSyncBatchRangeButtonState();
+      loadApprovalBatchList();
+    });
+  });
+  if (batchFromEl && !batchFromEl.dataset.batchChangeBind) {
+    batchFromEl.dataset.batchChangeBind = '1';
+    batchFromEl.addEventListener('change', _approvalSyncBatchRangeButtonState);
+  }
+  if (batchToEl && !batchToEl.dataset.batchChangeBind) {
+    batchToEl.dataset.batchChangeBind = '1';
+    batchToEl.addEventListener('change', _approvalSyncBatchRangeButtonState);
+  }
+
   const projectTabVisible = pjTabBtn && pjTabBtn.style.display !== 'none';
-  // Approval 화면의 카운트는 목록 로직에서 계산한 값만 사용한다.
-  // (초기 진입 시 전역 배지 재계산 결과가 덮어써서 숫자가 바뀌는 현상 방지)
   _approvalSetMainTabVisual('timesheet');
   await loadApprovalList();
   if (projectTabVisible) {
@@ -1420,6 +1466,9 @@ async function loadApprovalList() {
       entries = entries.filter(e => e.status !== 'draft');
     }
 
+    // 일괄기록 엔트리는 일괄기록 탭에서만 처리 (일반자문 탭에서 제외)
+    entries = entries.filter(e => !_approvalIsBatchEntry(e));
+
     // 목록 표시용 프로젝트 코드 메타 부착
     const hasProjectRows = entries.some((e) =>
       String(e.work_category_name || '').trim() === '프로젝트업무' && String(e.project_code || '').trim()
@@ -1429,8 +1478,21 @@ async function loadApprovalList() {
       for (const e of entries) await _apvAttachProjectSubcategory(e);
     }
 
-    // Approval 정책: 2차 승인자는 실제 승인대기 건(submitted/pre_approved)만 노출
-    entries = _approvalFilterSecondApproverPending(entries, session);
+    // Director(본부장) 화면: 일반자문업무·프로젝트업무 2차 승인 대상만 노출
+    // - 2차 대상만(needsSecondApproval): pre_approved 대기 + 1차/2차 동일 지정(직행) submitted
+    // - 그 외(일반통관·내부업무·일괄기록 등)는 Director 목록에 표시하지 않음
+    if (Auth.canApprove2nd(session)) {
+      const myId = String(session.id);
+      entries = entries.filter(e => {
+        const st = e.status;
+        if (!needsSecondApproval(e)) return false; // 일반자문업무·프로젝트업무만
+        if (st === 'submitted') return _approvalIsDirectSecondRoute(e) && String(e.reviewer2_id || '') === myId;
+        if (st === 'pre_approved') return String(e.reviewer2_id || '') === myId;
+        if (st === 'rejected') return String(e.reviewer_id || '') === myId;
+        if (st === 'approved') return String(e.reviewer_id || '') === myId;
+        return false;
+      });
+    }
 
     // 정렬
     const _apvSortTs = (e) => {
@@ -1499,25 +1561,41 @@ async function loadApprovalList() {
       });
     }
 
-    // 검토대기 카운트는 실제 대기 상태만 집계한다.
-    // (submitted / pre_approved 외 상태는 목록에 있더라도 대기 건수에서 제외)
-    const waitCount = entries.filter((e) => {
-      const st = String(e && e.status || '').trim();
-      return st === 'submitted' || st === 'pre_approved';
-    }).length;
+    // ★ waitCount: 역할 범위 전체 기준 계산 (배치 제외, 일반자문 건만)
+    const session2 = getSession();
+    const myId2 = String(session2.id);
+    let waitCount = 0;
+    const pendingScoped = await _scopeTimeEntriesForApproval(pendingAll, session2, '');
+    const pendingScopedNonBatch = pendingScoped.filter(e => !_approvalIsBatchEntry(e));
+    if (Auth.isAdmin(session2)) {
+      waitCount = pendingScopedNonBatch.length;
+    } else if (Auth.canApprove1st(session2)) {
+      waitCount = pendingScopedNonBatch.filter(e =>
+        (e.status === 'submitted' || e.status === 'pre_approved') &&
+        (String(e.approver_id) === myId2 || String(e.pre_approver_id) === myId2)
+      ).length;
+    } else if (Auth.canApprove2nd(session2)) {
+      waitCount = pendingScopedNonBatch.filter(e =>
+        (e.status === 'pre_approved' && needsSecondApproval(e) && String(e.reviewer2_id || '') === myId2) ||
+        (e.status === 'submitted' && !needsSecondApproval(e) && String(e.approver_id || '') === myId2) ||
+        (_approvalIsDirectSecondRoute(e) && String(e.reviewer2_id || '') === myId2)
+      ).length;
+    } else {
+      waitCount = pendingScopedNonBatch.filter(e =>
+        (e.status === 'submitted' || e.status === 'pre_approved') &&
+        String(e.approver_id) === myId2
+      ).length;
+    }
     const badge = document.getElementById('approval-count-badge');
-    // 메뉴/사이드바 배지는 조회필터 결과가 아닌 "전역 승인대기" 기준으로 유지한다.
-    _approvalSetTabCountPartial('timesheet', waitCountForMenu);
-    if (badge) {
-      if (waitCount > 0) {
-        badge.className = 'badge badge-red';
-        badge.style = '';
-        badge.textContent = `${waitCount}건 검토 대기`;
-      } else {
-        badge.className = '';
-        badge.style.cssText = 'font-size:12px;color:var(--text-muted);font-weight:400';
-        badge.textContent = '0건 검토 대기';
-      }
+    _approvalSetTabCountPartial('timesheet', waitCount);
+    if (waitCount > 0) {
+      badge.className = 'badge badge-red';
+      badge.style = '';
+      badge.textContent = `${waitCount}건 검토 대기`;
+    } else {
+      badge.className = '';
+      badge.style.cssText = 'font-size:12px;color:var(--text-muted);font-weight:400';
+      badge.textContent = `0건 검토 대기`;
     }
 
     // 첨부파일 맵
@@ -1632,6 +1710,228 @@ async function loadApprovalList() {
   } finally {
     if (reqSeq === _approvalListReqSeq) _approvalListLoading = false;
   }
+}
+
+// ══════════════════════════════════════════════
+// 일괄기록 승인 목록
+// ══════════════════════════════════════════════
+let _approvalBatchPage = 1;
+const APPROVAL_BATCH_PER_PAGE = 20;
+
+async function loadApprovalBatchList() {
+  const session = getSession();
+  const dateFrom = (document.getElementById('filter-approval-batch-date-from') || {}).value || '';
+  const dateTo   = (document.getElementById('filter-approval-batch-date-to') || {}).value || '';
+  const staffKw  = ((document.getElementById('filter-approval-batch-staff') || {}).value || '').trim().toLowerCase();
+  const status   = (document.getElementById('filter-approval-batch-status') || {}).value || '';
+
+  _approvalSyncBatchRangeButtonState();
+
+  try {
+    const statusFrag = status ? `status=eq.${encodeURIComponent(status)}` : 'status=neq.draft';
+    const [pendingSubmitted, pendingPre] = await Promise.all([
+      _approvalPaginateTimeEntries('status=eq.submitted'),
+      _approvalPaginateTimeEntries('status=eq.pre_approved'),
+    ]);
+    const pendingAll = _mergeTimeEntriesById([pendingSubmitted, pendingPre]);
+
+    let allFetched;
+    if (status === 'submitted') allFetched = pendingSubmitted;
+    else if (status === 'pre_approved') allFetched = pendingPre;
+    else {
+      try {
+        allFetched = await _approvalPaginateTimeEntries(statusFrag);
+      } catch (err) {
+        if (!status) {
+          allFetched = await _approvalPaginateTimeEntries('');
+          allFetched = allFetched.filter(e => e.status !== 'draft');
+        } else { throw err; }
+      }
+    }
+
+    // 배치 엔트리만
+    allFetched = allFetched.filter(e => _approvalIsBatchEntry(e));
+
+    let entries = await _scopeTimeEntriesForApproval(allFetched, session, '');
+
+    if (dateFrom || dateTo) {
+      entries = entries.filter(e => _approvalEntryInDateRange(e, dateFrom, dateTo));
+    }
+    if (staffKw) {
+      entries = entries.filter(e => (e.user_name || '').toLowerCase().includes(staffKw));
+    }
+    if (status) {
+      entries = entries.filter(e => e.status === status);
+    } else {
+      entries = entries.filter(e => e.status !== 'draft');
+    }
+
+    // Director 범위 필터 — 일괄기록은 1차 승인으로 종결이므로 2차 승인 분기 없음
+    if (Auth.canApprove2nd(session)) {
+      const myId = String(session.id);
+      entries = entries.filter(e => {
+        const st = e.status;
+        if (st === 'submitted') return String(e.approver_id || '') === myId;
+        if (st === 'pre_approved') return String(e.approver_id || '') === myId || String(e.reviewer2_id || '') === myId;
+        if (st === 'rejected') return String(e.reviewer_id || '') === myId || String(e.approver_id || '') === myId;
+        if (st === 'approved') return String(e.reviewer_id || '') === myId || String(e.approver_id || '') === myId;
+        return false;
+      });
+    }
+
+    // 정렬: 대기 우선, 그 내 과거→최신
+    const _apvSortTs = (e) => {
+      const raw = e?.work_start_at ?? e?.created_at;
+      if (raw == null) return 0;
+      const num = Number(raw);
+      let ts;
+      if (!isNaN(num) && num > 1000000000000) ts = num;
+      else if (!isNaN(num) && num > 1000000000) ts = num * 1000;
+      else ts = new Date(raw).getTime();
+      return isNaN(ts) ? 0 : ts;
+    };
+    const _apvStatusRank = (st) => {
+      if (st === 'rejected') return 0;
+      if (st === 'submitted') return 1;
+      if (st === 'pre_approved') return 2;
+      if (st === 'approved') return 3;
+      return 4;
+    };
+    entries.sort((a, b) => {
+      const ra = _apvStatusRank(a.status), rb = _apvStatusRank(b.status);
+      if (ra !== rb) return ra - rb;
+      return _apvSortTs(a) - _apvSortTs(b);
+    });
+
+    // 배치 탭 카운트 배지
+    const myId2 = String(session.id);
+    const pendingScopedBatch = (await _scopeTimeEntriesForApproval(
+      _mergeTimeEntriesById([pendingSubmitted, pendingPre]).filter(e => _approvalIsBatchEntry(e)),
+      session, ''
+    ));
+    let batchWaitCount = 0;
+    if (Auth.isAdmin(session)) {
+      batchWaitCount = pendingScopedBatch.length;
+    } else if (Auth.canApprove1st(session) || Auth.canApprove2nd(session)) {
+      // 일괄기록은 1차 승인으로 종결 — approver_id 기준으로만 대기 건수 산출
+      batchWaitCount = pendingScopedBatch.filter(e =>
+        e.status === 'submitted' &&
+        String(e.approver_id) === myId2
+      ).length;
+    } else {
+      batchWaitCount = pendingScopedBatch.filter(e =>
+        e.status === 'submitted' &&
+        String(e.approver_id) === myId2
+      ).length;
+    }
+    _approvalSetTabCountPartial('batch', batchWaitCount);
+    const batchBadge = document.getElementById('approval-batch-count-badge');
+    if (batchBadge) {
+      if (batchWaitCount > 0) {
+        batchBadge.className = 'badge badge-red';
+        batchBadge.style = '';
+        batchBadge.textContent = `${batchWaitCount}건 검토 대기`;
+      } else {
+        batchBadge.className = '';
+        batchBadge.style.cssText = 'font-size:12px;color:var(--text-muted);font-weight:400';
+        batchBadge.textContent = '0건 검토 대기';
+      }
+    }
+
+    const start = (_approvalBatchPage - 1) * APPROVAL_BATCH_PER_PAGE;
+    const paged = entries.slice(start, start + APPROVAL_BATCH_PER_PAGE);
+
+    const tbody = document.getElementById('approval-batch-list-body');
+    if (!tbody) return;
+
+    if (paged.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" class="table-empty"><i class="fas fa-check-circle" style="color:var(--success)"></i><p>검토 대기 중인 항목이 없습니다.</p></td></tr>`;
+    } else {
+      // 사용자 프로필에서 cs_team_name(소속팀)을 가져와 매핑
+      // time_entries.team_name 대신 실제 소속팀을 표시하기 위함
+      let userCsTeamMap = {};
+      try {
+        const allUsers = await Master.users();
+        allUsers.forEach(u => {
+          userCsTeamMap[String(u.id)] = String(u.cs_team_name || u.team_name || '').trim();
+        });
+      } catch (_) { /* 조회 실패 시 team_name 폴백 */ }
+
+      const fmtDate = (ms) => {
+        if (!ms) return '<span style="color:var(--text-muted)">—</span>';
+        const d = new Date(Number(ms));
+        return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`;
+      };
+      const B = 'width:30px;height:30px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;background:transparent;border:none;cursor:pointer;transition:background 0.15s;';
+
+      tbody.innerHTML = paged.map((e, idx) => {
+        const rowNo = ((_approvalBatchPage - 1) * APPROVAL_BATCH_PER_PAGE) + idx + 1;
+        const writtenAt = e.created_at ? fmtDate(e.created_at) : fmtDate(e.work_start_at);
+        const docNoShort = e.doc_no ? (Utils.formatDocNoShort ? Utils.formatDocNoShort(e.doc_no) : e.doc_no) : '';
+        const docNoHtml = e.doc_no
+          ? `<div style="font-size:11px;color:#94a3b8;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${Utils.escHtml(e.doc_no)}">${Utils.escHtml(docNoShort)}</div>`
+          : '';
+        // 소속: users 테이블의 cs_team_name 우선 → 폴백으로 time_entries.team_name
+        const csTeam = userCsTeamMap[String(e.user_id || '')] || e.team_name || '—';
+        return `<tr>
+          <td style="text-align:center;color:var(--text-muted);font-size:12px;font-variant-numeric:tabular-nums">${rowNo}</td>
+          <td style="font-size:12px;white-space:nowrap;color:var(--text-secondary)">${writtenAt}${docNoHtml}</td>
+          <td style="padding:0 8px">
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12.5px;font-weight:600" title="${Utils.escHtml(e.user_name||'')}">${Utils.escHtml(e.user_name||'—')}</span>
+          </td>
+          <td style="padding:0 8px">
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12px;color:var(--text-secondary)" title="${Utils.escHtml(csTeam)}">${Utils.escHtml(csTeam)}</span>
+          </td>
+          <td style="text-align:center;font-size:12.5px;font-weight:600;color:var(--text-secondary)">${Utils.formatDuration(e.duration_minutes)}</td>
+          <td style="text-align:center">${Utils.statusBadge(e.status)}</td>
+          <td style="text-align:center;padding:0 4px">
+            <button style="${B}" onclick="openApprovalModal('${e.id}')" title="상세보기"><i class="fas fa-eye" style="font-size:13px;color:#94a3b8"></i></button>
+          </td>
+        </tr>`;
+      }).join('');
+    }
+
+    const paginEl = document.getElementById('approval-batch-pagination');
+    if (paginEl) paginEl.innerHTML = Utils.paginationHTML(_approvalBatchPage, entries.length, APPROVAL_BATCH_PER_PAGE, 'changeApprovalBatchPage');
+
+  } catch (err) {
+    console.error(err);
+    Toast.error('일괄기록 승인 목록 로드 실패: ' + (err?.message || ''));
+  }
+}
+
+function changeApprovalBatchPage(p) {
+  _approvalBatchPage = p;
+  loadApprovalBatchList();
+}
+
+function resetApprovalBatchFilter() {
+  const now = new Date();
+  const y = now.getFullYear(), mo = now.getMonth();
+  const firstDay = `${y}-${String(mo + 1).padStart(2, '0')}-01`;
+  const lastDay  = `${y}-${String(mo + 1).padStart(2, '0')}-${String(new Date(y, mo + 1, 0).getDate()).padStart(2, '0')}`;
+  const fromEl = document.getElementById('filter-approval-batch-date-from');
+  const toEl   = document.getElementById('filter-approval-batch-date-to');
+  const staffEl = document.getElementById('filter-approval-batch-staff');
+  const statusEl = document.getElementById('filter-approval-batch-status');
+  if (fromEl) fromEl.value = firstDay;
+  if (toEl) toEl.value = lastDay;
+  if (staffEl) staffEl.value = '';
+  if (statusEl) statusEl.value = '';
+  _approvalBatchPage = 1;
+  _approvalSyncBatchRangeButtonState();
+  loadApprovalBatchList();
+}
+
+function _approvalSyncBatchRangeButtonState() {
+  const fromEl = document.getElementById('filter-approval-batch-date-from');
+  const toEl   = document.getElementById('filter-approval-batch-date-to');
+  const from = fromEl ? fromEl.value : '';
+  const to   = toEl   ? toEl.value   : '';
+  document.querySelectorAll('[data-approval-batch-range]').forEach((btn) => {
+    const { from: rf, to: rt } = _approvalQuickRangeDates(btn.dataset.approvalBatchRange);
+    btn.classList.toggle('is-active', from === rf && to === rt);
+  });
 }
 
 function resetApprovalFilter() {
@@ -2092,6 +2392,145 @@ function _buildRatingBtns(name) {
   </div>`;
 }
 
+function _approvalIsBatchEntry(entry) {
+  const mode = String(entry && entry.entry_mode || '').trim();
+  if (mode === 'batch') return true;
+  return String(entry && entry.work_description || '').trim().startsWith('[일괄기록]');
+}
+
+function _approvalFormatDateTime(ms) {
+  if (!ms) return '—';
+  const d = new Date(Number(ms));
+  if (Number.isNaN(d.getTime())) return '—';
+  return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function _approvalBatchAttachmentsHtml(atts) {
+  if (!Array.isArray(atts) || !atts.length) {
+    return '<div style="color:var(--text-muted);font-size:12px;padding:8px 0"><i class="fas fa-folder-open"></i> 첨부된 결과물이 없습니다.</div>';
+  }
+  const iconMap = { excel: 'fa-file-excel', word: 'fa-file-word', ppt: 'fa-file-powerpoint', pdf: 'fa-file-pdf', link: 'fa-link' };
+  const colorMap = { excel: '#16a34a', word: '#1d4ed8', ppt: '#c2410c', pdf: '#b91c1c', link: '#7c3aed' };
+  return atts.map((a, idx) => {
+    const hasContent = a.file_content && a.file_content.startsWith('data:');
+    const hasUrl = a.file_url && a.file_url.startsWith('http');
+    const actionBtn = hasContent
+      ? `<button class="btn btn-sm btn-primary" onclick="downloadApprovalFile(${idx})"><i class="fas fa-eye"></i> 미리보기</button>`
+      : hasUrl
+      ? `<a href="${a.file_url}" target="_blank" class="btn btn-sm btn-outline"><i class="fas fa-external-link-alt"></i> 링크 열기</a>`
+      : `<span style="font-size:11px;color:#94a3b8">열기 정보 없음</span>`;
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border-light);border-radius:8px;background:#f8fafc;margin-bottom:6px">
+      <i class="fas ${iconMap[a.file_type] || 'fa-file'}" style="color:${colorMap[a.file_type] || '#6b7280'}"></i>
+      <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${Utils.escHtml(String(a.file_name || '첨부파일'))}</div>
+      ${actionBtn}
+    </div>`;
+  }).join('');
+}
+
+function _approvalBuildBatchRowsHtml(details) {
+  const rows = Array.isArray(details) ? [...details] : [];
+  if (!rows.length) {
+    return '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px">저장된 상세 내역이 없습니다.</div>';
+  }
+  // 대분류 표시 순서: 일반통관업무 → 프로젝트업무 → 기타 고객업무 → 회사내부업무 → 나머지
+  const CAT_ORDER = ['일반통관업무', '프로젝트업무', '기타 고객업무', '회사내부업무'];
+  const catPriority = (name) => {
+    const idx = CAT_ORDER.indexOf(String(name || ''));
+    return idx === -1 ? CAT_ORDER.length : idx;
+  };
+  // 고객사 표시 대상 대분류
+  const CLIENT_CATS = new Set(['일반통관업무', '프로젝트업무', '기타 고객업무']);
+
+  rows.sort((a, b) => {
+    const pA = catPriority(a.work_category_name);
+    const pB = catPriority(b.work_category_name);
+    if (pA !== pB) return pA - pB;
+    const subA = String(a.work_subcategory_name || '').toLowerCase();
+    const subB = String(b.work_subcategory_name || '').toLowerCase();
+    if (subA !== subB) return subA < subB ? -1 : 1;
+    return (Number(a.row_order) || 0) - (Number(b.row_order) || 0);
+  });
+
+  const colStyle = 'padding:8px 10px;font-size:12px;border-bottom:1px solid var(--border-light);white-space:nowrap';
+  const thStyle = `${colStyle};background:#f8fafc;font-weight:600;color:var(--text-secondary);text-align:center`;
+  const rowsHtml = rows.map((r, idx) => {
+    const dur = r.duration_minutes ? `${r.duration_minutes}분` : '—';
+    const cat = Utils.escHtml(r.work_category_name || '—');
+    const isProject = String(r.work_category_name || '') === '프로젝트업무';
+    const sub = isProject
+      ? Utils.escHtml(r.project_code || r.work_subcategory_name || '—')
+      : Utils.escHtml(r.work_subcategory_name || '—');
+    const note = Utils.escHtml(r.work_note || '');
+    const hasClient = CLIENT_CATS.has(String(r.work_category_name || ''));
+    const clientHtml = hasClient
+      ? Utils.escHtml(r.client_name || '—')
+      : `<span style="color:var(--text-muted)">—</span>`;
+    const rowBg = idx % 2 === 1 ? 'background:#f8fafc;' : '';
+    return `<tr style="${rowBg}">
+      <td style="${colStyle};text-align:center;color:var(--text-muted);width:36px">${idx + 1}</td>
+      <td style="${colStyle};color:var(--text-primary);font-weight:500">${cat}</td>
+      <td style="${colStyle};color:var(--text-secondary)">${sub}</td>
+      <td style="${colStyle}">${clientHtml}</td>
+      <td style="${colStyle};color:var(--text-primary);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:normal;line-height:1.45" title="${note}">${note || '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td style="${colStyle};text-align:center;font-weight:600;color:var(--primary)">${dur}</td>
+    </tr>`;
+  }).join('');
+  return `<div style="overflow-x:auto;border:1px solid var(--border-light);border-radius:8px">
+    <table style="width:100%;border-collapse:collapse;min-width:460px">
+      <thead>
+        <tr>
+          <th style="${thStyle};width:36px">No</th>
+          <th style="${thStyle}">대분류</th>
+          <th style="${thStyle}">소분류</th>
+          <th style="${thStyle}">고객사</th>
+          <th style="${thStyle}">업무내용</th>
+          <th style="${thStyle}">소요시간</th>
+        </tr>
+      </thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+  </div>`;
+}
+
+async function _approvalLoadBatchDetails(entryId) {
+  return API.listAllPages('time_entry_details', {
+    filter: `entry_id=eq.${encodeURIComponent(String(entryId || ''))}`,
+    sort: 'row_order',
+    limit: 200,
+    maxPages: 20,
+  }).catch(() => []);
+}
+
+function _approvalBatchCommentHtml() {
+  return `<div>
+    <label style="font-size:12px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:6px">
+      검토 의견 <span style="color:var(--danger)">* (반려 시 필수)</span>
+    </label>
+    <textarea class="form-control" id="approval-batch-comment" rows="3" placeholder="검토 의견을 입력하세요."></textarea>
+  </div>`;
+}
+
+function _approvalBatchMetaHtml(entry, atts, details) {
+  return `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px 16px;margin-bottom:16px">
+      <div><span style="font-size:11px;color:var(--text-muted)">문서번호</span><div style="font-weight:700;margin-top:2px">${Utils.escHtml(String(entry.doc_no || '—'))}</div></div>
+      <div><span style="font-size:11px;color:var(--text-muted)">작성자</span><div style="font-weight:600;margin-top:2px">${Utils.escHtml(String(entry.user_name || '-'))}</div></div>
+      <div><span style="font-size:11px;color:var(--text-muted)">날짜</span><div style="font-weight:600;margin-top:2px">${Utils.formatDate(entry.work_start_at)}</div></div>
+      <div><span style="font-size:11px;color:var(--text-muted)">총 소요시간</span><div style="font-weight:700;color:var(--primary);margin-top:2px">${Utils.formatDurationLong(entry.duration_minutes)}</div></div>
+      <div><span style="font-size:11px;color:var(--text-muted)">상태</span><div style="margin-top:2px">${Utils.statusBadge(entry.status)}</div></div>
+      <div><span style="font-size:11px;color:var(--text-muted)">일괄 행 수</span><div style="margin-top:2px;font-weight:700">${Array.isArray(details) ? details.length : 0}건</div></div>
+    </div>
+    <hr style="border:none;border-top:1px solid var(--border-light);margin:0 0 14px">
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-weight:600;display:flex;align-items:center;gap:6px">
+      <i class="fas fa-list"></i> 업무 상세 내역
+      <span style="background:#e0f2fe;color:#0369a1;border-radius:10px;padding:0 7px;font-size:10px;font-weight:600">${Array.isArray(details) ? details.length : 0}건</span>
+    </div>
+    <div style="margin-bottom:16px">
+      ${_approvalBuildBatchRowsHtml(details)}
+    </div>
+  `;
+}
+
 // ══════════════════════════════════════════════
 // 승인 모달 열기 — 1차(manager) / 2차(director) 자동 분기
 // ══════════════════════════════════════════════
@@ -2123,20 +2562,20 @@ async function openApprovalModal(entryId, focusReject = false) {
     _apvCacheAtts(atts); // 추출 텍스트 버튼용 캐시 등록
 
     const session = getSession ? getSession() : null;
+    if (_approvalIsBatchEntry(entry)) {
+      if (modalBodyEl) modalBodyEl.innerHTML = '';
+      await openApprovalBatchModal(entry, atts, session, focusReject);
+      return;
+    }
+    const batchBodyEl = document.getElementById('approvalBatchModalBody');
+    if (batchBodyEl) batchBodyEl.innerHTML = '';
 
     // ── 분기: 1차(manager) vs 2차(본부장/사업부장) vs 상세보기
     const is1st = _approvalCanDoFirst(session, entry);
-    // 2차 승인자: pre_approved 건 OR 본인에게 지정된 submitted 건
-    // (팀장 제출건 누락 방지를 위해 대분류 제한 없이 처리)
-    const myIdNorm = String(session && session.id || '');
-    const myNameNorm = String(session && session.name || '').toLowerCase().replace(/\s+/g, '').trim();
-    const hitReviewer2 = String(entry.reviewer2_id || '') === myIdNorm ||
-      String(entry.approver_id || '') === myIdNorm ||
-      String(entry.reviewer2_name || '').toLowerCase().replace(/\s+/g, '').trim() === myNameNorm ||
-      String(entry.approver_name || '').toLowerCase().replace(/\s+/g, '').trim() === myNameNorm;
-    const is2nd = Auth.canApprove2nd(session) && (
-      entry.status === 'pre_approved' ||
-      (entry.status === 'submitted' && hitReviewer2)
+    // director: pre_approved 건 또는 (1·2차 동일 지정된 submitted 직행 건)
+    const is2nd = Auth.canApprove2nd(session) && needsSecondApproval(entry) && (
+      (entry.status === 'pre_approved' && String(entry.reviewer2_id || '') === String(session.id)) ||
+      (_approvalIsDirectSecondRoute(entry) && String(entry.reviewer2_id || '') === String(session.id))
     );
 
     if (is1st) {
@@ -2247,7 +2686,6 @@ function _openApprovalModal1st(entry, atts, session) {
 
 // ── 2차 승인 모달 (director용) ────────────────────────────────
 function _openApprovalModal2nd(entry, atts, session) {
-  const showQuality = needsSecondApprovalQuality(entry);
   const isManagerDirect = entry.status === 'submitted'; // manager 본인 건
   const showMgrPerf = isManagerDirect && isClientConsultEntry(entry) && !isDailySheetEntry(entry); // 2차는 client만 — 방어적 분기
   const perfType = entry.performance_type || '';
@@ -2443,6 +2881,278 @@ function _openApprovalModalReadonly(entry, atts, session) {
   document.getElementById('editEntryBtn').style.display  = 'none';
   document.getElementById('rejectBtn').style.display     = 'none';
   document.getElementById('approveBtn').style.display    = 'none';
+}
+
+async function openApprovalBatchModal(entry, atts, session, focusReject = false) {
+  const titleEl = document.getElementById('approvalBatchModalTitle');
+  const bodyEl = document.getElementById('approvalBatchModalBody');
+  const approveBtn = document.getElementById('approveBatchBtn');
+  const rejectBtn = document.getElementById('rejectBatchBtn');
+  if (!titleEl || !bodyEl || !approveBtn || !rejectBtn) throw new Error('batch approval modal DOM not found');
+
+  _approvalTarget = entry;
+  _approvalBatchDetails = await _approvalLoadBatchDetails(entry.id);
+  _approvalBatchRole = 'readonly';
+  bodyEl.innerHTML = '';
+
+  // 배치는 1차 승인으로 종결 — approver_id로 지정된 사람이면 매니저·본부장 구분 없이 승인 가능
+  const is1st = entry.status === 'submitted' && String(entry.approver_id || '') === String(session.id);
+  // 배치는 2차 승인 없음
+  const is2nd = false;
+  approveBtn.style.display = 'none';
+  rejectBtn.style.display = 'none';
+  approveBtn.disabled = false;
+  rejectBtn.disabled = false;
+
+  if (is1st) {
+    const needs2nd = false; // 일괄기록은 1차 승인으로 종결
+    const requirePerf = false; // 배치는 수행방식 평가 없음
+    _approvalBatchRole = 'first';
+    titleEl.textContent = '일괄기록 1차 검토';
+    bodyEl.innerHTML = `${_approvalBatchMetaHtml(entry, atts, _approvalBatchDetails)}
+      ${requirePerf ? `
+      <div style="margin-bottom:14px;padding:14px 16px;background:#f8fafc;border-radius:10px;border:1px solid var(--border-light)">
+        <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:10px">
+          <i class="fas fa-user-check" style="color:#2563eb"></i> 수행방식 확인 <span style="color:var(--danger)">*</span>
+        </div>
+        <div style="display:flex;gap:8px">
+          ${[
+            { value: 'independent', icon: 'fa-user', color: '#16a34a', label: '독립수행', desc: '혼자 완성' },
+            { value: 'guided', icon: 'fa-hands-helping', color: '#2563eb', label: '지도수행', desc: '지도 후 완성' },
+            { value: 'supervised', icon: 'fa-eye', color: '#f97316', label: '감독수행', desc: '전면 감독 완성' },
+          ].map((p) => `
+            <label class="perf-btn-batch" style="cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 12px;border-radius:8px;border:2px solid #e5e7eb;background:#fff;flex:1;transition:all 0.15s">
+              <input type="radio" name="performance_type_batch" value="${p.value}" style="display:none">
+              <i class="fas ${p.icon}" style="font-size:18px;color:${p.color}"></i>
+              <span style="font-size:11px;font-weight:700;color:#1a2b45">${p.label}</span>
+              <span style="font-size:10px;color:#9aa4b2">${p.desc}</span>
+            </label>`).join('')}
+        </div>
+        <div id="perf-warn-batch" style="display:none;margin-top:8px;font-size:11px;color:#ef4444"><i class="fas fa-exclamation-circle"></i> 수행방식을 선택해주세요.</div>
+      </div>` : ''}
+      ${_approvalBatchCommentHtml()}`;
+    approveBtn.style.display = '';
+    rejectBtn.style.display = '';
+    approveBtn.innerHTML = needs2nd ? '<i class="fas fa-arrow-right"></i> 1차 승인' : '<i class="fas fa-check"></i> 승인';
+    rejectBtn.innerHTML = '<i class="fas fa-times"></i> 반려';
+    approveBtn.onclick = () => processApprovalBatch('approved');
+    rejectBtn.onclick = () => processApprovalBatch('rejected');
+    setTimeout(() => {
+      document.querySelectorAll('.perf-btn-batch').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.perf-btn-batch').forEach((b) => { b.style.border = '2px solid #e5e7eb'; b.style.background = '#fff'; });
+          btn.style.border = '2px solid var(--primary)';
+          btn.style.background = '#eff6ff';
+          const warn = document.getElementById('perf-warn-batch');
+          if (warn) warn.style.display = 'none';
+        });
+      });
+    }, 40);
+  } else if (is2nd) {
+    const requireQuality = _needsSecondApprovalQualitySafe(entry);
+    const isManagerDirect = entry.status === 'submitted';
+    const showMgrPerf = isManagerDirect && requireQuality && !isDailySheetEntry(entry);
+    _approvalBatchRole = 'second';
+    titleEl.textContent = '일괄기록 최종 승인 (2차)';
+    bodyEl.innerHTML = `${_approvalBatchMetaHtml(entry, atts, _approvalBatchDetails)}
+      ${showMgrPerf ? `
+      <div style="margin-bottom:14px;padding:14px 16px;background:#fff7ed;border-radius:10px;border:1px solid #fed7aa">
+        <div style="font-size:12px;font-weight:600;color:#9a3412;margin-bottom:10px"><i class="fas fa-user-check" style="color:#f97316"></i> 수행방식 확인 <span style="color:var(--danger)">*</span></div>
+        <div style="display:flex;gap:8px">
+          ${[
+            { value: 'independent', icon: 'fa-user', color: '#16a34a', label: '독립수행', desc: '혼자 완성' },
+            { value: 'guided', icon: 'fa-hands-helping', color: '#2563eb', label: '지도수행', desc: '지도 후 완성' },
+            { value: 'supervised', icon: 'fa-eye', color: '#f97316', label: '감독수행', desc: '전면 감독 완성' },
+          ].map((p) => `
+            <label class="perf-btn-batch" style="cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 12px;border-radius:8px;border:2px solid #e5e7eb;background:#fff;flex:1;transition:all 0.15s">
+              <input type="radio" name="performance_type_batch" value="${p.value}" style="display:none">
+              <i class="fas ${p.icon}" style="font-size:18px;color:${p.color}"></i>
+              <span style="font-size:11px;font-weight:700;color:#1a2b45">${p.label}</span>
+              <span style="font-size:10px;color:#9aa4b2">${p.desc}</span>
+            </label>`).join('')}
+        </div>
+      </div>` : ''}
+      ${requireQuality ? `
+      <div style="margin-bottom:14px;padding:14px 16px;background:#f8fafc;border-radius:10px;border:1px solid var(--border-light)">
+        <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:10px"><i class="fas fa-star" style="color:#f59e0b"></i> 내용 품질 평가 <span style="color:var(--danger)">*</span></div>
+        ${_buildRatingBtns('quality_rating_batch')}
+        <div id="quality-archive-notice-batch" style="display:none;margin-top:8px;font-size:11px;color:#15803d;background:#dcfce7;border-radius:6px;padding:5px 10px"><i class="fas fa-archive"></i> 충족 이상 평가 — 자료실 저장 권장</div>
+        <div id="competency-preview-batch" style="margin-top:8px;font-size:12px;color:#475569">품질 평가를 선택하면 전문성 별점이 계산됩니다.</div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px">
+          <input type="checkbox" id="archive-save-check-batch" style="width:15px;height:15px;accent-color:var(--primary);cursor:pointer">
+          <span style="font-size:12px;color:#334155">자료실에 저장</span>
+        </label>
+      </div>` : ''}
+      ${_approvalBatchCommentHtml()}`;
+    approveBtn.style.display = '';
+    rejectBtn.style.display = '';
+    approveBtn.innerHTML = '<i class="fas fa-check-double"></i> 최종 승인';
+    rejectBtn.innerHTML = '<i class="fas fa-times"></i> 반려';
+    approveBtn.onclick = () => processApprovalBatch('approved');
+    rejectBtn.onclick = () => processApprovalBatch('rejected');
+    setTimeout(() => {
+      const updatePreview = () => {
+        const qRating = document.querySelector('input[name="quality_rating_batch"]:checked')?.value || '';
+        if (!qRating) return;
+        const pType = showMgrPerf
+          ? (document.querySelector('input[name="performance_type_batch"]:checked')?.value || 'independent')
+          : (entry.performance_type || 'independent');
+        const preview = document.getElementById('competency-preview-batch');
+        const notice = document.getElementById('quality-archive-notice-batch');
+        const archiveCheck = document.getElementById('archive-save-check-batch');
+        const comp = calcCompetency(qRating, pType);
+        const starStr = '★'.repeat(comp.competency_stars) + '☆'.repeat(3 - comp.competency_stars);
+        if (preview) preview.innerHTML = `수행방식: ${PERF_LABEL[pType] || pType} × 품질: ${RATING_LABEL[qRating] || qRating} → <strong style="color:#f59e0b">${starStr}</strong> ${RATING_LABEL[comp.competency_rating] || ''}`;
+        if (archiveCheck) archiveCheck.checked = ARCHIVE_RATINGS.includes(qRating);
+        if (notice) notice.style.display = ARCHIVE_RATINGS.includes(qRating) ? '' : 'none';
+      };
+      document.querySelectorAll('.quality-btn[data-group="quality_rating_batch"]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.quality-btn[data-group="quality_rating_batch"]').forEach((b) => { b.style.border = '2px solid #e5e7eb'; b.style.background = '#fff'; });
+          btn.style.border = '2px solid var(--primary)';
+          btn.style.background = '#eff6ff';
+          updatePreview();
+        });
+      });
+      document.querySelectorAll('.perf-btn-batch').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.perf-btn-batch').forEach((b) => { b.style.border = '2px solid #e5e7eb'; b.style.background = '#fff'; });
+          btn.style.border = '2px solid var(--primary)';
+          btn.style.background = '#eff6ff';
+          updatePreview();
+        });
+      });
+    }, 40);
+  } else {
+    _approvalBatchRole = 'readonly';
+    titleEl.textContent = '일괄기록 상세보기';
+    const reviewerComment = String(entry.reviewer_comment || '').trim();
+    bodyEl.innerHTML = `${_approvalBatchMetaHtml(entry, atts, _approvalBatchDetails)}
+      ${reviewerComment ? `<div style="margin-top:8px;padding:10px 12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;font-size:12px;line-height:1.6"><strong>검토 의견:</strong><br>${Utils.escHtml(reviewerComment)}</div>` : ''}`;
+  }
+
+  openModal('approvalBatchModal');
+  if (focusReject) setTimeout(() => document.getElementById('approval-batch-comment')?.focus(), 100);
+}
+
+async function processApprovalBatch(decision) {
+  if (!_approvalTarget) return;
+  if (_approvalBatchRole === 'first') return processApprovalBatch1st(decision);
+  if (_approvalBatchRole === 'second') return processApprovalBatch2nd(decision);
+}
+
+async function processApprovalBatch1st(decision) {
+  if (!_approvalTarget) return;
+  const session = getSession();
+  const comment = document.getElementById('approval-batch-comment')?.value.trim() || '';
+  // 일괄기록은 1차 승인으로 종결 — 2차 승인 없음
+  if (decision === 'rejected' && !comment) { Toast.warning('반려 사유를 입력해주세요.'); return; }
+  const approveBtn = document.getElementById('approveBatchBtn');
+  const rejectBtn = document.getElementById('rejectBatchBtn');
+  const isApprove = decision !== 'rejected';
+  const nextStatus = isApprove ? 'approved' : 'rejected';
+  const restoreBtn = BtnLoading.start(isApprove ? approveBtn : rejectBtn, isApprove ? '승인 중...' : '반려 처리 중...');
+  const restoreOthers = BtnLoading.disableAll(isApprove ? rejectBtn : approveBtn);
+  try {
+    const patchData = isApprove
+      ? { status: 'approved', reviewer_comment: comment, reviewed_at: Date.now(), reviewer_id: session.id, reviewer_name: session.name || '' }
+      : { status: 'rejected', reviewer_comment: comment, reviewed_at: Date.now(), reviewer_id: session.id, reviewer_name: session.name || '' };
+    await API.patch('time_entries', _approvalTarget.id, patchData);
+    if (typeof createNotification === 'function') {
+      const summary = `[일괄기록] ${_approvalBatchDetails.length || 0}건`;
+      createNotification({
+        toUserId: _approvalTarget.user_id, toUserName: _approvalTarget.user_name, fromUserId: session.id, fromUserName: session.name,
+        type: isApprove ? 'approved' : 'rejected',
+        entryId: _approvalTarget.id, entrySummary: summary,
+        message: isApprove
+          ? `${session.name}님이 일괄기록 타임시트를 승인했습니다.`
+          : `${session.name}님이 일괄기록 타임시트를 반려했습니다.`,
+        targetMenu: 'my-entries',
+      });
+    }
+    restoreBtn(); restoreOthers();
+    closeApprovalBatchModal();
+    Cache.invalidate('time_entries_list');
+    Cache.invalidate('time_entries_badge_' + session.id);
+    Cache.invalidate('time_entries_badge_admin_sub');
+    Cache.invalidate('time_entries_badge_admin_pre');
+    Cache.invalidate('dash_time_entries');
+    window._dashNeedsRefresh = true;
+    await updateApprovalBadge(session, true);
+    loadApprovalBatchList();
+    Toast.success(isApprove ? '승인 완료' : '반려되었습니다.');
+  } catch (err) {
+    restoreBtn(); restoreOthers();
+    Toast.error('처리 실패: ' + (err?.message || ''));
+  }
+}
+
+async function processApprovalBatch2nd(decision) {
+  if (!_approvalTarget) return;
+  const session = getSession();
+  const comment = document.getElementById('approval-batch-comment')?.value.trim() || '';
+  if (decision === 'rejected' && !comment) { Toast.warning('반려 사유를 입력해주세요.'); return; }
+  const requireQuality = _needsSecondApprovalQualitySafe(_approvalTarget);
+  const isManagerDirect = _approvalTarget.status === 'submitted';
+  const qRating = document.querySelector('input[name="quality_rating_batch"]:checked')?.value || null;
+  const perfType = isManagerDirect
+    ? (document.querySelector('input[name="performance_type_batch"]:checked')?.value || (isDailySheetEntry(_approvalTarget) ? 'independent' : null))
+    : (_approvalTarget.performance_type || 'independent');
+  if (decision !== 'rejected' && requireQuality && !qRating) { Toast.warning('내용 품질 평가를 선택해야 최종 승인할 수 있습니다.'); return; }
+  if (decision !== 'rejected' && isManagerDirect && requireQuality && !perfType && !isDailySheetEntry(_approvalTarget)) { Toast.warning('수행방식을 선택해주세요.'); return; }
+  const approveBtn = document.getElementById('approveBatchBtn');
+  const rejectBtn = document.getElementById('rejectBatchBtn');
+  const isApprove = decision !== 'rejected';
+  const restoreBtn = BtnLoading.start(isApprove ? approveBtn : rejectBtn, isApprove ? '최종 승인 중...' : '반려 처리 중...');
+  const restoreOthers = BtnLoading.disableAll(isApprove ? rejectBtn : approveBtn);
+  try {
+    const patchData = { status: isApprove ? 'approved' : 'rejected', reviewer_id: session.id, reviewer_name: session.name || '', reviewer_comment: comment, reviewed_at: Date.now() };
+    if (isApprove) {
+      const qStars = qRating ? (RATING_STARS[qRating] || 0) : 0;
+      let competencyStars = 0;
+      let competencyRating = null;
+      if (qRating && perfType && requireQuality) {
+        const comp = calcCompetency(qRating, perfType);
+        competencyStars = comp.competency_stars;
+        competencyRating = comp.competency_rating;
+      }
+      Object.assign(patchData, {
+        is_archived: requireQuality ? !!document.getElementById('archive-save-check-batch')?.checked : false,
+        quality_rating: qRating,
+        quality_stars: qStars,
+        competency_rating: competencyRating,
+        competency_stars: competencyStars,
+        performance_type: perfType,
+      });
+      if (isManagerDirect) {
+        Object.assign(patchData, { pre_approver_id: session.id, pre_approver_name: session.name || '', pre_approved_at: Date.now() });
+      }
+    }
+    await API.patch('time_entries', _approvalTarget.id, patchData);
+    if (typeof createNotification === 'function') {
+      createNotification({
+        toUserId: _approvalTarget.user_id, toUserName: _approvalTarget.user_name, fromUserId: session.id, fromUserName: session.name,
+        type: isApprove ? 'approved' : 'rejected',
+        entryId: _approvalTarget.id, entrySummary: `[일괄기록] ${_approvalBatchDetails.length || 0}건`,
+        message: isApprove ? `${session.name}님이 일괄기록 타임시트를 최종 승인했습니다.` : `${session.name}님이 일괄기록 타임시트를 반려했습니다.`,
+        targetMenu: 'my-entries',
+      });
+    }
+    restoreBtn(); restoreOthers();
+    closeApprovalBatchModal();
+    Cache.invalidate('time_entries_list');
+    Cache.invalidate('time_entries_badge_' + session.id);
+    Cache.invalidate('time_entries_badge_admin_sub');
+    Cache.invalidate('time_entries_badge_admin_pre');
+    Cache.invalidate('dash_time_entries');
+    window._dashNeedsRefresh = true;
+    await updateApprovalBadge(session, true);
+    loadApprovalBatchList();
+    Toast.success(isApprove ? '최종 승인 완료' : '반려되었습니다.');
+  } catch (err) {
+    restoreBtn(); restoreOthers();
+    Toast.error('처리 실패: ' + (err?.message || ''));
+  }
 }
 
 // ══════════════════════════════════════════════
@@ -3151,6 +3861,8 @@ function resetApprovalModalState() {
   _approvalUseRich = false;
   _approvalQuill = null;
   _apvPendingDescHtml = '';
+  _approvalBatchDetails = [];
+  _approvalBatchRole = 'readonly';
 
   // 버튼 상태 복구
   const editBtn = document.getElementById('editEntryBtn');
@@ -3164,6 +3876,10 @@ function resetApprovalModalState() {
   if (rejectBtn) { rejectBtn.disabled = false; rejectBtn.innerHTML = '<i class="fas fa-times"></i> 반려'; }
   const approveBtn = document.getElementById('approveBtn');
   if (approveBtn) { approveBtn.disabled = false; approveBtn.innerHTML = '<i class="fas fa-check"></i> 승인'; }
+  const rejectBatchBtn = document.getElementById('rejectBatchBtn');
+  if (rejectBatchBtn) { rejectBatchBtn.disabled = false; rejectBatchBtn.innerHTML = '<i class="fas fa-times"></i> 반려'; }
+  const approveBatchBtn = document.getElementById('approveBatchBtn');
+  if (approveBatchBtn) { approveBatchBtn.disabled = false; approveBatchBtn.innerHTML = '<i class="fas fa-check"></i> 승인'; }
 
   // 수행내용 영역 복구
   const descView = document.getElementById('approval-desc-view');
@@ -3205,6 +3921,12 @@ function resetApprovalModalState() {
 function closeApprovalModal() {
   resetApprovalModalState();
   closeModal('approvalModal');
+  closeModal('approvalBatchModal');
+}
+
+function closeApprovalBatchModal() {
+  resetApprovalModalState();
+  closeModal('approvalBatchModal');
 }
 
 /* 자문분류 태그 상태 (편집 중) */

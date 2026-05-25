@@ -202,6 +202,12 @@ function _onUserRoleChange(roleValue) {
   // 사업부/본부는 항상 표시
 }
 
+// 하위 호환: 구버전 main.html에서 onchange="_onUserJobTitleChange(...)"
+// 를 호출해도 런타임 오류가 나지 않도록 no-op 핸들러를 유지한다.
+function _onUserJobTitleChange(_jobTitle) {
+  return;
+}
+
 // ─────────────────────────────────────────────
 // 입력 UI 전체 초기화 (모달 열 때)
 // ─────────────────────────────────────────────

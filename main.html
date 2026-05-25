@@ -28,7 +28,7 @@
   <script src="https://cdn.jsdelivr.net/npm/turndown/dist/turndown.js" defer></script>
   <!-- turndown-plugin-gfm: 테이블 등 GFM 확장 지원 -->
   <script src="https://cdn.jsdelivr.net/npm/turndown-plugin-gfm/dist/turndown-plugin-gfm.js" defer></script>
-  <link rel="stylesheet" href="css/style.css?v=20260518archiveContentFullModal1" />
+  <link rel="stylesheet" href="css/style.css?v=20260525mobileMenuFix1" />
   <!-- Chart.js: 대시보드/분석에서 사용 → defer로 DOM 파싱 차단 방지 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
   <!-- ★ 무거운 라이브러리는 필요한 시점에 동적으로 로드 (초기 blocking 제거) -->
@@ -675,8 +675,9 @@
             <div style="display:inline-flex;gap:6px">
               <button type="button" id="entry-daily-mode-hour-btn" class="btn btn-sm btn-outline" onclick="setDailyPeriodMode('by_hour')">시간단위</button>
               <button type="button" id="entry-daily-mode-day-btn" class="btn btn-sm btn-outline" onclick="setDailyPeriodMode('by_day_span')">일단위</button>
+              <button type="button" id="entry-daily-mode-batch-btn" class="btn btn-sm btn-outline" onclick="setDailyPeriodMode('by_batch')">일괄기록</button>
             </div>
-            <span style="font-size:11px;color:var(--text-muted);margin-left:4px">일단위는 기간 일수 × 8시간으로 자동 계산됩니다.</span>
+            <span id="entry-daily-mode-help" style="font-size:11px;color:var(--text-muted);margin-left:4px">일단위는 기간 일수 × 8시간으로 자동 계산됩니다.</span>
           </div>
 
           <!-- entry-2x2-grid: form 태그 없이 직접 배치.
@@ -688,7 +689,7 @@
                    └──────────────────────────────────────┘ -->
               <div class="entry-panel entry-panel-meta">
                 <div class="entry-panel-header">
-                  <i class="fas fa-clipboard-list"></i> ① 기본 정보
+                  <i class="fas fa-clipboard-list"></i> 기본 정보
                 </div>
                 <div class="entry-panel-body" style="gap:10px">
 
@@ -787,6 +788,7 @@
                       <select id="entry-daily-period-mode-select" class="ep-ctrl" style="margin-top:4px;max-width:100%;display:none" onchange="onDailyPeriodModeChange()">
                         <option value="by_hour">시간단위</option>
                         <option value="by_day_span">일단위</option>
+                        <option value="by_batch">일괄기록</option>
                       </select>
                     </div>
                     <div id="entry-hourly-mount-daily" style="margin-bottom:10px"></div>
@@ -804,6 +806,57 @@
                     </div>
                     <div id="entry-daily-period-hint" style="font-size:11px;color:var(--text-muted,#64748b);margin-top:6px;line-height:1.45">
                       <strong>일 단위</strong>는 기간 일수×8시간이 소요시간에 자동 반영됩니다(공휴일·주말은 빼지 않으니, 해당일이 끼이지 않게 기간을 나누어 주세요). <strong>시간 단위</strong>는 시간제와 같이 시작·종료 일시로 입력합니다. 제출 시 1·2차 승인 절차가 적용됩니다.
+                    </div>
+                  </div>
+
+                  <div id="entry-batch-mode-wrap" style="display:none;border:1px solid #dbeafe;background:#f8fbff;border-radius:10px;padding:10px;gap:8px;flex-direction:column">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+                      <div style="display:flex;align-items:center;gap:8px">
+                        <strong style="font-size:12px;color:#1d4ed8"><i class="fas fa-table"></i> 일괄기록</strong>
+                        <span style="font-size:11px;color:#64748b">비일반자문 업무를 행 단위로 입력하고 1건으로 승인요청합니다.</span>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:6px">
+                        <span id="entry-batch-autosave-state" style="font-size:11px;color:#64748b">초기화됨</span>
+                        <button type="button" class="btn btn-sm btn-outline" onclick="entryBatchAddRow()"><i class="fas fa-plus"></i> 행 추가</button>
+                        <button type="button" class="btn btn-sm btn-outline" onclick="entryBatchRestoreLocalDraft()"><i class="fas fa-history"></i> 복구</button>
+                      </div>
+                    </div>
+                    <div id="entry-batch-layout" style="display:grid;grid-template-columns:minmax(220px,270px) minmax(0,1fr);gap:10px;align-items:start">
+                      <div style="border:1px solid #dbeafe;border-radius:8px;background:#fff;overflow:hidden">
+                        <div style="padding:8px 10px;border-bottom:1px solid #e2e8f0;background:#f8fafc;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+                          <strong style="font-size:11px;color:#1e3a8a">시간표</strong>
+                          <input id="entry-batch-timeline-date" type="date" class="ep-ctrl" style="height:28px;font-size:11px;padding:0 6px;max-width:130px" onchange="entryBatchTimelineOnDateChange(this.value)" />
+                        </div>
+                        <div style="padding:8px 10px;background:#f8fafc;border-bottom:1px solid #eef2ff;font-size:11px;color:#475569;line-height:1.4">
+                          <span>타임라인은 확정된 업무 시간을 시각적으로 표시합니다. 시간 입력은 우측 행의 <strong>시작시간/소요시간</strong>에서 입력 후 <strong>확정</strong>을 누르세요.</span>
+                        </div>
+                        <div style="padding:6px 10px;background:#f8fafc;border-bottom:1px solid #eef2ff;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center">
+                          <span style="font-size:10px;color:#94a3b8;font-weight:600;white-space:nowrap">대분류 구분 :</span>
+                          <span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:#0f766e"><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:rgba(20,184,166,0.35);border:1px solid #2dd4bf"></span>일반통관업무</span>
+                          <span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:#1e40af"><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:rgba(37,99,235,0.30);border:1px solid #3b82f6"></span>프로젝트업무</span>
+                          <span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:#9d174d"><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:rgba(236,72,153,0.28);border:1px solid #f472b6"></span>기타 고객업무</span>
+                          <span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:#334155"><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:rgba(100,116,139,0.35);border:1px solid #94a3b8"></span>회사내부업무</span>
+                        </div>
+                        <div id="entry-batch-timeline-wrap" style="position:relative;height:420px;overflow:auto;background:#fff">
+                          <div id="entry-batch-timeline-grid"></div>
+                          <div id="entry-batch-timeline-hitbox" style="position:absolute;left:52px;right:8px;top:0;height:1440px;z-index:2;cursor:default"></div>
+                          <div id="entry-batch-timeline-blocks" style="position:absolute;left:52px;right:8px;top:0;pointer-events:none"></div>
+                          <div id="entry-batch-timeline-select" style="position:absolute;left:52px;right:8px;top:0;display:none;background:rgba(59,130,246,0.25);border:1px dashed #2563eb;border-radius:6px;pointer-events:none;z-index:3"></div>
+                        </div>
+                      </div>
+                      <div id="entry-batch-grid-wrap" style="overflow:auto;border:1px solid #e2e8f0;border-radius:8px;background:#fff;padding:8px">
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 4px 8px 4px;border-bottom:1px solid #f1f5f9;margin-bottom:8px">
+                          <strong style="font-size:12px;color:#0f172a">행 입력</strong>
+                          <span style="font-size:11px;color:#64748b">표 대신 카드형 입력으로 즉시 편집</span>
+                        </div>
+                        <div id="entry-batch-rows-body" style="display:flex;flex-direction:column;gap:8px">
+                          <div style="padding:12px;text-align:center;color:#64748b;font-size:12px">행 추가 버튼으로 업무를 입력하세요.</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+                      <span style="font-size:11px;color:#64748b">프로젝트업무는 프로젝트코드 필수, 일반통관업무는 고객사·업무팀 필수, 회사내부업무는 업무팀 입력 없음</span>
+                      <strong id="entry-batch-total-min" style="font-size:12px;color:#0f172a">합계 0분</strong>
                     </div>
                   </div>
 
@@ -873,7 +926,7 @@
                    └──────────────────────────────────────┘ -->
               <div class="entry-panel entry-panel-desc" style="min-height:420px">
                 <div class="entry-panel-header">
-                  <i class="fas fa-pen-nib"></i> ② 수행 내용 <span class="required">*</span>
+                  <i class="fas fa-pen-nib"></i> 수행 내용 <span class="required">*</span>
                   <span id="desc-char-count" style="margin-left:auto;font-size:11px;color:#9ca3af;font-weight:400">0자</span>
                 </div>
                 <!-- 패널 바디: flex column, padding 0 -->
@@ -927,7 +980,7 @@
                    이 패널은 form 태그 없는 그리드 안에 배치됨 -->
               <div class="entry-panel entry-panel-kw" id="kwSection" style="display:none">
                 <div class="entry-panel-header">
-                  <i class="fas fa-tags"></i> ③ 자문 분류 정보
+                  <i class="fas fa-tags"></i> 자문 분류 정보
                   <span style="background:#e0e7ff;color:#4338ca;border-radius:4px;padding:1px 8px;font-size:10px;font-weight:700;margin-left:6px">고객업무</span>
                 </div>
                 <div class="entry-panel-body">
@@ -1018,7 +1071,7 @@
                    └──────────────────────────────────────┘ -->
               <div class="entry-panel entry-panel-file" id="filePanel">
                 <div class="entry-panel-header">
-                  <i class="fas fa-paperclip"></i> ④ 자문 결과물
+                  <i class="fas fa-paperclip"></i> 자문 결과물
                   <span class="required" id="attachRequired" style="margin-left:4px;font-size:11px">*</span>
                   <span class="optional" id="attachOptional" style="display:none;margin-left:4px;font-size:11px">(선택)</span>
                 </div>
@@ -1173,6 +1226,13 @@
           <button type="button" class="approval-main-tab is-active" data-entry-view-mode="all" onclick="switchEntryRecordView('all')">전체 기록</button>
           <button type="button" class="approval-main-tab" data-entry-view-mode="consultant" onclick="switchEntryRecordView('consultant')">자문업무 상세보기</button>
         </div>
+        <div id="entry-sheet-mode-tabs" class="approval-main-tabs entry-record-tabs" style="margin-bottom:8px" role="tablist" aria-label="타임시트 구분 보기">
+          <button type="button" class="approval-main-tab is-active" data-entry-sheet-mode="normal" onclick="switchMyEntriesSheetMode('normal')">일반자문</button>
+          <button type="button" class="approval-main-tab" data-entry-sheet-mode="batch" onclick="switchMyEntriesSheetMode('batch')">일괄기록</button>
+        </div>
+        <div id="entry-sheet-mode-note" style="display:none;margin-bottom:12px;padding:8px 12px;border-radius:8px;background:#ecfeff;border:1px solid #a5f3fc;color:#0e7490;font-size:12px;font-weight:600">
+          일괄기록 탭에서는 행 단위 상세를 확인할 수 있는 항목만 표시됩니다.
+        </div>
         <div id="entry-view-mode-note" style="display:none;margin-bottom:12px;padding:8px 12px;border-radius:8px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;font-size:12px;font-weight:600">
           최종승인된 일반자문업무기록만 표시됩니다.
         </div>
@@ -1243,10 +1303,10 @@
                   <col style="width:36px">   <!-- No -->
                   <col class="my-entries-col-author" style="width:68px">  <!-- 컨설턴트 (admin만 표시) -->
                   <col style="width:80px">   <!-- 작성일자 -->
-                  <col style="width:120px">  <!-- 고객사 -->
+                  <col class="my-entries-col-client" style="width:120px">  <!-- 고객사 -->
                   <col class="my-entries-col-team" style="width:84px">  <!-- 업무팀 -->
-                  <col style="width:90px">   <!-- 대분류 -->
-                  <col style="width:100px">  <!-- 소분류 -->
+                  <col class="my-entries-col-category" style="width:90px">   <!-- 대분류 -->
+                  <col class="my-entries-col-subcat" style="width:100px">  <!-- 소분류 -->
                   <col class="my-entries-col-start" style="width:82px">   <!-- 시작일시 -->
                   <col class="my-entries-col-end" style="width:82px">   <!-- 종료일시 -->
                   <col class="my-entries-col-perf" style="width:82px;display:none">   <!-- 수행방식 -->
@@ -1299,7 +1359,10 @@
         </div>
         <div class="approval-main-tabs" id="approval-main-tabs" role="tablist" aria-label="승인 구분">
           <button type="button" role="tab" id="approval-tab-timesheet" class="approval-main-tab is-active" aria-selected="true" onclick="switchApprovalMainTab('timesheet')">
-            <i class="fas fa-clock" style="margin-right:6px"></i>타임시트 승인
+            <i class="fas fa-clock" style="margin-right:6px"></i>일반자문 승인
+          </button>
+          <button type="button" role="tab" id="approval-tab-batch" class="approval-main-tab" aria-selected="false" onclick="switchApprovalMainTab('batch')">
+            <i class="fas fa-list-alt" style="margin-right:6px"></i>일괄기록 승인
           </button>
           <button type="button" role="tab" id="approval-tab-project" class="approval-main-tab" aria-selected="false" onclick="switchApprovalMainTab('project')">
             <i class="fas fa-folder-open" style="margin-right:6px"></i>프로젝트 승인
@@ -1321,55 +1384,51 @@
               <button type="button" class="approval-quick-range-btn" data-approval-range="month">1개월</button>
             </div>
           </div>
-          <div class="approval-filter-row approval-filter-row-top">
-            <div class="filter-group filter-group-modern-compact" id="filter-approval-hq-group" style="display:none">
-              <span class="filter-label" id="filter-approval-hq-label">본부</span>
-              <select class="filter-control" id="filter-approval-hq" style="width:120px">
-                <option value="">전체 사업부</option>
-              </select>
-            </div>
-            <div class="filter-group filter-group-modern-compact" id="filter-approval-team-group" style="display:none">
-              <span class="filter-label" id="filter-approval-team-label">팀</span>
-              <select class="filter-control" id="filter-approval-team" style="width:110px">
-                <option value="">전체</option>
-              </select>
-            </div>
-            <div class="filter-group filter-group-modern-client" id="filter-approval-client-group">
-              <span class="filter-label">고객사</span>
-              <div id="filter-approval-client-wrap" class="cs-wrap" style="min-height:30px;width:220px"></div>
-            </div>
-            <div class="filter-group filter-group-modern-compact" id="filter-approval-staff-group">
-              <span class="filter-label">컨설턴트</span>
-              <input type="text" class="filter-control" id="filter-approval-staff" placeholder="이름 검색" style="width:100px" />
-            </div>
+          <div class="filter-group filter-group-modern-compact" id="filter-approval-hq-group" style="display:none">
+            <span class="filter-label" id="filter-approval-hq-label">본부</span>
+            <select class="filter-control" id="filter-approval-hq" style="width:120px">
+              <option value="">전체 사업부</option>
+            </select>
           </div>
-          <div class="approval-filter-row approval-filter-row-bottom">
-            <div class="filter-group filter-group-modern-compact" id="filter-approval-category-group">
-              <span class="filter-label">업무 대분류</span>
-              <select class="filter-control" id="filter-approval-category" style="width:120px">
-                <option value="">전체 대분류</option>
-              </select>
-            </div>
-            <div class="filter-group filter-group-modern-compact" id="filter-approval-subcategory-group">
-              <span class="filter-label">업무 소분류</span>
-              <select class="filter-control" id="filter-approval-subcategory" style="width:120px">
-                <option value="">전체 소분류</option>
-              </select>
-            </div>
-            <div class="filter-group filter-group-modern-compact" id="filter-approval-status-group">
-              <span class="filter-label">상태</span>
-              <select class="filter-control" id="filter-approval-status" style="width:110px" onchange="loadApprovalList()">
-                <option value="" selected>전체</option>
-                <option value="submitted">1차 검토 대기</option>
-                <option value="pre_approved">최종 승인 대기</option>
-                <option value="approved">최종 승인</option>
-                <option value="rejected">반려</option>
-              </select>
-            </div>
-            <div class="filter-actions" id="filter-approval-actions">
-              <button class="btn btn-primary btn-sm" onclick="loadApprovalList()"><i class="fas fa-search"></i> 조회</button>
-              <button class="btn btn-ghost btn-sm" onclick="resetApprovalFilter()" title="초기화"><i class="fas fa-redo"></i></button>
-            </div>
+          <div class="filter-group filter-group-modern-compact" id="filter-approval-team-group" style="display:none">
+            <span class="filter-label" id="filter-approval-team-label">팀</span>
+            <select class="filter-control" id="filter-approval-team" style="width:110px">
+              <option value="">전체</option>
+            </select>
+          </div>
+          <div class="filter-group filter-group-modern-client" id="filter-approval-client-group">
+            <span class="filter-label">고객사</span>
+            <div id="filter-approval-client-wrap" class="cs-wrap" style="min-height:30px;width:220px"></div>
+          </div>
+          <div class="filter-group filter-group-modern-compact" id="filter-approval-staff-group">
+            <span class="filter-label">컨설턴트</span>
+            <input type="text" class="filter-control" id="filter-approval-staff" placeholder="이름 검색" style="width:100%" />
+          </div>
+          <div class="filter-group filter-group-modern-compact" id="filter-approval-category-group">
+            <span class="filter-label">업무 대분류</span>
+            <select class="filter-control" id="filter-approval-category" style="width:100%">
+              <option value="">전체 대분류</option>
+            </select>
+          </div>
+          <div class="filter-group filter-group-modern-compact" id="filter-approval-subcategory-group">
+            <span class="filter-label">업무 소분류</span>
+            <select class="filter-control" id="filter-approval-subcategory" style="width:100%">
+              <option value="">전체 소분류</option>
+            </select>
+          </div>
+          <div class="filter-group filter-group-modern-compact" id="filter-approval-status-group">
+            <span class="filter-label">상태</span>
+            <select class="filter-control" id="filter-approval-status" style="width:100%" onchange="loadApprovalList()">
+              <option value="" selected>전체</option>
+              <option value="submitted">1차 검토 대기</option>
+              <option value="pre_approved">최종 승인 대기</option>
+              <option value="approved">최종 승인</option>
+              <option value="rejected">반려</option>
+            </select>
+          </div>
+          <div class="filter-actions" id="filter-approval-actions">
+            <button class="btn btn-primary btn-sm" onclick="loadApprovalList()"><i class="fas fa-search"></i> 조회</button>
+            <button class="btn btn-ghost btn-sm" onclick="resetApprovalFilter()" title="초기화"><i class="fas fa-redo"></i></button>
           </div>
         </div>
 
@@ -1421,6 +1480,77 @@
             <div id="approval-pagination"></div>
           </div>
         </div>
+        </div>
+
+        <!-- 일괄기록 승인 패널 -->
+        <div id="approval-panel-batch" style="display:none">
+          <div class="filter-bar filter-bar--batch">
+            <!-- 날짜 입력 -->
+            <input type="date" class="filter-control batch-filter-date" id="filter-approval-batch-date-from" />
+            <span class="batch-filter-sep">~</span>
+            <input type="date" class="filter-control batch-filter-date" id="filter-approval-batch-date-to" />
+            <!-- 빠른 기간 버튼 -->
+            <div class="batch-filter-quick">
+              <button type="button" class="approval-quick-range-btn" data-approval-batch-range="today">당일</button>
+              <button type="button" class="approval-quick-range-btn" data-approval-batch-range="yesterday">전일</button>
+              <button type="button" class="approval-quick-range-btn" data-approval-batch-range="week">1주</button>
+              <button type="button" class="approval-quick-range-btn" data-approval-batch-range="month">1개월</button>
+            </div>
+            <!-- 구분선 -->
+            <div class="batch-filter-divider"></div>
+            <!-- 이름 검색 -->
+            <input type="text" class="filter-control batch-filter-staff" id="filter-approval-batch-staff" placeholder="컨설턴트 이름 검색" />
+            <!-- 상태 -->
+            <select class="filter-control batch-filter-status" id="filter-approval-batch-status" onchange="loadApprovalBatchList()">
+              <option value="" selected>전체 상태</option>
+              <option value="submitted">1차 검토 대기</option>
+              <option value="pre_approved">최종 승인 대기</option>
+              <option value="approved">최종 승인</option>
+              <option value="rejected">반려</option>
+            </select>
+            <!-- 버튼 -->
+            <button class="btn btn-primary btn-sm" onclick="loadApprovalBatchList()"><i class="fas fa-search"></i> 조회</button>
+            <button class="btn btn-ghost btn-sm" onclick="resetApprovalBatchFilter()" title="초기화"><i class="fas fa-redo"></i></button>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h2>일괄기록 승인 현황</h2>
+              <div class="card-actions">
+                <span id="approval-batch-count-badge" style="font-size:12px;color:var(--text-muted);font-weight:400">0건 검토 대기</span>
+              </div>
+            </div>
+            <div class="card-body" style="padding:0">
+              <div class="table-wrapper" style="border:none;border-radius:0;overflow-x:auto">
+                <table class="data-table" id="approval-batch-list-table" style="width:100%;table-layout:fixed">
+                  <colgroup>
+                    <col style="width:44px">   <!-- No -->
+                    <col style="width:100px">  <!-- 작성일자 -->
+                    <col style="width:90px">   <!-- 컨설턴트 -->
+                    <col style="width:100px">  <!-- 소속 -->
+                    <col style="width:80px">   <!-- 업무시간 -->
+                    <col style="width:80px">   <!-- 상태 -->
+                    <col style="width:70px">   <!-- 상세보기 -->
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th style="text-align:center">No</th>
+                      <th>작성일자</th>
+                      <th>컨설턴트</th>
+                      <th>소속</th>
+                      <th style="text-align:center">업무시간</th>
+                      <th style="text-align:center">상태</th>
+                      <th style="text-align:center">상세보기</th>
+                    </tr>
+                  </thead>
+                  <tbody id="approval-batch-list-body">
+                    <tr><td colspan="7" class="table-empty"><i class="fas fa-inbox"></i><p>데이터가 없습니다.</p></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div id="approval-batch-pagination"></div>
+            </div>
+          </div>
         </div>
 
         <div id="approval-panel-project" style="display:none">
@@ -1476,7 +1606,8 @@
             <div class="mobile-approval-filters">
               <select id="mobile-approval-kind" class="form-control">
                 <option value="all">전체 구분</option>
-                <option value="timesheet">타임시트</option>
+                <option value="timesheet">일반자문</option>
+                <option value="batch">일괄기록</option>
                 <option value="project">프로젝트 등록</option>
               </select>
               <select id="mobile-approval-status" class="form-control">
@@ -4685,6 +4816,26 @@
   </div>
 </div>
 
+<!-- 승인/반려 모달 (일괄기록 전용) -->
+<div class="modal-overlay" id="approvalBatchModal">
+  <div class="modal" style="width:840px;max-width:96vw">
+    <div class="modal-header">
+      <h3 id="approvalBatchModalTitle">일괄기록 검토</h3>
+      <button class="btn-close" onclick="closeApprovalBatchModal()">×</button>
+    </div>
+    <div class="modal-body" id="approvalBatchModalBody" onkeydown="event.stopPropagation()"></div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-ghost" onclick="closeApprovalBatchModal()">취소</button>
+      <button type="button" class="btn btn-danger" id="rejectBatchBtn" onclick="processApprovalBatch('rejected')" style="display:none">
+        <i class="fas fa-times"></i> 반려
+      </button>
+      <button type="button" class="btn btn-success" id="approveBatchBtn" onclick="processApprovalBatch('approved')" style="display:none">
+        <i class="fas fa-check"></i> 승인
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- 프로젝트 승인 상세 모달 -->
 <div class="modal-overlay" id="projectApprovalModal">
   <div class="modal" style="width:760px;max-width:96vw">
@@ -5878,15 +6029,15 @@
 </div>
 
 <!-- JS 파일들 -->
-<script src="js/app.js?v=20260518refDataPolicyFallback1"></script>
+<script src="js/app.js?v=20260525ceoTimesheetFix1"></script>
 <script src="js/kw-example-maps.js?v=20260407a"></script>
 <script src="js/llm-proxy.js?v=20260409a"></script>
 <script src="js/notify.js?v=20260419invoiceDueRemind2"></script>
 <script src="js/dashboard.js?v=20260514dashboardPendingSync4"></script>
-<script src="js/entry.js?v=20260514entryPaginationCallbackFix1"></script>
+<script src="js/entry.js?v=20260525catColorsFix1"></script>
 <script src="js/daily-module.js?v=20260419dailyModePlan1"></script>
-<script src="js/approval.js?v=20260514mobileApprovalMvp1"></script>
-<script src="js/mobile-approval.js?v=20260514mobileApprovalMvp1"></script>
+<script src="js/approval.js?v=20260525batchApprovalTab10"></script>
+<script src="js/mobile-approval.js?v=20260525mobileApprovalBatch1"></script>
 <script src="js/analysis.js?v=20260514staffQuickRange1"></script>
 <script src="js/archive.js?v=20260518archiveContentFullModal1"></script>
 <script src="js/project-management.js?v=20260514pmProgressDownload1"></script>
