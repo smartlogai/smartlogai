@@ -17,6 +17,7 @@ let _approvalAllCsTeamNames = [];
 let _approvalDeptByCsTeam = {};
 let _approvalScopeUserIdSet = new Set();
 let _approvalListReqSeq = 0;
+let _approvalBatchReqSeq = 0;
 let _approvalListLoading = false;
 let _approvalMutationInFlight = false;
 let _approvalBatchDetails = [];
@@ -1727,6 +1728,7 @@ let _approvalBatchPage = 1;
 const APPROVAL_BATCH_PER_PAGE = 20;
 
 async function loadApprovalBatchList() {
+  const reqSeq = ++_approvalBatchReqSeq;
   const session = getSession();
   const dateFrom = (document.getElementById('filter-approval-batch-date-from') || {}).value || '';
   const dateTo   = (document.getElementById('filter-approval-batch-date-to') || {}).value || '';
@@ -1811,6 +1813,9 @@ async function loadApprovalBatchList() {
       return _apvSortTs(a) - _apvSortTs(b);
     });
 
+    // 오래된 요청 응답은 화면을 덮어쓰지 않음
+    if (reqSeq !== _approvalBatchReqSeq) return;
+
     // 배치 탭 카운트 배지
     const myId2 = String(session.id);
     const pendingScopedBatch = (await _scopeTimeEntriesForApproval(
@@ -1845,6 +1850,9 @@ async function loadApprovalBatchList() {
         batchBadge.textContent = '0건 검토 대기';
       }
     }
+
+    // 오래된 요청 응답은 화면을 덮어쓰지 않음
+    if (reqSeq !== _approvalBatchReqSeq) return;
 
     const start = (_approvalBatchPage - 1) * APPROVAL_BATCH_PER_PAGE;
     const paged = entries.slice(start, start + APPROVAL_BATCH_PER_PAGE);
@@ -2571,6 +2579,7 @@ async function openApprovalModal(entryId, focusReject = false) {
 
     const session = getSession ? getSession() : null;
     if (_approvalIsBatchEntry(entry)) {
+      const modalBodyEl = document.getElementById('approvalModalBody');
       if (modalBodyEl) modalBodyEl.innerHTML = '';
       await openApprovalBatchModal(entry, atts, session, focusReject);
       return;
