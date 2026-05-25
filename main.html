@@ -673,7 +673,7 @@
           <div id="entry-daily-mode-toggle" style="display:none;align-items:center;gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;margin-bottom:12px">
             <span style="font-size:12px;font-weight:600;color:#475569;white-space:nowrap">입력 방식</span>
             <div style="display:inline-flex;gap:6px">
-              <button type="button" id="entry-daily-mode-hour-btn" class="btn btn-sm btn-outline" onclick="setDailyPeriodMode('by_hour')">시간단위</button>
+              <button type="button" id="entry-daily-mode-hour-btn" class="btn btn-sm btn-outline" onclick="setDailyPeriodMode('by_hour')">개별기록</button>
               <button type="button" id="entry-daily-mode-day-btn" class="btn btn-sm btn-outline" onclick="setDailyPeriodMode('by_day_span')">일단위</button>
               <button type="button" id="entry-daily-mode-batch-btn" class="btn btn-sm btn-outline" onclick="setDailyPeriodMode('by_batch')">일괄기록</button>
             </div>
@@ -786,7 +786,7 @@
                     <div id="entry-daily-period-mode-wrap" style="margin-bottom:10px">
                       <label class="ep-label" for="entry-daily-period-mode-select">입력 방식</label>
                       <select id="entry-daily-period-mode-select" class="ep-ctrl" style="margin-top:4px;max-width:100%;display:none" onchange="onDailyPeriodModeChange()">
-                        <option value="by_hour">시간단위</option>
+                        <option value="by_hour">개별기록</option>
                         <option value="by_day_span">일단위</option>
                         <option value="by_batch">일괄기록</option>
                       </select>

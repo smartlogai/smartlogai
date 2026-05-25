@@ -920,7 +920,7 @@ function _syncDailyPeriodModeToggleUI() {
   if (helpEl) {
     helpEl.textContent = isDaily
       ? '일단위는 기간 일수 × 8시간으로 자동 계산됩니다.'
-      : '시간단위 또는 일괄기록 중 선택할 수 있습니다.';
+      : '개별기록 또는 일괄기록 중 선택할 수 있습니다.';
   }
   const mode = _entryEffectiveInputMode();
   const active = 'btn btn-sm btn-primary';
