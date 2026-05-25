@@ -168,6 +168,12 @@ const Auth = {
   /** 인건비 설정·매출 업로드 등 (기존 admin 전용 버튼 → 경영층으로 이전) */
   canManageLaborCostSettings: (s) => !!(s && (Auth.isDirector(s) || Auth.isTopMgr(s))),
 
+  /** 직원 고과 분석 탭: director + top_mgr + admin */
+  canViewStaffAnalysis: (s) => !!(s && (Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isAdmin(s))),
+
+  /** 프로젝트 수익 분석 탭: director + top_mgr + admin */
+  canViewProjectProfitAnalysis: (s) => !!(s && (Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isAdmin(s))),
+
   // ★ 승인자 지정 여부 (staff에만 의미 있음, manager 이상은 true 반환)
   hasApprover: (s) => {
     if (!s) return false;
@@ -229,6 +235,12 @@ const Auth = {
 
   // 소속 단위 열람: manager + director + top_mgr + admin
   canViewDeptScope: (s) => s && (Auth.isManager(s) || Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isAdmin(s)),
+
+  // 대시보드 전사 열람: admin + top_mgr
+  canViewDashboardAll: (s) => s && (Auth.isAdmin(s) || Auth.isTopMgr(s)),
+
+  // 대시보드 소속 열람 메뉴: manager + director + top_mgr + admin
+  canViewDashboardMenu: (s) => s && (Auth.isManager(s) || Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isAdmin(s)),
 
   // 마스터 관리 (조직구성·직원): admin만
   canManageMaster: (s) => s && Auth.isAdmin(s),
