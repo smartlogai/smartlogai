@@ -181,6 +181,12 @@ const Auth = {
   /** 인건비 설정·매출 업로드 등 (기존 admin 전용 버튼 → 경영층으로 이전) */
   canManageLaborCostSettings: (s) => !!(s && (Auth.isDirector(s) || Auth.isTopMgr(s))),
 
+  /** 직원 고과 분석 탭: director + top_mgr + admin */
+  canViewStaffAnalysis: (s) => !!(s && (Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isAdmin(s))),
+
+  /** 프로젝트 수익 분석 탭: director + top_mgr + admin */
+  canViewProjectProfitAnalysis: (s) => !!(s && (Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isAdmin(s))),
+
   // ★ 승인자 지정 여부 (staff에만 의미 있음, manager 이상은 true 반환)
   hasApprover: (s) => {
     if (!s) return false;
