@@ -5888,16 +5888,11 @@ function _entryApplySheetModeFilter(entries) {
 }
 
 function _entryApplySheetModeUi(canViewStaffRecords) {
-  const tabs = document.getElementById('entry-sheet-mode-tabs');
   const note = document.getElementById('entry-sheet-mode-note');
   const useConsultant = canViewStaffRecords && _entryRecordViewMode === 'consultant';
   if (useConsultant) _entrySheetMode = 'normal';
-  if (tabs) tabs.style.display = useConsultant ? 'none' : '';
   if (note) note.style.display = (!useConsultant && _entrySheetMode === 'batch') ? '' : 'none';
-  document.querySelectorAll('[data-entry-sheet-mode]').forEach((btn) => {
-    const mode = String(btn.getAttribute('data-entry-sheet-mode') || 'normal');
-    btn.classList.toggle('is-active', mode === _entrySheetMode);
-  });
+  _entrySyncMainTabsUi(canViewStaffRecords);
 }
 
 function _entryApplyRecordViewUi(canViewStaffRecords) {
@@ -5912,7 +5907,7 @@ function _entryApplyRecordViewUi(canViewStaffRecords) {
   const subcategoryGroup = document.getElementById('filter-entry-subcategory-group');
   const statusGroup = document.getElementById('filter-entry-status-group');
   const note = document.getElementById('entry-view-mode-note');
-  if (tabs) tabs.style.display = canViewStaffRecords ? '' : 'none';
+  if (tabs) tabs.style.display = '';
   const useConsultant = canViewStaffRecords && _entryRecordViewMode === 'consultant';
   if (staffGroup) staffGroup.style.display = canViewStaffRecords ? '' : 'none';
   if (deptGroup) deptGroup.style.display = useConsultant ? '' : 'none';
@@ -5924,10 +5919,7 @@ function _entryApplyRecordViewUi(canViewStaffRecords) {
   if (statusGroup) statusGroup.style.display = useConsultant ? 'none' : '';
   if (panel) panel.style.display = useConsultant ? '' : 'none';
   if (note) note.style.display = useConsultant ? '' : 'none';
-  document.querySelectorAll('[data-entry-view-mode]').forEach((btn) => {
-    const mode = String(btn.getAttribute('data-entry-view-mode') || 'all');
-    btn.classList.toggle('is-active', mode === _entryRecordViewMode);
-  });
+  _entrySyncMainTabsUi(canViewStaffRecords);
   _entryApplySheetModeUi(canViewStaffRecords);
   if (useConsultant) _entryRenderOrgFilterOptions();
   _entrySyncConsultantColumns(canViewStaffRecords);
@@ -6045,25 +6037,55 @@ function _entryCanReadMyEntriesMenu(session) {
   }
 }
 
-function switchEntryRecordView(mode) {
+function _entrySyncMainTabsUi(canViewStaffRecords) {
+  document.querySelectorAll('[data-entry-main-tab]').forEach((btn) => {
+    const mode = String(btn.getAttribute('data-entry-main-tab') || '').trim();
+    if (mode === 'consultant') {
+      btn.style.display = canViewStaffRecords ? '' : 'none';
+    }
+  });
+  const activeMode = (canViewStaffRecords && _entryRecordViewMode === 'consultant')
+    ? 'consultant'
+    : (_entrySheetMode === 'batch' ? 'batch' : 'individual');
+  document.querySelectorAll('[data-entry-main-tab]').forEach((btn) => {
+    const mode = String(btn.getAttribute('data-entry-main-tab') || '').trim();
+    btn.classList.toggle('is-active', mode === activeMode);
+  });
+}
+
+function switchMyEntriesMainTab(mode) {
   const session = getSession ? getSession() : null;
   const canViewStaffRecords = !!(session && (Auth.canViewAll(session) || Auth.canViewDeptScope(session) || _entryCanReadMyEntriesMenu(session)));
-  const next = String(mode || '').trim() === 'consultant' ? 'consultant' : 'all';
-  _entryRecordViewMode = canViewStaffRecords ? next : 'all';
+  const next = String(mode || '').trim();
+
+  if (next === 'consultant' && canViewStaffRecords) {
+    _entryRecordViewMode = 'consultant';
+    _entrySheetMode = 'normal';
+  } else if (next === 'batch') {
+    _entryRecordViewMode = 'all';
+    _entrySheetMode = 'batch';
+  } else {
+    _entryRecordViewMode = 'all';
+    _entrySheetMode = 'normal';
+  }
+
+  try { sessionStorage.setItem('my_entries_sheet_mode', _entrySheetMode); } catch (_) {}
   _entriesPage = 1;
   _entryApplyRecordViewUi(canViewStaffRecords);
+  _entryApplySheetModeUi(canViewStaffRecords);
+  _entrySyncMainTabsUi(canViewStaffRecords);
   _entryRenderConsultantSummary(_entryLastFilteredEntries, canViewStaffRecords);
   loadMyEntries();
 }
 
+function switchEntryRecordView(mode) {
+  const next = String(mode || '').trim() === 'consultant' ? 'consultant' : 'all';
+  if (next === 'consultant') return switchMyEntriesMainTab('consultant');
+  return switchMyEntriesMainTab(_entrySheetMode === 'batch' ? 'batch' : 'individual');
+}
+
 function switchMyEntriesSheetMode(mode) {
-  _entrySheetMode = String(mode || '').trim() === 'batch' ? 'batch' : 'normal';
-  try { sessionStorage.setItem('my_entries_sheet_mode', _entrySheetMode); } catch (_) {}
-  const session = getSession ? getSession() : null;
-  const canViewStaffRecords = !!(session && (Auth.canViewAll(session) || Auth.canViewDeptScope(session) || _entryCanReadMyEntriesMenu(session)));
-  _entriesPage = 1;
-  _entryApplySheetModeUi(canViewStaffRecords);
-  loadMyEntries();
+  return switchMyEntriesMainTab(String(mode || '').trim() === 'batch' ? 'batch' : 'individual');
 }
 
 function entryApplyConsultantFilter(name) {
