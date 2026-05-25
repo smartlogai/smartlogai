@@ -1809,6 +1809,7 @@ function navigateTo(page) {
     item.classList.toggle('active', item.dataset.page === page);
   });
   document.querySelector('.sidebar')?.classList.remove('open');
+  return page;
 }
 
 function toggleSidebar() {
