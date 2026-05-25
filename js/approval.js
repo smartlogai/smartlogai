@@ -123,20 +123,28 @@ function _approvalSetTabCountPartial(kind, count) {
 }
 
 function _approvalAutoActivateSinglePendingTab(split) {
-  const data = split || window.__approvalBadgeSplit || { timesheet: 0, project: 0 };
+  const data = split || window.__approvalBadgeSplit || { timesheet: 0, batch: 0, project: 0 };
   const ts = Number(data.timesheet) || 0;
+  const bt = Number(data.batch) || 0;
   const pj = Number(data.project) || 0;
+  const btBtn = document.getElementById('approval-tab-batch');
   const pjBtn = document.getElementById('approval-tab-project');
+  const btVisible = !!(btBtn && btBtn.style.display !== 'none');
   const pjVisible = !!(pjBtn && pjBtn.style.display !== 'none');
-  // 한쪽 탭에만 대기건이 있으면 해당 탭을 자동 활성화
-  if (pjVisible && ts === 0 && pj > 0 && _approvalMainTab !== 'project') {
-    _approvalSetMainTabVisual('project');
-    Promise.resolve().then(() => loadApprovalProjectList()).catch(() => {});
+
+  // 자동 전환은 "초기 진입 직후(기본 timesheet 상태)"에서만 수행.
+  // 사용자가 batch/project 탭을 직접 클릭한 이후에는 탭을 되돌리지 않는다.
+  if (_approvalMainTab !== 'timesheet') return;
+
+  // 한쪽 탭에만 대기건이 있으면 해당 탭 자동 활성화
+  if (btVisible && ts === 0 && bt > 0 && (!pjVisible || pj === 0)) {
+    _approvalSetMainTabVisual('batch');
+    Promise.resolve().then(() => loadApprovalBatchList()).catch(() => {});
     return;
   }
-  if (ts > 0 && pj === 0 && _approvalMainTab !== 'timesheet') {
-    _approvalSetMainTabVisual('timesheet');
-    Promise.resolve().then(() => loadApprovalList()).catch(() => {});
+  if (pjVisible && ts === 0 && pj > 0 && (!btVisible || bt === 0)) {
+    _approvalSetMainTabVisual('project');
+    Promise.resolve().then(() => loadApprovalProjectList()).catch(() => {});
   }
 }
 
