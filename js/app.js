@@ -255,6 +255,12 @@ const Auth = {
   // 소속 단위 열람: manager + director + top_mgr + admin
   canViewDeptScope: (s) => s && (Auth.isManager(s) || Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isAdmin(s)),
 
+  // 대시보드 전사 열람: admin + top_mgr + CEO
+  canViewDashboardAll: (s) => s && (Auth.isAdmin(s) || Auth.isTopMgr(s) || Auth.isCeo(s)),
+
+  // 대시보드 소속 열람 메뉴: manager + director + top_mgr + admin + CEO
+  canViewDashboardMenu: (s) => s && (Auth.isManager(s) || Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isAdmin(s) || Auth.isCeo(s)),
+
   // 마스터 관리 (조직구성·직원): admin만
   canManageMaster: (s) => s && Auth.isAdmin(s),
 
