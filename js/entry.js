@@ -6476,13 +6476,13 @@ async function loadMyEntries() {
           ? `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12.5px" title="${Utils.escHtml(e.client_name)}">${Utils.escHtml(e.client_name)}</span>`
           : `<span style="color:var(--text-muted);font-size:11px">내부</span>`;
 
-        // 업무팀
-        // 내부업무(고객사 없음)는 업무팀명이 비어있거나 '팀 선택'으로 저장된 케이스가 있어도 사용자에게는 '내부'로 통일 표기
-        const isInternalRow = !e.client_name;
-        const rawTeamName = String(e.team_name || '').trim();
-        const teamLabel = isInternalRow ? '내부' : (rawTeamName && rawTeamName !== '팀 선택' ? rawTeamName : '');
+        // 소속팀: 내부/외부 구분과 무관하게 작성자 소속(고객지원팀 우선)을 표시
+        const uid = String(e.user_id || '').trim();
+        const userMeta = (uid && _entryStaffUserById[uid]) || null;
+        const rawTeamName = String(userMeta?.teamName || e.cs_team_name || e.team_name || '').trim();
+        const teamLabel = (rawTeamName && rawTeamName !== '팀 선택') ? rawTeamName : '';
         const teamHtml = teamLabel
-          ? `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12px;color:${isInternalRow ? 'var(--text-muted)' : 'var(--text-secondary)'}" title="${Utils.escHtml(teamLabel)}">${Utils.escHtml(teamLabel)}</span>`
+          ? `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:12px;color:var(--text-secondary)" title="${Utils.escHtml(teamLabel)}">${Utils.escHtml(teamLabel)}</span>`
           : `<span style="color:var(--text-muted);font-size:11px">—</span>`;
 
         // 소분류: 프로젝트업무+프로젝트코드면 project_code_types 소분류명을 우선 표시
