@@ -5151,12 +5151,12 @@ async function _doSaveEntry(status, approverInfo, autoApprove = false) {
       const existing = await API.get('time_entries', _editEntryId);
       if (existing && existing.doc_no) {
         entryData.doc_no = existing.doc_no;
-        entry = await API.update('time_entries', effectiveEditId, entryData);
+        entry = await API.update('time_entries', _editEntryId, entryData);
       } else {
         // 문서번호는 "저장 시점" 기준으로 발번 (작성일자와 일치)
         entry = await _entryEnsureDocNoForSave(Date.now(), async (docNo) => {
           entryData.doc_no = docNo;
-          return await API.update('time_entries', effectiveEditId, entryData);
+          return await API.update('time_entries', _editEntryId, entryData);
         });
       }
     } else {
