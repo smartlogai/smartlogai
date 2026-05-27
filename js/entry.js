@@ -6470,11 +6470,6 @@ async function loadMyEntries() {
           btns.push(`<button style="${B}" onclick="openEntryDetailModal('${e.id}')" title="상세보기"><i class="fas fa-eye" style="font-size:13px;color:#94a3b8"></i></button>`);
         } else {
           btns.push(`<button style="${B}" onclick="openApprovalModal('${e.id}')" title="상세보기"><i class="fas fa-eye" style="font-size:13px;color:#94a3b8"></i></button>`);
-          if (canEdit && allowMutate)            btns.push(`<button style="${B}" onclick="editEntry('${e.id}')" title="수정"><i class="fas fa-edit" style="font-size:13px;color:#94a3b8"></i></button>`);
-          if (e.status==='draft' && allowMutate) btns.push(`<button style="${B}" onclick="submitSingleEntry('${e.id}')" title="제출"><i class="fas fa-paper-plane" style="font-size:13px;color:var(--primary)"></i></button>`);
-          if (canEdit && allowMutate)            btns.push(`<button style="${B}" onclick="deleteEntry('${e.id}')" title="삭제"><i class="fas fa-trash" style="font-size:13px;color:#f87171"></i></button>`);
-          if (e.status==='rejected' && e.reviewer_comment)
-            btns.push(`<button style="${B}" onclick="showRejectReason('${(e.reviewer_comment||'').replace(/'/g,"\\'")}') " title="반려사유"><i class="fas fa-comment-alt" style="font-size:13px;color:#e07b3a"></i></button>`);
         }
         // 고객사 (내부업무는 회색 '내부' 표시)
         const clientHtml = e.client_name
@@ -6969,6 +6964,17 @@ async function openEntryDetailModal(entryId) {
         }
       });
       footer.appendChild(submitBtn);
+    }
+
+    if (canEdit) {
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'btn btn-danger';
+      deleteBtn.innerHTML = '<i class="fas fa-trash"></i> 삭제';
+      deleteBtn.addEventListener('click', async () => {
+        const done = await deleteEntry(entry.id);
+        if (done) overlay.remove();
+      });
+      footer.appendChild(deleteBtn);
     }
 
     const closeOnlyBtn = document.createElement('button');
@@ -8096,11 +8102,30 @@ async function deleteEntry(id) {
   const ok = await Confirm.delete('업무 기록');
   if (!ok) return;
   try {
+    const session = getSession();
+    const entry = await API.get('time_entries', id).catch(() => null);
     await API.delete('time_entries', id);
+
+    // 일괄기록 임시저장 삭제 시 복구 캐시가 남아 재노출되지 않도록 정리
+    if (entry && String(entry.entry_mode || '').trim() === 'batch') {
+      const isDraftLike = String(entry.status || '').trim() === 'draft' || String(entry.status || '').trim() === 'rejected';
+      const isOwnEntry = String(entry.user_id || '') === String(session && session.id || '');
+      if (isDraftLike && isOwnEntry && session) {
+        const cachedServerDraftId = _entryBatchGetDraftServerId(session);
+        if (!cachedServerDraftId || cachedServerDraftId === String(id)) {
+          _entryBatchClearDraftServerId(session);
+          try { localStorage.removeItem(ENTRY_BATCH_LOCAL_KEY); } catch (_) {}
+        }
+      }
+    }
+
     Toast.success('삭제되었습니다.');
+    await updateApprovalBadge(getSession()).catch(() => {});
     loadMyEntries();
+    return true;
   } catch {
     Toast.error('삭제 실패');
+    return false;
   }
 }
 

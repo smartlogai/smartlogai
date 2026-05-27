@@ -2775,6 +2775,8 @@ function _openApprovalModal1st(entry, atts, session) {
 
   // 수정/승인/반려 버튼 표시
   document.getElementById('editEntryBtn').style.display  = '';
+  const deleteBtn = document.getElementById('approvalDeleteBtn');
+  if (deleteBtn) deleteBtn.style.display = 'none';
   document.getElementById('rejectBtn').style.display     = '';
   const approveBtn = document.getElementById('approveBtn');
   approveBtn.style.display  = '';
@@ -2905,6 +2907,8 @@ function _openApprovalModal2nd(entry, atts, session) {
   _renderApprovalDescView(entry);
 
   document.getElementById('editEntryBtn').style.display  = '';
+  const deleteBtn = document.getElementById('approvalDeleteBtn');
+  if (deleteBtn) deleteBtn.style.display = 'none';
   document.getElementById('rejectBtn').style.display     = '';
   const approveBtn = document.getElementById('approveBtn');
   approveBtn.style.display  = '';
@@ -2999,6 +3003,24 @@ function _openApprovalModalReadonly(entry, atts, session) {
   document.getElementById('editEntryBtn').style.display  = 'none';
   document.getElementById('rejectBtn').style.display     = 'none';
   document.getElementById('approveBtn').style.display    = 'none';
+  const deleteBtn = document.getElementById('approvalDeleteBtn');
+  if (deleteBtn) {
+    const isOwn = String(entry?.user_id || '') === String(session?.id || '');
+    const canDelete = isOwn && (entry?.status === 'draft' || entry?.status === 'rejected');
+    deleteBtn.style.display = canDelete ? '' : 'none';
+    deleteBtn.disabled = false;
+    deleteBtn.innerHTML = '<i class="fas fa-trash"></i> 삭제';
+    deleteBtn.onclick = async () => {
+      deleteBtn.disabled = true;
+      deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 삭제 중...';
+      const done = await _approvalDeleteCurrentEntry(entry.id);
+      if (done) closeApprovalModal();
+      else {
+        deleteBtn.disabled = false;
+        deleteBtn.innerHTML = '<i class="fas fa-trash"></i> 삭제';
+      }
+    };
+  }
 }
 
 async function openApprovalBatchModal(entry, atts, session, focusReject = false) {
@@ -3990,6 +4012,13 @@ function resetApprovalModalState() {
     editBtn.className = 'btn btn-outline';
     editBtn.onclick = toggleApprovalEdit;
   }
+  const deleteBtn = document.getElementById('approvalDeleteBtn');
+  if (deleteBtn) {
+    deleteBtn.style.display = 'none';
+    deleteBtn.disabled = false;
+    deleteBtn.innerHTML = '<i class="fas fa-trash"></i> 삭제';
+    deleteBtn.onclick = null;
+  }
   const rejectBtn = document.getElementById('rejectBtn');
   if (rejectBtn) { rejectBtn.disabled = false; rejectBtn.innerHTML = '<i class="fas fa-times"></i> 반려'; }
   const approveBtn = document.getElementById('approveBtn');
@@ -4045,6 +4074,26 @@ function closeApprovalModal() {
 function closeApprovalBatchModal() {
   resetApprovalModalState();
   closeModal('approvalBatchModal');
+}
+
+async function _approvalDeleteCurrentEntry(entryId) {
+  if (!entryId) return false;
+  try {
+    if (typeof deleteEntry === 'function') {
+      const done = await deleteEntry(entryId);
+      return !!done;
+    }
+    const ok = await Confirm.delete('업무 기록');
+    if (!ok) return false;
+    await API.delete('time_entries', entryId);
+    Toast.success('삭제되었습니다.');
+    await updateApprovalBadge(getSession()).catch(() => {});
+    if (typeof loadMyEntries === 'function') loadMyEntries();
+    return true;
+  } catch (e) {
+    Toast.error('삭제 실패' + (e?.message ? `: ${e.message}` : ''));
+    return false;
+  }
 }
 
 /* 자문분류 태그 상태 (편집 중) */

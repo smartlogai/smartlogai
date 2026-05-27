@@ -1026,6 +1026,15 @@ const Confirm = {
       const overlay = document.createElement('div');
       overlay.className = 'modal-overlay show';
       overlay.dataset.dynamic = 'true'; // 동적 생성 confirm 표시
+      // 기존 모달(상세/첨부/승인) 위에 항상 뜨도록 최상위 z-index를 동적으로 계산
+      let topZ = 500;
+      try {
+        document.querySelectorAll('.modal-overlay.show').forEach((el) => {
+          const z = Number(window.getComputedStyle(el).zIndex);
+          if (Number.isFinite(z)) topZ = Math.max(topZ, z);
+        });
+      } catch (_) {}
+      overlay.style.zIndex = String(topZ + 2);
       overlay.innerHTML = `
         <div class="confirm-dialog">
           <div class="confirm-icon">${icon}</div>
