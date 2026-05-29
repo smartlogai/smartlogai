@@ -2808,6 +2808,7 @@ function _openApprovalModal1st(entry, atts, session) {
 function _openApprovalModal2nd(entry, atts, session) {
   const isManagerDirect = entry.status === 'submitted'; // manager 본인 건
   const showMgrPerf = isManagerDirect && isClientConsultEntry(entry) && !isDailySheetEntry(entry); // 2차는 client만 — 방어적 분기
+  const showQuality = needsSecondApprovalQuality(entry);
   const perfType = entry.performance_type || '';
   const preApproverBanner = entry.pre_approver_name
     ? `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;
