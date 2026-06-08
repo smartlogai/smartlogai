@@ -2659,8 +2659,8 @@ function _approvalBatchMetaHtml(entry, atts, details) {
 // 승인 모달 열기 — 1차/2차 지정자 자동 분기
 // ══════════════════════════════════════════════
 async function openApprovalModal(entryId, focusReject = false) {
-  if (_approvalMutationInFlight || _approvalListLoading) {
-    Toast.info('승인 처리 후 목록을 갱신 중입니다. 잠시 후 다시 시도해주세요.');
+  if (_approvalMutationInFlight) {
+    Toast.info('승인 처리 중입니다. 잠시 후 다시 시도해주세요.');
     return;
   }
   try {
@@ -2698,15 +2698,16 @@ async function openApprovalModal(entryId, focusReject = false) {
     // ── 분기: 1차(manager) vs 2차(본부장/사업부장) vs 상세보기
     const is1st = _approvalCanDoFirst(session, entry);
     // director: pre_approved 건 또는 (1·2차 동일 지정된 submitted 직행 건)
+    const isDirect2nd = _approvalIsDirectSecondRoute(entry) && String(entry.reviewer2_id || '') === String(session.id);
     const is2nd = Auth.canApprove2nd(session) && needsSecondApproval(entry) && (
       (entry.status === 'pre_approved' && String(entry.reviewer2_id || '') === String(session.id)) ||
-      (_approvalIsDirectSecondRoute(entry) && String(entry.reviewer2_id || '') === String(session.id))
+      isDirect2nd
     );
 
-    if (is1st) {
-      _openApprovalModal1st(entry, atts, session);
-    } else if (is2nd) {
+    if (is2nd) {
       _openApprovalModal2nd(entry, atts, session);
+    } else if (is1st) {
+      _openApprovalModal1st(entry, atts, session);
     } else {
       _openApprovalModalReadonly(entry, atts, session);
     }
@@ -3310,6 +3311,9 @@ async function processApproval1st(decision) {
   if (!_approvalTarget) return;
   if (_approvalMutationInFlight) return;
   _approvalMutationInFlight = true;
+  let restoreBtn = () => {};
+  let restoreOthers = () => {};
+  try {
   const session = getSession();
   const comment = document.getElementById('approval-comment')?.value.trim() || '';
   const entry0 = _approvalTarget;
@@ -3337,10 +3341,9 @@ async function processApproval1st(decision) {
   const rejectBtn  = document.getElementById('rejectBtn');
   const isApprove  = decision === 'pre_approved';
   const approveLoading = isApprove ? (needs2nd ? '1차 승인 중...' : '승인 중...') : '반려 처리 중...';
-  const restoreBtn    = BtnLoading.start(isApprove ? approveBtn : rejectBtn, approveLoading);
-  const restoreOthers = BtnLoading.disableAll(isApprove ? rejectBtn : approveBtn);
+  restoreBtn    = BtnLoading.start(isApprove ? approveBtn : rejectBtn, approveLoading);
+  restoreOthers = BtnLoading.disableAll(isApprove ? rejectBtn : approveBtn);
 
-  try {
     let patchData;
     if (decision === 'rejected') {
       patchData = {
@@ -3462,6 +3465,9 @@ async function processApproval2nd(decision) {
   if (!_approvalTarget) return;
   if (_approvalMutationInFlight) return;
   _approvalMutationInFlight = true;
+  let restoreBtn = () => {};
+  let restoreOthers = () => {};
+  try {
   const session = getSession();
   const comment = document.getElementById('approval-comment')?.value.trim() || '';
 
@@ -3497,8 +3503,8 @@ async function processApproval2nd(decision) {
   const approveBtn = document.getElementById('approveBtn');
   const rejectBtn  = document.getElementById('rejectBtn');
   const isApprove  = decision === 'approved';
-  const restoreBtn    = BtnLoading.start(isApprove ? approveBtn : rejectBtn, isApprove ? '최종 승인 중...' : '반려 처리 중...');
-  const restoreOthers = BtnLoading.disableAll(isApprove ? rejectBtn : approveBtn);
+  restoreBtn    = BtnLoading.start(isApprove ? approveBtn : rejectBtn, isApprove ? '최종 승인 중...' : '반려 처리 중...');
+  restoreOthers = BtnLoading.disableAll(isApprove ? rejectBtn : approveBtn);
 
   const qualityStars = qRating ? (RATING_STARS[qRating] || 0) : 0;
   let competencyStars = 0, competencyRating = null;
@@ -3508,7 +3514,6 @@ async function processApproval2nd(decision) {
     competencyRating = comp.competency_rating;
   }
 
-  try {
     const patchData = {
       status:           decision,
       reviewer_id:      session.id,
