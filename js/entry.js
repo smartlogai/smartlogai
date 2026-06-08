@@ -4928,6 +4928,14 @@ async function saveEntry(status) {
       return;
     }
   }
+  const requiresSecondApprover =
+    status === 'submitted' &&
+    !isCcbAutoApprove &&
+    (catName.trim() === '일반자문업무' || catName.trim() === '프로젝트업무');
+  if (requiresSecondApprover && !String(approverInfo.reviewer2_id || '').trim()) {
+    Toast.warning('일반자문업무/프로젝트업무는 2차 승인자를 지정해야 제출할 수 있습니다. 직원 관리에서 2차 승인자를 지정하세요.');
+    return;
+  }
   if (entryFormSheetType() === 'daily' && entryDailyCategoryName() === '회사내부업무') {
     const memoEl = document.getElementById('entry-memo');
     const memoTxt = memoEl ? memoEl.value.trim() : '';

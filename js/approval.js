@@ -1147,8 +1147,7 @@ function _approvalCanDoFirst(session, entry) {
   const myId = String(session.id || '');
   if (!myId || entry.status !== 'submitted') return false;
   if (String(entry.approver_id || '') !== myId) return false;
-  // 1차 승인자(manager)만 1차 처리 가능
-  // Director(본부장)는 일반자문업무·프로젝트업무의 2차 승인만 담당
+  // 지정된 1차 승인자(팀장/본부장/사업부장)만 1차 처리 가능
   return Auth.canApprove1st(session);
 }
 
@@ -1567,16 +1566,19 @@ async function loadApprovalList() {
       for (const e of entries) await _apvAttachProjectSubcategory(e);
     }
 
-    // Director(본부장) 화면: 일반자문업무·프로젝트업무 2차 승인 대상만 노출
-    // - 2차 대상만(needsSecondApproval): pre_approved 대기 + 1차/2차 동일 지정(직행) submitted
-    // - 그 외(일반통관·내부업무·일괄기록 등)는 Director 목록에 표시하지 않음
+    // 본부장/사업부장 화면: 지정된 1차/2차 승인 대상만 노출
+    // - 1차 승인자로 지정된 submitted 건
+    // - 2차 승인자로 지정된 pre_approved 건
+    // - 1차/2차 동일 지정 직행 submitted 건
     if (Auth.canApprove2nd(session)) {
       const myId = String(session.id);
       entries = entries.filter(e => {
         const st = e.status;
-        if (!needsSecondApproval(e)) return false; // 일반자문업무·프로젝트업무만
-        if (st === 'submitted') return _approvalIsDirectSecondRoute(e) && String(e.reviewer2_id || '') === myId;
-        if (st === 'pre_approved') return String(e.reviewer2_id || '') === myId;
+        if (st === 'submitted') {
+          if (_approvalCanDoFirst(session, e)) return true;
+          return needsSecondApproval(e) && _approvalIsDirectSecondRoute(e) && String(e.reviewer2_id || '') === myId;
+        }
+        if (st === 'pre_approved') return needsSecondApproval(e) && String(e.reviewer2_id || '') === myId;
         if (st === 'rejected') return String(e.reviewer_id || '') === myId;
         if (st === 'approved') return String(e.reviewer_id || '') === myId;
         return false;
@@ -1594,7 +1596,7 @@ async function loadApprovalList() {
       else ts = new Date(raw).getTime();
       return isNaN(ts) ? 0 : ts;
     };
-    // 1차 승인자(manager)·Admin 목록: (1)반려 (2)1차검토중 (3)2차검토중 (4)최종승인 (5)기타 → 1~3·5는 그룹 내 과거→최신, approved만 최신→과거
+    // 1차 승인자·Admin 목록: (1)반려 (2)1차검토중 (3)2차검토중 (4)최종승인 (5)기타 → 1~3·5는 그룹 내 과거→최신, approved만 최신→과거
     const _apv1stStatusRank = (st) => {
       if (st === 'rejected') return 0;
       if (st === 'submitted') return 1;
@@ -1661,17 +1663,22 @@ async function loadApprovalList() {
     const pendingScopedNonBatch = pendingAllScoped.filter(e => !_approvalIsBatchEntry(e));
     if (Auth.isAdmin(session2)) {
       waitCount = pendingScopedNonBatch.length;
-    } else if (Auth.canApprove1st(session2)) {
-      waitCount = pendingScopedNonBatch.filter(e =>
-        (e.status === 'submitted' || e.status === 'pre_approved') &&
-        (String(e.approver_id) === myId2 || String(e.pre_approver_id) === myId2)
-      ).length;
-    } else if (Auth.canApprove2nd(session2)) {
-      waitCount = pendingScopedNonBatch.filter(e =>
-        (e.status === 'pre_approved' && needsSecondApproval(e) && String(e.reviewer2_id || '') === myId2) ||
-        (e.status === 'submitted' && !needsSecondApproval(e) && String(e.approver_id || '') === myId2) ||
-        (_approvalIsDirectSecondRoute(e) && String(e.reviewer2_id || '') === myId2)
-      ).length;
+    } else if (Auth.canApprove1st(session2) || Auth.canApprove2nd(session2)) {
+      const pendingIdSet = new Set();
+      if (Auth.canApprove1st(session2)) {
+        pendingScopedNonBatch
+          .filter(e => e.status === 'submitted' && String(e.approver_id || '') === myId2)
+          .forEach(e => { if (e.id) pendingIdSet.add(String(e.id)); });
+      }
+      if (Auth.canApprove2nd(session2)) {
+        pendingScopedNonBatch
+          .filter(e =>
+            (e.status === 'pre_approved' && needsSecondApproval(e) && String(e.reviewer2_id || '') === myId2) ||
+            (_approvalIsDirectSecondRoute(e) && String(e.reviewer2_id || '') === myId2)
+          )
+          .forEach(e => { if (e.id) pendingIdSet.add(String(e.id)); });
+      }
+      waitCount = pendingIdSet.size;
     } else {
       waitCount = pendingScopedNonBatch.filter(e =>
         (e.status === 'submitted' || e.status === 'pre_approved') &&
@@ -2649,7 +2656,7 @@ function _approvalBatchMetaHtml(entry, atts, details) {
 }
 
 // ══════════════════════════════════════════════
-// 승인 모달 열기 — 1차(manager) / 2차(director) 자동 분기
+// 승인 모달 열기 — 1차/2차 지정자 자동 분기
 // ══════════════════════════════════════════════
 async function openApprovalModal(entryId, focusReject = false) {
   if (_approvalMutationInFlight || _approvalListLoading) {
@@ -2726,7 +2733,7 @@ async function openApprovalModal(entryId, focusReject = false) {
   }
 }
 
-// ── 1차 승인 모달 (manager용) ────────────────────────────────
+// ── 1차 승인 모달 ────────────────────────────────
 function _openApprovalModal1st(entry, atts, session) {
   const showPerf = isClientConsultEntry(entry) && !isDailySheetEntry(entry);
   const needs2ndClient = isClientConsultEntry(entry)
@@ -2804,7 +2811,7 @@ function _openApprovalModal1st(entry, atts, session) {
   }
 }
 
-// ── 2차 승인 모달 (director용) ────────────────────────────────
+// ── 2차 승인 모달 ────────────────────────────────
 function _openApprovalModal2nd(entry, atts, session) {
   const isManagerDirect = entry.status === 'submitted'; // manager 본인 건
   const showMgrPerf = isManagerDirect && isClientConsultEntry(entry) && !isDailySheetEntry(entry); // 2차는 client만 — 방어적 분기

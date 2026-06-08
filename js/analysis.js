@@ -1190,6 +1190,7 @@ async function loadStaffAnalysis() {
     const adjustedBizDays = Math.max(0, effectiveBizDays - leaveMonths);
 
     const userMetaById = new Map(targetUsersForWorklog.map((u) => [String(u.id || ''), u]));
+    const userProfileById = new Map(safeUsers.map((u) => [String(u.id || ''), u]));
     const grouped = {};
     const scopeLabel = (u, uid, fallbackName = '') => {
       if (_staffWorklogScope === 'dept') return _analysisUserDept(u) || '미지정 사업부';
@@ -1206,7 +1207,9 @@ async function loadStaffAnalysis() {
     });
     (filteredEntries || []).forEach((e) => {
       const uid = String(e.user_id || '').trim();
-      const u = userMetaById.get(uid) || null;
+      // 비활성/퇴사자 등 기록률 "대상자" 목록에서 제외된 사용자라도,
+      // 과거 승인 기록은 사용자 프로필의 당시 소속팀으로 집계한다.
+      const u = userMetaById.get(uid) || userProfileById.get(uid) || null;
       const label = scopeLabel(u, uid, String(e.user_name || '').trim());
       if (!grouped[label]) grouped[label] = { label, userIds: new Set(), loggedMin: 0 };
       if (uid) grouped[label].userIds.add(uid);

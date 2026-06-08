@@ -517,11 +517,11 @@ const _LAZY_SCRIPTS = {
   'master-org'        : 'js/master.js?v=20260419clientApproverRouting1',
   'master-departments': 'js/master.js?v=20260419clientApproverRouting1',
   'master-csteams'    : 'js/master.js?v=20260419clientApproverRouting1',
-  'users'             : 'js/users.js?v=20260512reviewer2TopMgr1',
+  'users'             : 'js/users.js?v=20260608flexApproverPolicy1',
   'permission-management': 'js/permission-management.js?v=20260501permSystemAdminAll1',
   'project-register'  : 'js/project-register.js?v=20260514projRegEditGuard1',
   'project-management': 'js/project-register.js?v=20260514projRegEditGuard1',
-  'helpdesk'          : 'js/helpdesk.js?v=20260515helpdeskScopeAll1',
+  'helpdesk'          : 'js/helpdesk.js?v=20260604helpdeskRlsHeaders1',
 };
 const _lazyLoaded = {};  // 이미 로드된 파일 추적
 

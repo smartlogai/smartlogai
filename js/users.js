@@ -575,17 +575,20 @@ async function loadUsers() {
 }
 
 // ─────────────────────────────────────────────
-// 1차 승인자 드롭다운 채우기 — staff 전용
-// CCB 소속은 Manager + Director 선택 가능
+// 1차 승인자 드롭다운 채우기 — 팀장/본부장/사업부장 자유 지정
 // ─────────────────────────────────────────────
 async function fillApproverSelect(excludeUserId = '', selectedApproverId = '', targetDeptName = '') {
   const el = document.getElementById('user-approver-input');
   if (!el) return;
 
   const users = await Master.users();
-  const isCcb = String(targetDeptName || '').trim().toUpperCase().includes('CCB');
+  const roleLabel = (role) => {
+    if (role === 'top_mgr') return '사업부장';
+    if (role === 'director') return '본부장';
+    return '팀장';
+  };
   const approvers = users.filter(u =>
-    (u.role === 'manager' || (isCcb && u.role === 'director')) &&
+    (u.role === 'manager' || u.role === 'director' || u.role === 'top_mgr') &&
     u.is_active !== false &&
     u.id !== excludeUserId
   );
@@ -594,7 +597,7 @@ async function fillApproverSelect(excludeUserId = '', selectedApproverId = '', t
   approvers.forEach(u => {
     const opt = document.createElement('option');
     opt.value = u.id;
-    opt.textContent = `${u.name} (${u.role === 'director' ? '본부장' : '팀장'})`;
+    opt.textContent = `${u.name} (${roleLabel(u.role)})`;
     opt.dataset.name = u.name;
     if (u.id === selectedApproverId) opt.selected = true;
     el.appendChild(opt);

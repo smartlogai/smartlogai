@@ -248,10 +248,10 @@ const Auth = {
   },
 
   // ── 승인 권한 분리 ──────────────────────────────────────
-  // 1차 승인: manager (수행방식 확인 + 형식 검증)
-  canApprove1st: (s) => s && Auth.isManager(s),
-  // 2차 최종 승인: director (품질평가 + 전문성 + DB저장)
-  canApprove2nd: (s) => s && Auth.isDirector(s),
+  // 1차 승인: 지정된 팀장/본부장/사업부장 (수행방식 확인 + 형식 검증)
+  canApprove1st: (s) => s && (Auth.isManager(s) || Auth.isDirector(s) || Auth.isTopMgr(s)),
+  // 2차 최종 승인: 지정된 본부장/사업부장 (품질평가 + 전문성 + DB저장)
+  canApprove2nd: (s) => s && (Auth.isDirector(s) || Auth.isTopMgr(s)),
   // 하위 호환: 기존 canApprove = 1차 승인 권한과 동일
   canApprove: (s) => s && Auth.isManager(s),
 
@@ -477,11 +477,21 @@ const API = {
 
   // 공통 헤더
   _headers() {
-    return {
+    const session = (typeof Session !== 'undefined' && Session.get) ? Session.get() : null;
+    const userId = String(session && (session.id || session.user_id) || '').trim();
+    const userRole = String(session && session.role || '').trim();
+    const userEmail = String(session && session.email || '').trim();
+    const headers = {
       'Content-Type': 'application/json',
       'apikey': SUPABASE_KEY,
       'Authorization': `Bearer ${SUPABASE_KEY}`,
       'Prefer': 'return=representation',
+    };
+    if (userId) headers['x-app-user-id'] = userId;
+    if (userRole) headers['x-app-user-role'] = userRole;
+    if (userEmail) headers['x-app-user-email'] = userEmail;
+    return {
+      ...headers,
     };
   },
 
@@ -2254,41 +2264,31 @@ async function updateApprovalBadge(session, force = false) {
       return { data: await API.listAllPages('time_entries', { limit: 400, maxPages: 60, sort: 'updated_at' }) };
     }, 120000);
     if (r && r.data) {
-      let tsCount = 0;
+      const pendingIds = new Set();
       let batchCount = 0;
       if (Auth.canApprove1st(session)) {
-        const mineSubmitted = r.data.filter(e =>
+        r.data.filter(e =>
           e.status === 'submitted' && String(e.approver_id) === String(session.id)
-        );
-        tsCount = mineSubmitted.filter(e => String(e.entry_mode || '') !== 'batch').length;
-        batchCount = mineSubmitted.filter(e => String(e.entry_mode || '') === 'batch').length;
-      } else if (Auth.canApprove2nd(session)) {
-        const allUsers = await Master.users();
-        const scopeIds = new Set(allUsers.filter(u => Auth.scopeMatch(session, u)).map(u => String(u.id)));
-        const preApproved = r.data.filter(e =>
-          e.status === 'pre_approved' && scopeIds.has(String(e.user_id)) && _needsSecondApprovalByCategory(e)
-        ).length;
-        const directSecond = r.data.filter(e =>
+        ).forEach((e) => {
+          if (String(e.entry_mode || '') === 'batch') batchCount += 1;
+          else if (e.id) pendingIds.add(String(e.id));
+        });
+      }
+      if (Auth.canApprove2nd(session)) {
+        r.data.filter(e =>
+          e.status === 'pre_approved' &&
+          _needsSecondApprovalByCategory(e) &&
+          String(e.reviewer2_id || '') === String(session.id)
+        ).forEach((e) => { if (e.id) pendingIds.add(String(e.id)); });
+        r.data.filter(e =>
           e.status === 'submitted' &&
           _needsSecondApprovalByCategory(e) &&
           String(e.approver_id || '') &&
           String(e.approver_id || '') === String(e.reviewer2_id || '') &&
           String(e.reviewer2_id || '') === String(session.id)
-        ).length;
-        // Director(본부장) 배지:
-        // - 개별기록(일반자문/프로젝트업무) 2차 대기 = preApproved + directSecond
-        // - 일괄기록 1차 대기 = batchPending
-        const batchPending = r.data.filter(e =>
-          e.status === 'submitted' &&
-          String(e.entry_mode || '') === 'batch' &&
-          String(e.approver_id) === String(session.id)
-        ).length;
-        tsCount = preApproved + directSecond;
-        batchCount = batchPending;
-      } else {
-        tsCount = 0;
-        batchCount = 0;
+        ).forEach((e) => { if (e.id) pendingIds.add(String(e.id)); });
       }
+      const tsCount = pendingIds.size;
       const pjCount = await _countProjectApprovalBadge(session);
       const count = tsCount + batchCount + pjCount;
       window.__approvalBadgeSplit = { timesheet: tsCount, batch: batchCount, project: pjCount, total: count };

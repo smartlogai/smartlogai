@@ -5724,8 +5724,8 @@
           <label class="form-label">역할 <span class="required">*</span></label>
           <select class="form-control" id="user-role-input" onchange="_onUserRoleChange(this.value)">
             <option value="staff">담당</option>
-            <option value="manager">팀장 (1차 승인)</option>
-            <option value="director">본부장 (2차 승인)</option>
+            <option value="manager">팀장</option>
+            <option value="director">본부장</option>
             <option value="top_mgr">Top Mgr (사업부장·대표·경영지원)</option>
             <option value="admin">Admin (시스템 관리자)</option>
           </select>
@@ -5798,7 +5798,7 @@
         <!-- 승인자: staff일 때만 표시 -->
         <div class="form-group" style="grid-column:1/-1" id="approver-select-wrap">
           <label class="form-label">
-            1차 승인자 <small style="font-weight:400;color:var(--text-muted)">(기본: 고객지원팀장 · CCB는 본부장 지정 가능)</small>
+            1차 승인자 <small style="font-weight:400;color:var(--text-muted)">(팀장·본부장·사업부장 지정 가능)</small>
           </label>
           <select class="form-control" id="user-approver-input">
             <option value="">1차 승인자 선택 (미지정)</option>
@@ -5808,7 +5808,7 @@
         <!-- 2차 승인자: staff/manager 모두 표시 -->
         <div class="form-group" style="grid-column:1/-1" id="reviewer2-select-wrap">
           <label class="form-label">
-            2차 승인자 <small style="font-weight:400;color:var(--text-muted)">(본부장)</small>
+            2차 승인자 <small style="font-weight:400;color:var(--text-muted)">(본부장·사업부장 지정 가능)</small>
           </label>
           <select class="form-control" id="user-reviewer2-input">
             <option value="">2차 승인자 선택 (미지정)</option>
@@ -6029,16 +6029,16 @@
 </div>
 
 <!-- JS 파일들 -->
-<script src="js/app.js?v=20260525runtimeEmergency2"></script>
+<script src="js/app.js?v=20260608flexApproverPolicy1"></script>
 <script src="js/kw-example-maps.js?v=20260407a"></script>
 <script src="js/llm-proxy.js?v=20260409a"></script>
 <script src="js/notify.js?v=20260419invoiceDueRemind2"></script>
 <script src="js/dashboard.js?v=20260514dashboardPendingSync4"></script>
-<script src="js/entry.js?v=20260525catColorsFix1"></script>
+<script src="js/entry.js?v=20260608flexApproverPolicy1"></script>
 <script src="js/daily-module.js?v=20260419dailyModePlan1"></script>
-<script src="js/approval.js?v=20260525batchDetailAndCountFix1"></script>
+<script src="js/approval.js?v=20260608flexApproverPolicy1"></script>
 <script src="js/mobile-approval.js?v=20260525mobileApprovalBatch1"></script>
-<script src="js/analysis.js?v=20260514staffQuickRange1"></script>
+<script src="js/analysis.js?v=20260608inactiveUserTeamMap1"></script>
 <script src="js/archive.js?v=20260518archiveContentFullModal1"></script>
 <script src="js/project-management.js?v=20260514pmProgressDownload1"></script>
 <script src="js/project-dashboard-v2.js?v=20260514excludeInactiveUsers1"></script>
