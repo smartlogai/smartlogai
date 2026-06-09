@@ -19,29 +19,7 @@ alter table public.work_subcategories
   add column if not exists is_active_for_entry boolean not null default true;
 
 -- 1) 신규 소분류 목록(이미지 기준)
-drop table if exists tmp_new_subcategories;
-create temporary table tmp_new_subcategories (
-  sub_category_name text primary key,
-  sort_order int not null
-) on commit drop;
-
-insert into tmp_new_subcategories (sub_category_name, sort_order) values
-  ('고객정기레포트', 10),
-  ('Master data 관리', 20),
-  ('가격신고 및 과세자료 검토', 30),
-  ('과세가격 검토', 40),
-  ('관세감면 검토', 50),
-  ('확정가격신고', 60),
-  ('품목 · 세율 검토', 70),
-  ('규제 · 요건 검토', 80),
-  ('신고정정(보정, 수정, 경정청구)', 90),
-  ('FTA 검토', 100),
-  ('특혜 원산지 증명서 검토', 110),
-  ('원산지 표시(대외무역법)', 120),
-  ('관세환급 검토', 130),
-  ('보세화물 검토', 140),
-  ('신규거래 검토', 150),
-  ('기타', 160);
+--    주의: SQL Editor에서 문장 단위 실행해도 동작하도록 임시테이블 대신 CTE 사용
 
 -- 2) 대상 대분류(category_id) 확인
 --    기본값: 일반통관업무
@@ -67,13 +45,32 @@ insert into public.work_subcategories (
   sort_order,
   is_active_for_entry
 )
+with new_subcategories(sub_category_name, sort_order) as (
+  values
+    ('고객정기레포트', 10),
+    ('Master data 관리', 20),
+    ('가격신고 및 과세자료 검토', 30),
+    ('과세가격 검토', 40),
+    ('관세감면 검토', 50),
+    ('확정가격신고', 60),
+    ('품목 · 세율 검토', 70),
+    ('규제 · 요건 검토', 80),
+    ('신고정정(보정, 수정, 경정청구)', 90),
+    ('FTA 검토', 100),
+    ('특혜 원산지 증명서 검토', 110),
+    ('원산지 표시(대외무역법)', 120),
+    ('관세환급 검토', 130),
+    ('보세화물 검토', 140),
+    ('신규거래 검토', 150),
+    ('기타', 160)
+)
 select
   gen_random_uuid(),
   c.id,
   n.sub_category_name,
   n.sort_order,
   true
-from tmp_new_subcategories n
+from new_subcategories n
 cross join (
   select id
   from public.work_categories
@@ -93,7 +90,25 @@ update public.work_subcategories s
 set
   sort_order = n.sort_order,
   is_active_for_entry = true
-from tmp_new_subcategories n
+from (
+  values
+    ('고객정기레포트', 10),
+    ('Master data 관리', 20),
+    ('가격신고 및 과세자료 검토', 30),
+    ('과세가격 검토', 40),
+    ('관세감면 검토', 50),
+    ('확정가격신고', 60),
+    ('품목 · 세율 검토', 70),
+    ('규제 · 요건 검토', 80),
+    ('신고정정(보정, 수정, 경정청구)', 90),
+    ('FTA 검토', 100),
+    ('특혜 원산지 증명서 검토', 110),
+    ('원산지 표시(대외무역법)', 120),
+    ('관세환급 검토', 130),
+    ('보세화물 검토', 140),
+    ('신규거래 검토', 150),
+    ('기타', 160)
+) as n(sub_category_name, sort_order)
 join (
   select id
   from public.work_categories
@@ -117,7 +132,25 @@ where s.category_id = (
   )
   and not exists (
     select 1
-    from tmp_new_subcategories n
+    from (
+      values
+        ('고객정기레포트'),
+        ('Master data 관리'),
+        ('가격신고 및 과세자료 검토'),
+        ('과세가격 검토'),
+        ('관세감면 검토'),
+        ('확정가격신고'),
+        ('품목 · 세율 검토'),
+        ('규제 · 요건 검토'),
+        ('신고정정(보정, 수정, 경정청구)'),
+        ('FTA 검토'),
+        ('특혜 원산지 증명서 검토'),
+        ('원산지 표시(대외무역법)'),
+        ('관세환급 검토'),
+        ('보세화물 검토'),
+        ('신규거래 검토'),
+        ('기타')
+    ) as n(sub_category_name)
     where trim(n.sub_category_name) = trim(coalesce(s.sub_category_name, ''))
   );
 

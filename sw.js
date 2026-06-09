@@ -1,115 +1,22 @@
-const CACHE_NAME = 'smartlog-mobile-approval-v3';
-const STATIC_ASSETS = [
-  './',
-  './main.html',
-  './manifest.webmanifest',
-  './css/style.css',
-  './js/app.js',
-  './js/approval.js',
-  './js/mobile-approval.js',
-  './js/main.js',
-];
-
-async function _setAppBadgeFromCount(count) {
-  try {
-    const n = Number(count || 0);
-    if (!Number.isFinite(n)) return;
-    if (self.navigator && typeof self.navigator.setAppBadge === 'function') {
-      if (n > 0) await self.navigator.setAppBadge(n);
-      else if (typeof self.navigator.clearAppBadge === 'function') await self.navigator.clearAppBadge();
-    }
-  } catch (_) {
-    // 일부 브라우저/OS는 Badging API 미지원
-  }
-}
-
+/* local cache-reset service worker
+ * 목적: 과거 빌드에서 남아있는 서비스워커 캐시를 즉시 비우고 스스로 해제.
+ */
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS)).catch(() => {})
-  );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.map((key) => (key !== CACHE_NAME ? caches.delete(key) : Promise.resolve())))
-    )
-  );
-  self.clients.claim();
-});
-
-self.addEventListener('fetch', (event) => {
-  const req = event.request;
-  if (req.method !== 'GET') return;
-  const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return;
-  if (url.pathname.includes('/rest/v1/') || url.pathname.includes('/storage/v1/')) return;
-
-  const isStatic = /\.(css|js|html|ico|png|jpg|jpeg|svg|webp)$/i.test(url.pathname) || url.pathname === '/' || url.pathname.endsWith('/main.html');
-  if (!isStatic) return;
-
-  event.respondWith(
-    caches.match(req).then((cached) => {
-      if (cached) return cached;
-      return fetch(req).then((res) => {
-        if (!res || res.status !== 200) return res;
-        const cloned = res.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(req, cloned)).catch(() => {});
-        return res;
-      });
-    })
-  );
-});
-
-self.addEventListener('push', (event) => {
-  let payload = {};
-  try {
-    payload = event.data ? event.data.json() : {};
-  } catch (_) {
-    payload = { body: event.data ? event.data.text() : '' };
-  }
-  const title = String(payload.title || 'Smart Log AI');
-  const body = String(payload.body || '새 알림이 도착했습니다.');
-  const url = String(payload.url || './main.html');
-  const tag = String(payload.tag || 'smartlog-notification');
-  const options = {
-    body,
-    tag,
-    icon: './favicon.ico',
-    badge: './favicon.ico',
-    data: {
-      url,
-      target_menu: String(payload.target_menu || ''),
-      entry_id: String(payload.entry_id || ''),
-      badge_count: Number(payload.badge_count || 0),
-    },
-  };
-  event.waitUntil(Promise.all([
-    self.registration.showNotification(title, options),
-    _setAppBadgeFromCount(payload.badge_count),
-  ]));
-});
-
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close();
-  const targetUrl = (event.notification && event.notification.data && event.notification.data.url)
-    ? String(event.notification.data.url)
-    : './main.html';
-  event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      for (const client of clientList) {
-        if ('focus' in client) {
-          client.postMessage({
-            type: 'smartlog-notification-click',
-            target_menu: event.notification?.data?.target_menu || '',
-            entry_id: event.notification?.data?.entry_id || '',
-          });
-          return client.focus();
-        }
-      }
-      if (clients.openWindow) return clients.openWindow(targetUrl);
-      return Promise.resolve();
-    })
-  );
+  event.waitUntil((async () => {
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    } catch (_) {}
+    try {
+      await self.registration.unregister();
+    } catch (_) {}
+    try {
+      const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      clients.forEach((c) => c.navigate(c.url));
+    } catch (_) {}
+  })());
 });

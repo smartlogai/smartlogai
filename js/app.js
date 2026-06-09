@@ -261,6 +261,13 @@ const Auth = {
   // 소속 단위 열람: manager + director + top_mgr + admin
   canViewDeptScope: (s) => s && (Auth.isManager(s) || Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isAdmin(s)),
 
+  // 컨설턴트 업무 기록(소속 범위): admin + 1·2차 승인자 — scopeMatch로 팀/본부/사업부 필터
+  canViewStaffConsultantRecords: (s) => !!(s && (
+    Auth.canViewAll(s) ||
+    Auth.canApprove1st(s) ||
+    Auth.canApprove2nd(s)
+  )),
+
   // 대시보드 전사 열람: admin + top_mgr + CEO
   canViewDashboardAll: (s) => s && (Auth.isAdmin(s) || Auth.isTopMgr(s) || Auth.isCeo(s)),
 
@@ -1818,7 +1825,7 @@ const UserSearchSelect = (() => {
 function navigateTo(page) {
   const session = Session.get();
   if (page === 'entry-new' || page === 'my-entries') {
-    const allowStaffRecordsPage = page === 'my-entries' && session && Auth.isTopMgr(session);
+    const allowStaffRecordsPage = page === 'my-entries' && session && Auth.canViewStaffConsultantRecords(session);
     if (session && !Auth.canViewAll(session) && !allowStaffRecordsPage) {
       const prefer = Auth.preferredSheetType(session);
       const hourlyOk = Auth.timesheetHourlyEnabled(session);
@@ -1887,7 +1894,7 @@ function toggleSidebar() {
   │ Dashboard           │   ✅   │    ✅   │    ✅    │   ✅   │
   │ New Entry           │   ✅   │    ❌   │    ❌    │   ❌   │
   │ My Time Sheet       │   ✅   │    ✅*  │    ❌    │   ❌   │
-  │ Staff 업무 기록     │   ❌   │    ❌   │    ❌    │   ✅   │
+  │ Staff 업무 기록     │   ❌   │    ✅   │    ✅    │   ✅   │
   │ Approval(통합)      │   ❌   │    ✅   │    ✅    │   ❌   │
   │ Analysis            │   ❌   │    ❌   │    ✅    │   ✅   │
   │ Settings            │   ❌   │    ❌   │    ❌    │   ✅   │
@@ -1908,7 +1915,7 @@ function setupMenuByRole(session) {
   const canApprove           = Auth.canApprove(session);        // manager
   const canViewDeptScope     = Auth.canViewDeptScope(session);  // manager+director+admin
   const canViewAll           = Auth.canViewAll(session);        // admin only
-  const canViewStaffRecords  = canViewAll || Auth.isTopMgr(session);
+  const canViewStaffRecords  = Auth.canViewStaffConsultantRecords(session);
   const canAnalysis          = Auth.canViewAnalysis(session);   // director+admin
   const isMaster             = Auth.canManageMaster(session);   // admin only
   const isTopMgr             = Auth.isTopMgr(session);
@@ -1974,7 +1981,7 @@ function setupMenuByRole(session) {
     mobileApprovalMenu.style.display = (canApprove || canViewDeptScope) ? '' : 'none';
   }
   const adminAllEntries = document.getElementById('menu-admin-all-entries');
-  // top_mgr는 Settings를 제외한 운영 메뉴를 모두 보이도록 Staff 업무 기록 메뉴를 허용
+  // admin + 1·2차 승인자: 소속 범위 컨설턴트 업무 기록 메뉴
   if (adminAllEntries) adminAllEntries.style.display = canViewStaffRecords ? '' : 'none';
 
   // ── Analysis: director + admin ────────────────────────────

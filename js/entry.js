@@ -4686,7 +4686,7 @@ async function _saveBatchEntry(status, approverInfo, autoApprove = false) {
     // navigateTo 후 loadMyEntries가 호출될 때 batch 탭이 활성화되도록 UI 갱신
     setTimeout(() => {
       const sess = getSession ? getSession() : null;
-      const cvsr = !!(sess && (Auth.canViewAll(sess) || Auth.canViewDeptScope(sess) || _entryCanReadMyEntriesMenu(sess)));
+      const cvsr = _entryCanViewStaffRecords(sess);
       _entryApplySheetModeUi(cvsr);
       loadMyEntries();
     }, 100);
@@ -6054,6 +6054,11 @@ function _entryCanReadMyEntriesMenu(session) {
   }
 }
 
+function _entryCanViewStaffRecords(session) {
+  if (!session) return false;
+  return Auth.canViewStaffConsultantRecords(session) || _entryCanReadMyEntriesMenu(session);
+}
+
 function _entrySyncMainTabsUi(canViewStaffRecords) {
   document.querySelectorAll('[data-entry-main-tab]').forEach((btn) => {
     const mode = String(btn.getAttribute('data-entry-main-tab') || '').trim();
@@ -6072,7 +6077,7 @@ function _entrySyncMainTabsUi(canViewStaffRecords) {
 
 function switchMyEntriesMainTab(mode) {
   const session = getSession ? getSession() : null;
-  const canViewStaffRecords = !!(session && (Auth.canViewAll(session) || Auth.canViewDeptScope(session) || _entryCanReadMyEntriesMenu(session)));
+  const canViewStaffRecords = _entryCanViewStaffRecords(session);
   const next = String(mode || '').trim();
 
   if (next === 'consultant' && canViewStaffRecords) {
@@ -6130,7 +6135,7 @@ function entryClearConsultantDrilldown() {
 async function init_my_entries() {
   const session = getSession();
   const isAdminAll = Auth.canViewAll(session);
-  const canViewStaffRecords = isAdminAll || Auth.canViewDeptScope(session) || _entryCanReadMyEntriesMenu(session);
+  const canViewStaffRecords = _entryCanViewStaffRecords(session);
   const pageSection = document.getElementById('page-my-entries');
   if (pageSection) pageSection.classList.toggle('admin-all-entries', canViewStaffRecords);
   if (!canViewStaffRecords) _entryRecordViewMode = 'all';
@@ -6270,7 +6275,7 @@ async function loadMyEntries() {
   _entrySyncRangeButtonState();
   const session      = getSession();
   const isAdminAll   = Auth.canViewAll(session);
-  const canViewStaffRecords = isAdminAll || Auth.canViewDeptScope(session) || _entryCanReadMyEntriesMenu(session);
+  const canViewStaffRecords = _entryCanViewStaffRecords(session);
   const useConsultantMode = canViewStaffRecords && _entryRecordViewMode === 'consultant';
   const dateFrom     = document.getElementById('filter-entry-date-from').value;  // 'YYYY-MM-DD'
   const dateTo       = document.getElementById('filter-entry-date-to').value;
@@ -8201,7 +8206,7 @@ async function exportEntriesToExcel() {
     // ① 타임시트 데이터 로드 (화면 필터와 동일: 상태·권한 반영)
     console.log('[Excel] step1: fetching time_entries...');
     const isAdminAll = Auth.canViewAll(session);
-    const canViewStaffRecords = isAdminAll || Auth.canViewDeptScope(session) || _entryCanReadMyEntriesMenu(session);
+    const canViewStaffRecords = _entryCanViewStaffRecords(session);
     const useConsultantMode = canViewStaffRecords && _entryRecordViewMode === 'consultant';
     const statusVal = (document.getElementById('filter-entry-status') || {}).value || '';
     const queryStatus = useConsultantMode ? '' : statusVal;

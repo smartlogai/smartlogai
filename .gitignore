@@ -1,2 +1,16 @@
-# 로컬 개발용 Supabase 설정(비밀 포함 가능) — supabase.dev.example.js 만 저장소에 둠
+# 로컬 개발용 Supabase 설정(비밀 포함 가능)
 js/supabase.dev.js
+
+# Vercel 로컬 연결 정보
+.vercel/
+
+# Supabase CLI 임시 파일
+supabase/.temp/
+
+# 로컬 백업 폴더
+SmartlogAIV2_main_backup/
+
+# 테스트/삭제/정리용 SQL만 제외
+docs/sql/dev_delete_test_*.sql
+docs/sql/dev_cleanup_*duplicates.sql
+
