@@ -5811,13 +5811,10 @@ async function _entryPopulateStaffFilterOptions(session, canViewStaffRecords) {
   } catch (_) {
     users = [];
   }
-  const myId = String((session && (session.id || session.user_id)) || '').trim();
+  const scopeUserIds = Auth.getStaffRecordsScopeUserIds(session, users || []);
   const scoped = (users || []).filter((u) => {
     if (u.deleted === true || u.is_active === false) return false;
-    if (Auth.canViewAll(session)) return true;
-    const uid = String(u.id || '').trim();
-    if (myId && uid === myId) return true;
-    return Auth.scopeMatch(session, u);
+    return scopeUserIds.has(String(u.id || '').trim());
   }).map((u) => ({
     id: String(u.id || '').trim(),
     name: String(u.name || '').trim(),
@@ -6223,8 +6220,9 @@ async function onEntryFilterCategoryChange() {
 }
 
 /** Staff 업무 기록/엑셀: 최신 500건만 보면 상태·기간 필터가 어긋남 → 페이지 순회·필요 시 user_id/status 서버 필터 */
-async function _loadTimeEntriesForMyList(session, isAdminAll, statusVal) {
-  if (!isAdminAll && (Auth.isStaff(session) || Auth.isManager(session))) {
+async function _loadTimeEntriesForMyList(session, isAdminAll, statusVal, canViewStaffRecords = false) {
+  const ownEntriesOnly = !isAdminAll && !canViewStaffRecords && (Auth.isStaff(session) || Auth.isManager(session));
+  if (ownEntriesOnly) {
     const uid = encodeURIComponent(String(session.id));
     return API.listAllPages('time_entries', { filter: `user_id=eq.${uid}`, sort: 'updated_at', limit: 400, maxPages: 100 });
   }
@@ -6248,21 +6246,14 @@ async function _loadTimeEntriesForMyList(session, isAdminAll, statusVal) {
 async function _scopeEntriesForStaffRecords(entries, session) {
   if (!Array.isArray(entries) || !session) return [];
   if (Auth.canViewAll(session)) return entries;
-  if (!Auth.canViewDeptScope(session) && !_entryCanReadMyEntriesMenu(session)) return entries;
+  if (!Auth.canViewStaffConsultantRecords(session) && !Auth.canViewDeptScope(session) && !_entryCanReadMyEntriesMenu(session)) return entries;
   let users = [];
   try {
     users = await Master.users();
   } catch (_) {
     users = [];
   }
-  const myId = String(session.id || '').trim();
-  const scopeUserIds = new Set(
-    (users || [])
-      .filter((u) => Auth.scopeMatch(session, u))
-      .map((u) => String(u.id || '').trim())
-      .filter(Boolean)
-  );
-  if (myId) scopeUserIds.add(myId);
+  const scopeUserIds = Auth.getStaffRecordsScopeUserIds(session, users);
   return (entries || []).filter((e) => {
     const uid = String((e && e.user_id) || '').trim();
     if (uid) return scopeUserIds.has(uid);
@@ -6296,7 +6287,7 @@ async function loadMyEntries() {
 
   try {
     const queryStatus = useConsultantMode ? '' : status;
-    let entries = await _loadTimeEntriesForMyList(session, isAdminAll, queryStatus);
+    let entries = await _loadTimeEntriesForMyList(session, isAdminAll, queryStatus, canViewStaffRecords);
     entries = await _scopeEntriesForStaffRecords(entries, session);
 
     // 기간 From~To 필터 — ms숫자/숫자문자열/ISO문자열 모두 안전 처리
@@ -8210,7 +8201,7 @@ async function exportEntriesToExcel() {
     const useConsultantMode = canViewStaffRecords && _entryRecordViewMode === 'consultant';
     const statusVal = (document.getElementById('filter-entry-status') || {}).value || '';
     const queryStatus = useConsultantMode ? '' : statusVal;
-    let entries = await _loadTimeEntriesForMyList(session, isAdminAll, queryStatus);
+    let entries = await _loadTimeEntriesForMyList(session, isAdminAll, queryStatus, canViewStaffRecords);
     entries = await _scopeEntriesForStaffRecords(entries, session);
     console.log('[Excel] step1 result count:', entries.length);
 

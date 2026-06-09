@@ -261,12 +261,57 @@ const Auth = {
   // 소속 단위 열람: manager + director + top_mgr + admin
   canViewDeptScope: (s) => s && (Auth.isManager(s) || Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isAdmin(s)),
 
-  // 컨설턴트 업무 기록(소속 범위): admin + 1·2차 승인자 — scopeMatch로 팀/본부/사업부 필터
+  // 컨설턴트 업무 기록(소속 범위): admin + 1·2차 승인자
   canViewStaffConsultantRecords: (s) => !!(s && (
     Auth.canViewAll(s) ||
     Auth.canApprove1st(s) ||
     Auth.canApprove2nd(s)
   )),
+
+  /** 컨설턴트 업무 기록 조회 대상 user_id 집합 (Analysis와 동일 기준) */
+  getStaffRecordsScopeUserIds(s, users) {
+    const list = Array.isArray(users) ? users : [];
+    const sid = String(s && s.id || '').trim();
+    const out = new Set();
+    if (!s) return out;
+
+    const isActive = (u) => u && u.deleted !== true && u.is_active !== false;
+
+    if (Auth.canViewAll(s)) {
+      list.forEach((u) => {
+        if (!isActive(u)) return;
+        const id = String(u.id || '').trim();
+        if (id) out.add(id);
+      });
+      return out;
+    }
+
+    if (Auth.isManager(s)) {
+      // 팀장: 1차 승인자(approver_id)로 지정된 팀원 + 본인
+      list.forEach((u) => {
+        if (!isActive(u)) return;
+        const id = String(u.id || '').trim();
+        if (!id) return;
+        if (String(u.approver_id || '') === sid) out.add(id);
+      });
+      if (sid) out.add(sid);
+      return out;
+    }
+
+    if (Auth.isDirector(s) || Auth.isTopMgr(s)) {
+      list.forEach((u) => {
+        if (!isActive(u)) return;
+        const id = String(u.id || '').trim();
+        if (!id) return;
+        if (Auth.scopeMatch(s, u)) out.add(id);
+      });
+      if (sid) out.add(sid);
+      return out;
+    }
+
+    if (sid) out.add(sid);
+    return out;
+  },
 
   // 대시보드 전사 열람: admin + top_mgr + CEO
   canViewDashboardAll: (s) => s && (Auth.isAdmin(s) || Auth.isTopMgr(s) || Auth.isCeo(s)),
