@@ -6051,9 +6051,26 @@ function _entryCanReadMyEntriesMenu(session) {
   }
 }
 
+function _entryActiveNavPage() {
+  const active = document.querySelector('.nav-item.active');
+  return String(active && active.dataset && active.dataset.page || '').trim();
+}
+
+function _entryIsConsultantRecordsPage() {
+  return _entryActiveNavPage() === 'my-entries';
+}
+
+/** 컨설턴트 업무 기록 화면(my-entries)에서만 true — My Time Sheet와 분리 */
 function _entryCanViewStaffRecords(session) {
   if (!session) return false;
-  return Auth.canViewStaffConsultantRecords(session) || _entryCanReadMyEntriesMenu(session);
+  return Auth.canViewStaffConsultantRecords(session) && _entryIsConsultantRecordsPage();
+}
+
+function _entryCanAccessMyEntriesPage(session) {
+  if (!session) return false;
+  return Auth.canWriteEntry(session)
+    || Auth.canViewStaffConsultantRecords(session)
+    || _entryCanReadMyEntriesMenu(session);
 }
 
 function _entrySyncMainTabsUi(canViewStaffRecords) {
@@ -6148,7 +6165,7 @@ async function init_my_entries() {
     document.getElementById('pageTitle').textContent = '컨설턴트 업무 기록';
   }
 
-  if (!Auth.canWriteEntry(session) && !canViewStaffRecords) {
+  if (!Auth.canWriteEntry(session) && !_entryCanAccessMyEntriesPage(session)) {
     if (!Auth.isStaff(session) && !Auth.isManager(session)) {
       navigateTo('dashboard');
       Toast.warning('My Time Sheet는 Staff/Manager 또는 권한이 부여된 관리자만 접근 가능합니다.');
@@ -6288,7 +6305,9 @@ async function loadMyEntries() {
   try {
     const queryStatus = useConsultantMode ? '' : status;
     let entries = await _loadTimeEntriesForMyList(session, isAdminAll, queryStatus, canViewStaffRecords);
-    entries = await _scopeEntriesForStaffRecords(entries, session);
+    if (canViewStaffRecords) {
+      entries = await _scopeEntriesForStaffRecords(entries, session);
+    }
 
     // 기간 From~To 필터 — ms숫자/숫자문자열/ISO문자열 모두 안전 처리
     if (tsFrom || tsTo) {
@@ -8202,7 +8221,9 @@ async function exportEntriesToExcel() {
     const statusVal = (document.getElementById('filter-entry-status') || {}).value || '';
     const queryStatus = useConsultantMode ? '' : statusVal;
     let entries = await _loadTimeEntriesForMyList(session, isAdminAll, queryStatus, canViewStaffRecords);
-    entries = await _scopeEntriesForStaffRecords(entries, session);
+    if (canViewStaffRecords) {
+      entries = await _scopeEntriesForStaffRecords(entries, session);
+    }
     console.log('[Excel] step1 result count:', entries.length);
 
     // staff·manager는 로더에서 이미 user_id 범위. 그 외 비-admin은 방어적 필터
