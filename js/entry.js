@@ -6489,7 +6489,8 @@ async function loadMyEntries() {
         const allowMutate = !canViewStaffRecords || isOwnEntry;
         const B = 'width:30px;height:30px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;background:transparent;border:none;cursor:pointer;transition:background 0.15s;';
         const btns = [];
-        if (canViewStaffRecords) {
+        // My Time Sheet 본인 건은 openEntryDetailModal(수정·제출 가능), 타인 건은 openApprovalModal
+        if (canViewStaffRecords || isOwnEntry) {
           btns.push(`<button style="${B}" onclick="openEntryDetailModal('${e.id}')" title="상세보기"><i class="fas fa-eye" style="font-size:13px;color:#94a3b8"></i></button>`);
         } else {
           btns.push(`<button style="${B}" onclick="openApprovalModal('${e.id}')" title="상세보기"><i class="fas fa-eye" style="font-size:13px;color:#94a3b8"></i></button>`);
