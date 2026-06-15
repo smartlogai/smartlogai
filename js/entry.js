@@ -5907,6 +5907,18 @@ function _entryApplySheetModeUi(canViewStaffRecords) {
   if (useConsultant) _entrySheetMode = 'normal';
   if (note) note.style.display = (!useConsultant && _entrySheetMode === 'batch') ? '' : 'none';
   _entrySyncMainTabsUi(canViewStaffRecords);
+  _entrySyncExportButtonsUi(canViewStaffRecords);
+}
+
+function _entrySyncExportButtonsUi(canViewStaffRecords) {
+  const useConsultant = canViewStaffRecords && _entryRecordViewMode === 'consultant';
+  const isBatch = !useConsultant && _entrySheetMode === 'batch';
+  const normalBtn = document.getElementById('entry-export-normal-btn');
+  const batchAllBtn = document.getElementById('entry-export-batch-all-btn');
+  const batchCatBtn = document.getElementById('entry-export-batch-cat-btn');
+  if (normalBtn) normalBtn.style.display = isBatch ? 'none' : '';
+  if (batchAllBtn) batchAllBtn.style.display = isBatch ? '' : 'none';
+  if (batchCatBtn) batchCatBtn.style.display = isBatch ? '' : 'none';
 }
 
 function _entryApplyRecordViewUi(canViewStaffRecords) {
@@ -8173,131 +8185,328 @@ function showRejectReason(reason) {
 // ─────────────────────────────────────────────
 // 엑셀 내보내기
 // ─────────────────────────────────────────────
-async function exportEntriesToExcel() {
-  // ── 버튼 로딩 표시 ─────────────────────────
-  const btn = document.querySelector('[onclick="exportEntriesToExcel()"]');
+async function _entryEnsureXlsxForExport() {
+  if (typeof XLSX !== 'undefined') return true;
+  if (typeof LibLoader !== 'undefined') {
+    await LibLoader.load('xlsx');
+  } else {
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'js/xlsx.full.min.js';
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('XLSX 로드 실패'));
+      document.head.appendChild(s);
+    });
+  }
+  return typeof XLSX !== 'undefined';
+}
+
+function _entryExcelToDateOnly(ms) {
+  if (!ms) return '';
+  try {
+    const d = new Date(Number(ms));
+    const yy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yy}-${mm}-${dd}`;
+  } catch {
+    return '';
+  }
+}
+
+function _entryExcelToTimeOnly(ms) {
+  if (!ms) return '';
+  try {
+    const d = new Date(Number(ms));
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mi = String(d.getMinutes()).padStart(2, '0');
+    return `${hh}:${mi}`;
+  } catch {
+    return '';
+  }
+}
+
+function _entryExcelSheetName(name, used) {
+  let s = String(name || '기타').replace(/[\\/*?:\[\]]/g, '_').trim() || '기타';
+  if (s.length > 31) s = s.slice(0, 31);
+  let base = s;
+  let n = 1;
+  while (used.has(s)) {
+    const suffix = `_${n++}`;
+    s = `${base.slice(0, Math.max(1, 31 - suffix.length))}${suffix}`;
+  }
+  used.add(s);
+  return s;
+}
+
+async function _entryGetFilteredEntriesForExport() {
+  const session = getSession();
+  const isAdminAll = Auth.canViewAll(session);
+  const canViewStaffRecords = _entryCanViewStaffRecords(session);
+  const useConsultantMode = canViewStaffRecords && _entryRecordViewMode === 'consultant';
+  const statusVal = (document.getElementById('filter-entry-status') || {}).value || '';
+  const queryStatus = useConsultantMode ? '' : statusVal;
+  let entries = await _loadTimeEntriesForMyList(session, isAdminAll, queryStatus, canViewStaffRecords);
+  if (canViewStaffRecords) {
+    entries = await _scopeEntriesForStaffRecords(entries, session);
+  }
+  if (!canViewStaffRecords && !Auth.isStaff(session) && !Auth.isManager(session)) {
+    entries = entries.filter((e) => String(e.user_id) === String(session.id));
+  }
+
+  const dateFrom = (document.getElementById('filter-entry-date-from') || {}).value;
+  const dateTo = (document.getElementById('filter-entry-date-to') || {}).value;
+  const tsFrom = dateFrom ? new Date(dateFrom + 'T00:00:00').getTime() : null;
+  const tsTo = dateTo ? new Date(dateTo + 'T23:59:59').getTime() : null;
+  if (tsFrom || tsTo) {
+    entries = entries.filter((e) => {
+      if (!e.work_start_at) return false;
+      const raw = e.work_start_at;
+      const num = Number(raw);
+      let ts;
+      if (!isNaN(num) && num > 1000000000000) ts = num;
+      else if (!isNaN(num) && num > 1000000000) ts = num * 1000;
+      else ts = new Date(raw).getTime();
+      if (isNaN(ts)) return false;
+      if (tsFrom && ts < tsFrom) return false;
+      if (tsTo && ts > tsTo) return false;
+      return true;
+    });
+  }
+
+  const clientId = (typeof ClientSearchSelect !== 'undefined')
+    ? (ClientSearchSelect.getValue('filter-entry-client-wrap')?.id || '')
+    : '';
+  const categoryId = (document.getElementById('filter-entry-category') || {}).value || '';
+  const subcategoryId = (document.getElementById('filter-entry-subcategory') || {}).value || '';
+  const orgSel = _entryCurrentOrgSelection();
+  const staffRaw = String((document.getElementById('filter-entry-staff') || {}).value || '').trim();
+  const staffKw = staffRaw.toLowerCase();
+  const staffId = _entryResolveStaffFilterId(staffRaw);
+
+  if (!useConsultantMode && clientId) entries = entries.filter((e) => e.client_id === clientId);
+  if (!useConsultantMode && categoryId) entries = entries.filter((e) => e.work_category_id === categoryId);
+  if (!useConsultantMode && subcategoryId) {
+    if (_entryFilterIsProjectMainValue(subcategoryId)) {
+      await _entryEnsureProjectCodeTypes();
+      _entryAttachProjectMainFields(entries);
+      const mainCode = _entryFilterProjectMainCode(subcategoryId);
+      entries = entries.filter((e) => String(e._project_main_code || '') === mainCode);
+    } else if (_entryFilterIsSubcategoryNameValue(subcategoryId)) {
+      const subName = _entryFilterSubcategoryName(subcategoryId).trim();
+      entries = entries.filter((e) => String(e.work_subcategory_name || '').trim() === subName);
+    } else {
+      entries = entries.filter((e) => e.work_subcategory_id === subcategoryId);
+    }
+  }
+  if (!useConsultantMode && statusVal) entries = entries.filter((e) => String(e.status) === String(statusVal));
+  if (useConsultantMode && (orgSel.dept || orgSel.hq || orgSel.team)) {
+    entries = entries.filter((e) => {
+      const uid = String(e.user_id || '').trim();
+      const meta = (uid && _entryStaffUserById[uid]) || {
+        deptName: String(e.dept_name || e.department_name || '').trim(),
+        hqName: String(e.hq_name || '').trim(),
+        teamName: String(e.cs_team_name || e.team_name || '').trim(),
+      };
+      return _entryMatchOrgFilter(meta, orgSel);
+    });
+  }
+  if (canViewStaffRecords && (staffKw || staffId)) {
+    entries = entries.filter((e) => {
+      if (staffId) return String(e.user_id || '').trim() === staffId;
+      return String(e.user_name || '').toLowerCase().includes(staffKw);
+    });
+  }
+
+  const sheetF = myEntriesSheetFilter(session);
+  if (sheetF) entries = entries.filter((e) => _rowSheetType(e) === sheetF);
+  entries = _entryApplyConsultantViewGate(entries, canViewStaffRecords);
+  if (_entryRecordViewMode !== 'consultant') entries = _entryApplySheetModeFilter(entries);
+  return entries;
+}
+
+async function _entryLoadBatchDetailsByEntryIds(entryIds) {
+  const ids = [...new Set((entryIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
+  if (!ids.length) return [];
+  const chunkSize = 40;
+  const out = [];
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    const filter = `entry_id=in.(${chunk.map((id) => encodeURIComponent(id)).join(',')})`;
+    const rows = await API.listAllPages('time_entry_details', {
+      filter,
+      sort: 'row_order',
+      limit: 200,
+      maxPages: 20,
+    }).catch(() => []);
+    out.push(...(Array.isArray(rows) ? rows : []));
+  }
+  out.sort((a, b) => {
+    const ta = Number(a.from_at) || 0;
+    const tb = Number(b.from_at) || 0;
+    if (ta !== tb) return ta - tb;
+    const ua = String(a.user_name || '');
+    const ub = String(b.user_name || '');
+    if (ua !== ub) return ua.localeCompare(ub, 'ko');
+    return (Number(a.row_order) || 0) - (Number(b.row_order) || 0);
+  });
+  return out;
+}
+
+function _entryBuildBatchDetailExcelRows(details, headerById) {
+  const statusLabel = {
+    draft: '임시저장',
+    submitted: '검토중',
+    pre_approved: '2차검토',
+    approved: '승인',
+    rejected: '반려',
+  };
+  const noteToPlain = (raw) => String(raw || '').replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
+
+  return (details || []).map((d, i) => {
+    const header = headerById.get(String(d.entry_id || '')) || {};
+    const isProj = String(d.work_category_name || '').trim() === '프로젝트업무';
+    const subCol = isProj
+      ? (String(d.project_code || '').trim() || d.work_subcategory_name || '')
+      : (d.work_subcategory_name || '');
+    const workDate = d.work_date || _entryExcelToDateOnly(d.from_at || header.work_start_at);
+    return {
+      No: i + 1,
+      업무일자: workDate,
+      Staff: d.user_name || header.user_name || '',
+      업무팀: d.team_name || header.team_name || '',
+      고객사: d.client_name || header.client_name || '내부업무',
+      대분류: d.work_category_name || '',
+      소분류: subCol,
+      업무내용: noteToPlain(d.work_note),
+      시작일자: _entryExcelToDateOnly(d.from_at),
+      시작시간: _entryExcelToTimeOnly(d.from_at),
+      종료일자: _entryExcelToDateOnly(d.to_at),
+      종료시간: _entryExcelToTimeOnly(d.to_at),
+      소요시간: Utils.formatDuration(d.duration_minutes),
+      상태: statusLabel[header.status] || header.status || statusLabel[d.status] || d.status || '',
+      문서번호: header.doc_no || '',
+    };
+  });
+}
+
+const _ENTRY_BATCH_DETAIL_COLS = [
+  { wch: 5 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 16 },
+  { wch: 16 }, { wch: 20 }, { wch: 48 }, { wch: 12 }, { wch: 8 },
+  { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 18 },
+];
+
+async function _entryDownloadExcelWorkbook(wb, fileName, successMsg) {
+  if (typeof xlsxDownload === 'function') {
+    await xlsxDownload(wb, fileName);
+  } else {
+    const wbArray = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([wbArray], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+  Toast.success(successMsg);
+}
+
+async function exportBatchDetailsToExcel(mode) {
+  const modeKey = String(mode || 'all').trim() === 'by_category' ? 'by_category' : 'all';
+  const btnId = modeKey === 'by_category' ? 'entry-export-batch-cat-btn' : 'entry-export-batch-all-btn';
+  const btn = document.getElementById(btnId);
   const origHtml = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 로딩 중...'; }
 
-  // ── XLSX 라이브러리 지연 로드 (LibLoader 사용) ───────────
   try {
-    if (typeof XLSX === 'undefined') {
-      if (typeof LibLoader !== 'undefined') {
-        await LibLoader.load('xlsx');
-      } else {
-        // LibLoader 없으면 직접 script 태그로 로드
-        await new Promise((resolve, reject) => {
-          const s = document.createElement('script');
-          s.src = 'js/xlsx.full.min.js';
-          s.onload = resolve;
-          s.onerror = () => reject(new Error('XLSX 로드 실패'));
-          document.head.appendChild(s);
-        });
-      }
+    const ok = await _entryEnsureXlsxForExport();
+    if (!ok) {
+      Toast.error('엑셀 라이브러리를 불러올 수 없습니다. 페이지를 새로고침 해주세요.');
+      return;
+    }
+    if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 생성 중...';
+
+    const headers = (await _entryGetFilteredEntriesForExport()).filter((e) => _entryIsBatchHeaderEntry(e));
+    if (!headers.length) {
+      Toast.info('보낼 일괄기록이 없습니다.');
+      return;
+    }
+
+    const headerById = new Map(headers.map((e) => [String(e.id), e]));
+    const details = await _entryLoadBatchDetailsByEntryIds(headers.map((e) => e.id));
+    if (!details.length) {
+      Toast.info('보낼 상세행이 없습니다.');
+      return;
+    }
+
+    const rows = _entryBuildBatchDetailExcelRows(details, headerById);
+    const wb = XLSX.utils.book_new();
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+
+    if (modeKey === 'by_category') {
+      const groups = new Map();
+      rows.forEach((row) => {
+        const cat = String(row['대분류'] || '').trim() || '미분류';
+        if (!groups.has(cat)) groups.set(cat, []);
+        groups.get(cat).push(row);
+      });
+      const usedNames = new Set();
+      [...groups.keys()].sort((a, b) => a.localeCompare(b, 'ko')).forEach((cat) => {
+        const catRows = (groups.get(cat) || []).map((row, idx) => ({ ...row, No: idx + 1 }));
+        const ws = XLSX.utils.json_to_sheet(catRows);
+        ws['!cols'] = _ENTRY_BATCH_DETAIL_COLS;
+        XLSX.utils.book_append_sheet(wb, ws, _entryExcelSheetName(cat, usedNames));
+      });
+      const fname = `일괄기록_대분류별_${today}.xlsx`;
+      await _entryDownloadExcelWorkbook(wb, fname, `대분류별 엑셀 저장 완료 (${rows.length}행 · ${groups.size}개 대분류) — ${fname}`);
+      return;
+    }
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = _ENTRY_BATCH_DETAIL_COLS;
+    XLSX.utils.book_append_sheet(wb, ws, '일괄기록상세');
+    const fname = `일괄기록_상세행_${today}.xlsx`;
+    await _entryDownloadExcelWorkbook(wb, fname, `상세행 엑셀 저장 완료 (${rows.length}행) — ${fname}`);
+  } catch (err) {
+    console.error('exportBatchDetailsToExcel error:', err);
+    Toast.error('보내기 실패: ' + (err.message || String(err)));
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
+  }
+}
+
+async function exportEntriesToExcel() {
+  // ── 버튼 로딩 표시 ─────────────────────────
+  const btn = document.getElementById('entry-export-normal-btn');
+  const origHtml = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 로딩 중...'; }
+
+  try {
+    const ok = await _entryEnsureXlsxForExport();
+    if (!ok) {
+      Toast.error('엑셀 라이브러리를 불러올 수 없습니다. 페이지를 새로고침 해주세요.');
+      return;
     }
   } catch (loadErr) {
     Toast.error('엑셀 라이브러리 로드 실패: ' + loadErr.message);
-    if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
     return;
-  }
-
-  // 로드 후에도 XLSX 없으면 중단
-  if (typeof XLSX === 'undefined') {
-    Toast.error('엑셀 라이브러리를 불러올 수 없습니다. 페이지를 새로고침 해주세요.');
-    if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
-    return;
+  } finally {
+    if (btn && typeof XLSX === 'undefined') {
+      btn.disabled = false;
+      btn.innerHTML = origHtml;
+    }
   }
 
   if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 생성 중...'; }
 
   try {
-    const session = getSession();
-    console.log('[Excel] session:', session?.role, session?.id);
-
-    // ① 타임시트 데이터 로드 (화면 필터와 동일: 상태·권한 반영)
-    console.log('[Excel] step1: fetching time_entries...');
-    const isAdminAll = Auth.canViewAll(session);
-    const canViewStaffRecords = _entryCanViewStaffRecords(session);
-    const useConsultantMode = canViewStaffRecords && _entryRecordViewMode === 'consultant';
-    const statusVal = (document.getElementById('filter-entry-status') || {}).value || '';
-    const queryStatus = useConsultantMode ? '' : statusVal;
-    let entries = await _loadTimeEntriesForMyList(session, isAdminAll, queryStatus, canViewStaffRecords);
-    if (canViewStaffRecords) {
-      entries = await _scopeEntriesForStaffRecords(entries, session);
-    }
-    console.log('[Excel] step1 result count:', entries.length);
-
-    // staff·manager는 로더에서 이미 user_id 범위. 그 외 비-admin은 방어적 필터
-    if (!canViewStaffRecords && !Auth.isStaff(session) && !Auth.isManager(session)) {
-      entries = entries.filter(e => String(e.user_id) === String(session.id));
-    }
-    // 화면 필터(기간·고객사·분류)와 동일하게 맞춤
-    const dateFrom = (document.getElementById('filter-entry-date-from') || {}).value;
-    const dateTo   = (document.getElementById('filter-entry-date-to') || {}).value;
-    const tsFrom = dateFrom ? new Date(dateFrom + 'T00:00:00').getTime() : null;
-    const tsTo   = dateTo   ? new Date(dateTo   + 'T23:59:59').getTime() : null;
-    if (tsFrom || tsTo) {
-      entries = entries.filter(e => {
-        if (!e.work_start_at) return false;
-        const raw = e.work_start_at;
-        const num = Number(raw);
-        let ts;
-        if (!isNaN(num) && num > 1000000000000) ts = num;
-        else if (!isNaN(num) && num > 1000000000) ts = num * 1000;
-        else ts = new Date(raw).getTime();
-        if (isNaN(ts)) return false;
-        if (tsFrom && ts < tsFrom) return false;
-        if (tsTo   && ts > tsTo)   return false;
-        return true;
-      });
-    }
-    const clientId = (typeof ClientSearchSelect !== 'undefined')
-      ? (ClientSearchSelect.getValue('filter-entry-client-wrap')?.id || '')
-      : '';
-    const categoryId = (document.getElementById('filter-entry-category') || {}).value || '';
-    const subcategoryId = (document.getElementById('filter-entry-subcategory') || {}).value || '';
-    const orgSel = _entryCurrentOrgSelection();
-    const staffRaw = String((document.getElementById('filter-entry-staff') || {}).value || '').trim();
-    const staffKw = staffRaw.toLowerCase();
-    const staffId = _entryResolveStaffFilterId(staffRaw);
-    if (!useConsultantMode && clientId) entries = entries.filter(e => e.client_id === clientId);
-    if (!useConsultantMode && categoryId) entries = entries.filter(e => e.work_category_id === categoryId);
-    if (!useConsultantMode && subcategoryId) {
-      if (_entryFilterIsProjectMainValue(subcategoryId)) {
-        await _entryEnsureProjectCodeTypes();
-        _entryAttachProjectMainFields(entries);
-        const mainCode = _entryFilterProjectMainCode(subcategoryId);
-        entries = entries.filter((e) => String(e._project_main_code || '') === mainCode);
-      } else if (_entryFilterIsSubcategoryNameValue(subcategoryId)) {
-        const subName = _entryFilterSubcategoryName(subcategoryId).trim();
-        entries = entries.filter((e) => String(e.work_subcategory_name || '').trim() === subName);
-      } else {
-        entries = entries.filter(e => e.work_subcategory_id === subcategoryId);
-      }
-    }
-    if (!useConsultantMode && statusVal) entries = entries.filter(e => String(e.status) === String(statusVal));
-    if (useConsultantMode && (orgSel.dept || orgSel.hq || orgSel.team)) {
-      entries = entries.filter((e) => {
-        const uid = String(e.user_id || '').trim();
-        const meta = (uid && _entryStaffUserById[uid]) || {
-          deptName: String(e.dept_name || e.department_name || '').trim(),
-          hqName: String(e.hq_name || '').trim(),
-          teamName: String(e.cs_team_name || e.team_name || '').trim(),
-        };
-        return _entryMatchOrgFilter(meta, orgSel);
-      });
-    }
-    if (canViewStaffRecords && (staffKw || staffId)) {
-      entries = entries.filter((e) => {
-        if (staffId) return String(e.user_id || '').trim() === staffId;
-        return String(e.user_name || '').toLowerCase().includes(staffKw);
-      });
-    }
-
-    const sheetF = myEntriesSheetFilter(session);
-    if (sheetF) entries = entries.filter(e => _rowSheetType(e) === sheetF);
-    entries = _entryApplyConsultantViewGate(entries, canViewStaffRecords);
-    if (_entryRecordViewMode !== 'consultant') entries = _entryApplySheetModeFilter(entries);
+    let entries = await _entryGetFilteredEntriesForExport();
 
     const hasProjExcel = entries.some((e) =>
       String(e.work_category_name || '').trim() === '프로젝트업무' && String(e.project_code || '').trim()
