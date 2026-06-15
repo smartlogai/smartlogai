@@ -3968,6 +3968,201 @@ textarea.form-control {
   background: #fff;
   padding: 10px;
 }
+#pmTcInvoiceModal .pm-tc-invoice-modal {
+  width: min(920px, 96vw);
+  max-width: 96vw;
+  border-radius: 14px;
+}
+#pmTcInvoiceModal .pm-tc-invoice-modal-body {
+  padding: 14px 16px;
+  background: #f8fafc;
+}
+#pmTcInvoiceModal .pm-tc-invoice-modal-guide {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px dashed #dbe5f3;
+  border-radius: 8px;
+  background: #f8fbff;
+  color: #475569;
+}
+#pmTcInvoiceModal .pm-tc-invoice-modal-preview-shell {
+  max-height: min(68vh, 720px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: #fff;
+}
+#pmTcInvoiceModal #pm-tc-invoice-modal-preview {
+  padding: 12px 0 8px;
+  overflow: visible;
+  display: block;
+}
+#pmTcInvoiceModal #pm-tc-invoice-modal-preview .pm-tc-invoice-page {
+  width: 794px;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 18px 14px;
+  box-sizing: border-box;
+  background: #fff;
+}
+#pmTcInvoiceModal .pm-tc-invoice-doc,
+#pmTcBillingDetailModal .pm-tc-billing-doc {
+  font-family: 'Malgun Gothic', '맑은 고딕', Arial, Helvetica, sans-serif;
+  font-weight: 400;
+}
+#pmTcInvoiceModal .pm-tc-invoice-doc .data-table,
+#pmTcBillingDetailModal .pm-tc-billing-doc .data-table {
+  font-size: 12px;
+  font-family: 'Malgun Gothic', '맑은 고딕', Arial, Helvetica, sans-serif;
+  font-weight: 400;
+}
+#pmTcInvoiceModal .pm-tc-invoice-doc .data-table,
+#pmTcBillingDetailModal .pm-tc-billing-doc .data-table,
+.pm-tc-doc-surface .data-table {
+  border-collapse: collapse !important;
+  border-spacing: 0 !important;
+}
+#pmTcInvoiceModal .pm-tc-invoice-doc .data-table th,
+#pmTcInvoiceModal .pm-tc-invoice-doc .data-table td,
+#pmTcBillingDetailModal .pm-tc-billing-doc .data-table th,
+#pmTcBillingDetailModal .pm-tc-billing-doc .data-table td,
+.pm-tc-doc-surface .data-table th,
+.pm-tc-doc-surface .data-table td {
+  border: 0.5px solid #c4ccd7 !important;
+  background: #fff !important;
+  font-weight: 400 !important;
+  box-sizing: border-box;
+  color: #111827;
+}
+#pmTcInvoiceModal .pm-tc-invoice-doc .data-table thead th,
+#pmTcBillingDetailModal .pm-tc-billing-doc .data-table thead th,
+.pm-tc-doc-surface .data-table thead th {
+  font-weight: 500 !important;
+  color: #374151;
+  background: #fff !important;
+}
+#pmTcInvoiceModal .pm-tc-invoice-doc .data-table tbody td,
+#pmTcBillingDetailModal .pm-tc-billing-doc .data-table tbody td {
+  font-weight: 400 !important;
+}
+#pmTcInvoiceModal .pm-tc-invoice-doc {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+#pmTcBillingDetailModal .pm-tc-billing-modal {
+  width: min(920px, 96vw);
+  max-width: 96vw;
+  border-radius: 14px;
+}
+#pmTcBillingDetailModal .pm-tc-billing-modal-body {
+  padding: 14px 16px;
+  background: #f8fafc;
+}
+#pmTcBillingDetailModal .pm-tc-billing-modal-guide {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px dashed #dbe5f3;
+  border-radius: 8px;
+  background: #f8fbff;
+  color: #475569;
+}
+#pmTcBillingDetailModal .pm-tc-billing-modal-preview-shell {
+  max-height: min(68vh, 720px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: #fff;
+}
+#pmTcBillingDetailModal #pm-tc-billing-modal-preview {
+  padding: 12px 0 8px;
+  overflow: visible;
+  display: block;
+}
+#pmTcBillingDetailModal #pm-tc-billing-modal-preview .pm-tc-billing-page {
+  width: 794px;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 18px 14px;
+  box-sizing: border-box;
+  background: #fff;
+}
+#pmTcBillingDetailModal .pm-tc-billing-doc {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+#pmTcBillingDetailModal .pm-tc-billing-title {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+  text-align: center !important;
+}
+#pmTcBillingDetailModal .pm-tc-billing-meta-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px 18px;
+  margin: 0 0 22px;
+  padding: 12px 14px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+#pmTcBillingDetailModal .pm-tc-billing-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+}
+#pmTcBillingDetailModal .pm-tc-billing-doc .data-table td {
+  max-width: none !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  padding: 8px !important;
+  vertical-align: middle;
+}
+#pmTcBillingDetailModal .pm-tc-billing-doc .data-table thead th {
+  text-align: center !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  max-width: none !important;
+  text-overflow: clip !important;
+  padding: 8px !important;
+  background: #fff !important;
+  font-size: 12px;
+  font-weight: 500;
+  color: #374151;
+  border: 0.5px solid #c4ccd7 !important;
+}
+.pm-tc-doc-surface .pm-tc-invoice-detail-table td:nth-child(5) {
+  text-align: left !important;
+}
+#pmTcBillingDetailModal .pm-tc-billing-doc .data-table tbody tr:hover {
+  background: transparent !important;
+}
+/* Time Charge 인쇄/PDF iframe */
+.pm-tc-export-mode .pm-tc-billing-doc,
+.pm-tc-export-mode .pm-tc-invoice-doc,
+.pm-tc-export-mode .pm-tc-pdf-page,
+.pm-tc-pdf-page {
+  font-family: 'Malgun Gothic', '맑은 고딕', Arial, Helvetica, sans-serif;
+  font-weight: 400;
+  background: #fff;
+}
+.pm-tc-export-mode .pm-tc-billing-meta-strip,
+.pm-tc-export-mode .pm-tc-invoice-project-strip {
+  background: #fff !important;
+}
 #page-project-register .pm-tc-stage-kpis {
   margin-top: 10px;
   display: grid;
@@ -4022,6 +4217,12 @@ textarea.form-control {
   vertical-align: middle;
   padding: 10px 8px;
 }
+#pmTcInvoiceModal .pm-tc-invoice-summary-table thead th,
+#pmTcInvoiceModal .pm-tc-invoice-summary-table tbody td,
+#pmTcInvoiceModal .pm-tc-invoice-total-table tbody th,
+#pmTcInvoiceModal .pm-tc-invoice-total-table tbody td,
+#pmTcInvoiceModal .pm-tc-invoice-detail-table thead th,
+#pmTcInvoiceModal .pm-tc-invoice-detail-table tbody td,
 #page-project-register .pm-tc-invoice-summary-table thead th,
 #page-project-register .pm-tc-invoice-summary-table tbody td,
 #page-project-register .pm-tc-invoice-total-table tbody th,
@@ -4036,17 +4237,191 @@ textarea.form-control {
   vertical-align: middle;
 }
 #page-project-register .pm-tc-invoice-total-table tbody th {
-  background: #f8fafc;
+  background: #fff;
   color: #334155;
-  font-weight: 700;
+  font-weight: 500;
 }
 #page-project-register .pm-tc-invoice-total-table .pm-tc-invoice-total-claim-row th,
 #page-project-register .pm-tc-invoice-total-table .pm-tc-invoice-total-claim-row td {
-  background: #f8fbff;
-  font-weight: 800;
+  background: #fff;
+  font-weight: 600;
   color: #0f172a;
 }
+#page-project-register .pm-tc-invoice-header-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 28px;
+  padding: 0 2px;
+}
+#pmTcInvoiceModal .pm-tc-invoice-logo-wrap,
+#page-project-register .pm-tc-invoice-logo-wrap {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  min-width: 92px;
+}
+#pmTcInvoiceModal .pm-tc-invoice-logo,
+#page-project-register .pm-tc-invoice-logo {
+  height: 88px;
+  width: auto;
+  display: block;
+}
+#page-project-register .pm-tc-invoice-company-block {
+  flex: 1;
+  text-align: right;
+  padding: 0;
+  border-bottom: none;
+}
+#pmTcInvoiceModal .pm-tc-invoice-company-name,
+#page-project-register .pm-tc-invoice-company-name {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: #111827;
+}
+#pmTcInvoiceModal .pm-tc-invoice-company-line,
+#page-project-register .pm-tc-invoice-company-line {
+  font-size: 12px;
+  line-height: 1.65;
+  color: #334155;
+}
+#pmTcInvoiceModal .pm-tc-invoice-divider,
+#page-project-register .pm-tc-invoice-divider {
+  display: block;
+  width: 100%;
+  height: 0;
+  border: none;
+  border-top: 2px solid #000;
+  margin: 16px 0 22px;
+  background: transparent;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+#pmTcInvoiceModal .pm-tc-invoice-doc h1.pm-tc-invoice-title,
+#page-project-register .pm-tc-invoice-doc h1.pm-tc-invoice-title {
+  display: block;
+  width: 100%;
+  margin: 0 0 20px;
+  font-size: 36px;
+  letter-spacing: 5px;
+  font-weight: 700;
+  text-align: center !important;
+  color: #111827;
+}
+#pmTcInvoiceModal .pm-tc-invoice-doc .data-table td,
+#page-project-register .pm-tc-invoice-doc .data-table td {
+  max-width: none !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  padding: 8px !important;
+}
+#pmTcInvoiceModal .pm-tc-invoice-doc .data-table thead th,
+#page-project-register .pm-tc-invoice-doc .data-table thead th {
+  text-align: center !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  max-width: none !important;
+  text-overflow: clip !important;
+  padding: 8px !important;
+  background: #fff !important;
+  font-size: 12px;
+  font-weight: 500;
+  border: 0.5px solid #c4ccd7 !important;
+}
+#pmTcInvoiceModal .pm-tc-invoice-doc .data-table tbody tr:hover,
+#page-project-register .pm-tc-invoice-doc .data-table tbody tr:hover {
+  background: transparent !important;
+}
+#page-project-register .pm-tc-invoice-info-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 14px;
+}
+#page-project-register .pm-tc-invoice-bill-to {
+  flex: 1;
+  min-width: 0;
+  text-align: left !important;
+}
+#page-project-register .pm-tc-invoice-info-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  letter-spacing: 0.3px;
+  margin-bottom: 4px;
+}
+#page-project-register .pm-tc-invoice-info-value {
+  font-size: 13px;
+  color: #111827;
+  line-height: 1.5;
+}
+#page-project-register .pm-tc-invoice-doc-meta {
+  text-align: right;
+  font-size: 12px;
+  line-height: 1.85;
+  min-width: 240px;
+}
+#page-project-register .pm-tc-invoice-meta-line {
+  white-space: nowrap;
+}
+#page-project-register .pm-tc-invoice-doc-label {
+  font-weight: 700;
+  color: #111827;
+  margin-right: 8px;
+}
+#page-project-register .pm-tc-invoice-project-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 18px;
+  margin: 0 0 22px;
+  padding: 12px 14px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+#page-project-register .pm-tc-invoice-strip-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+}
+#pmTcInvoiceModal .pm-tc-invoice-section-title,
+#pmTcBillingDetailModal .pm-tc-invoice-section-title,
+.pm-tc-export-mode .pm-tc-invoice-section-title,
+.pm-tc-pdf-page .pm-tc-invoice-section-title {
+  text-align: left !important;
+}
+#pmTcInvoiceModal .pm-tc-invoice-person-head,
+#pmTcBillingDetailModal .pm-tc-invoice-person-head,
+.pm-tc-export-mode .pm-tc-invoice-person-head,
+.pm-tc-pdf-page .pm-tc-invoice-person-head {
+  text-align: left !important;
+}
+#page-project-register .pm-tc-invoice-section {
+  margin: 20px 0 8px;
+}
+#page-project-register .pm-tc-invoice-section-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  text-align: left !important;
+}
+#page-project-register .pm-tc-invoice-person-head {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0 0 6px;
+  text-align: left !important;
+}
 #page-project-register .pm-tc-invoice-detail-table tbody td:nth-child(6) {
+  text-align: right;
+}
+#page-project-register .pm-tc-invoice-detail-table tbody td:nth-child(5) {
   text-align: center;
   white-space: normal;
   word-break: keep-all;
@@ -4094,6 +4469,35 @@ textarea.form-control {
   }
 }
 @media (max-width: 640px) {
+  #page-project-register .pm-tc-invoice-header-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+  }
+  #page-project-register .pm-tc-invoice-company-block {
+    text-align: left;
+  }
+  #page-project-register .pm-tc-invoice-info-row {
+    flex-direction: column;
+    gap: 12px;
+  }
+  #page-project-register .pm-tc-invoice-doc-meta {
+    text-align: left;
+    min-width: 0;
+  }
+  #page-project-register .pm-tc-invoice-project-strip {
+    grid-template-columns: 1fr;
+  }
+  #page-project-register .pm-tc-billing-meta-strip {
+    grid-template-columns: 1fr;
+  }
+  #pmTcBillingDetailModal .pm-tc-billing-meta-strip {
+    grid-template-columns: 1fr;
+  }
+  #page-project-register .pm-tc-invoice-title {
+    font-size: 28px;
+    letter-spacing: 3px;
+  }
   #page-project-register .pm-tc-stage-kpis {
     grid-template-columns: 1fr;
   }

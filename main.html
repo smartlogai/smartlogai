@@ -3443,6 +3443,48 @@
           </div>
         </div>
 
+        <div class="modal-overlay" id="pmTcBillingDetailModal">
+          <div class="modal pm-tc-billing-modal">
+            <div class="modal-header">
+              <h3><i class="fas fa-file-invoice-dollar" style="color:var(--primary)"></i> 타임차지 청구내역</h3>
+              <button class="btn-close" onclick="closeModal('pmTcBillingDetailModal')">×</button>
+            </div>
+            <div class="modal-body pm-tc-billing-modal-body">
+              <p class="pm-summary-text pm-tc-billing-modal-guide">고객사 사전승인용 청구내역입니다. 인쇄 또는 PDF로 저장해 전달할 수 있습니다.</p>
+              <div class="pm-tc-billing-modal-preview-shell">
+                <div id="pm-tc-billing-modal-preview" class="pm-inv-doc-preview"></div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-sm btn-outline" id="pm-tc-billing-print-btn"><i class="fas fa-print"></i> 인쇄</button>
+              <button type="button" class="btn btn-sm btn-outline" id="pm-tc-billing-pdf-btn"><i class="fas fa-file-pdf"></i> PDF 다운로드</button>
+              <button type="button" class="btn btn-sm btn-ghost" onclick="closeModal('pmTcBillingDetailModal')">닫기</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-overlay" id="pmTcInvoiceModal">
+          <div class="modal pm-tc-invoice-modal">
+            <div class="modal-header">
+              <h3><i class="fas fa-file-invoice" style="color:var(--primary)"></i> 타임차지 청구서 (INVOICE)</h3>
+              <button class="btn-close" onclick="closeModal('pmTcInvoiceModal')">×</button>
+            </div>
+            <div class="modal-body pm-tc-invoice-modal-body">
+              <p class="pm-summary-text pm-tc-invoice-modal-guide">정식 INVOICE 양식입니다. 인쇄 또는 PDF로 저장해 청구·발송에 사용할 수 있습니다.</p>
+              <div class="pm-tc-invoice-modal-preview-shell">
+                <div id="pm-tc-invoice-modal-preview" class="pm-inv-doc-preview">
+                  <div class="pm-inv-doc-preview-empty">하단 <b>청구서 생성·출력</b> 버튼을 누르면 청구서가 표시됩니다.</div>
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-sm btn-outline" id="pm-tc-invoice-print-btn" disabled><i class="fas fa-print"></i> 인쇄</button>
+              <button type="button" class="btn btn-sm btn-outline" id="pm-tc-invoice-pdf-btn" disabled><i class="fas fa-file-pdf"></i> PDF 다운로드</button>
+              <button type="button" class="btn btn-sm btn-ghost" onclick="closeModal('pmTcInvoiceModal')">닫기</button>
+            </div>
+          </div>
+        </div>
+
         <div id="pm-panel-timecharge" style="display:none">
           <div class="card">
             <div class="card-header" style="align-items:flex-start">
@@ -3503,13 +3545,12 @@
                             <th style="width:140px">컨설턴트</th>
                             <th style="width:130px">수행시간</th>
                             <th style="width:95px">투입시간</th>
-                            <th style="width:130px">수행장소</th>
                             <th>수행업무</th>
                             <th style="width:100px">상태</th>
                           </tr>
                         </thead>
                         <tbody id="pm-tc-pending-body">
-                          <tr><td colspan="8" class="table-empty"><i class="fas fa-inbox"></i><p>검토 중인 데이터가 없습니다.</p></td></tr>
+                          <tr><td colspan="7" class="table-empty"><i class="fas fa-inbox"></i><p>검토 중인 데이터가 없습니다.</p></td></tr>
                         </tbody>
                       </table>
                     </div>
@@ -3531,7 +3572,7 @@
                               <th style="width:90px">건수</th>
                               <th style="width:130px">총투입시간</th>
                               <th style="width:130px">청구금액</th>
-                              <th style="width:90px">상세</th>
+                              <th style="width:90px">상세보기</th>
                             </tr>
                           </thead>
                           <tbody id="pm-tc-status-summary-body">
@@ -3557,15 +3598,6 @@
                         </table>
                       </div>
                     </div>
-                    <div id="pm-tc-doc-invoice-wrap" style="display:none">
-                      <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:8px">
-                        <button type="button" class="btn btn-sm btn-outline" id="pm-tc-invoice-pdf-btn"><i class="fas fa-file-pdf"></i> PDF 다운로드</button>
-                        <button type="button" class="btn btn-sm btn-ghost" id="pm-tc-invoice-close-btn"><i class="fas fa-times"></i> 닫기</button>
-                      </div>
-                      <div id="pm-tc-invoice-preview" class="pm-inv-doc-preview">
-                        <div class="pm-inv-doc-preview-empty">청구서 미리보기를 실행하면 문서가 표시됩니다.</div>
-                      </div>
-                    </div>
                     <div id="pm-tc-doc-tax-wrap" style="display:none">
                       <div id="pm-tc-tax-preview" class="pm-inv-doc-preview">
                         <div class="pm-inv-doc-preview-empty">세금계산서 미리보기를 실행하면 문서가 표시됩니다.</div>
@@ -3577,9 +3609,9 @@
                     <div class="pm-kpi-card"><div class="pm-kpi-label">검토 시간</div><div class="pm-kpi-value" id="pm-tc-stage2-minutes">0분</div></div>
                     <div class="pm-kpi-card"><div class="pm-kpi-label">오류/중복</div><div class="pm-kpi-value" id="pm-tc-stage2-issues">0 / 0</div></div>
                   </div>
-                  <div class="pm-summary-text pm-tc-validation-guide">현황표 검증 후 <b>청구서 생성·출력</b>을 먼저 수행하고, 그 다음 세금계산서 발행요청을 진행하세요.</div>
+                  <div class="pm-summary-text pm-tc-validation-guide">현황표 검증 후 <b>청구서 생성·출력</b>으로 청구서를 만든 뒤, 모달에서 인쇄·PDF를 진행하고 세금계산서 발행요청을 하세요.</div>
                   <div class="pm-action-row pm-tc-stage-actions pm-tc-doc-actions pm-tc-bottom-bar">
-                    <button type="button" class="btn btn-sm btn-outline" id="pm-tc-generate-print-btn"><i class="fas fa-print"></i> 청구서 생성·출력</button>
+                    <button type="button" class="btn btn-sm btn-outline" id="pm-tc-generate-print-btn"><i class="fas fa-file-invoice"></i> 청구서 생성·출력</button>
                     <button type="button" class="btn btn-sm btn-primary" id="pm-tc-request-btn"><i class="fas fa-paper-plane"></i> 세금계산서 발행요청</button>
                     <span id="pm-tc-summary" class="pm-summary-text">현재 배치 0건 · 공급가액 0원</span>
                   </div>

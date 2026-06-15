@@ -3403,11 +3403,53 @@ function _pmSyncTimeChargeActionAvailability() {
   apply('pm-tc-upload-cancel-btn', !canWrite || !hasPending);
   apply('pm-tc-save-btn', !canWrite || !hasProject);
   apply('pm-tc-generate-print-btn', !canWrite || !hasProject);
-  apply('pm-tc-invoice-pdf-btn', !canWrite || !hasProject);
+  apply('pm-tc-invoice-print-btn', !canWrite || !hasProject || !invoiceReady);
+  apply('pm-tc-invoice-pdf-btn', !canWrite || !hasProject || !invoiceReady);
   apply('pm-tc-request-btn', !canRequest || !hasProject || !invoiceReady);
   const uploadFile = document.getElementById('pm-tc-upload-file');
   if (uploadFile) uploadFile.disabled = !canWrite || !hasProject || mode === 'timesheet';
   _pmSyncTimeChargeDocTabUi();
+}
+
+function _pmIsTimeChargeInvoiceReady() {
+  const batchId = String(PM_STATE.currentBatch?.id || '').trim();
+  return !!(batchId && PM_STATE.timechargeInvoiceGeneratedByBatch && PM_STATE.timechargeInvoiceGeneratedByBatch[batchId]);
+}
+
+function _pmRequireTimeChargeInvoiceReady() {
+  if (!(PM_STATE.currentLines || []).length) {
+    Toast.warning('먼저 Time Charge 라인을 불러오세요.');
+    return false;
+  }
+  if (!_pmIsTimeChargeInvoiceReady()) {
+    Toast.warning('먼저 청구서 생성·출력 버튼으로 청구서를 생성하세요.');
+    return false;
+  }
+  return true;
+}
+
+function _pmEnsureTimeChargeInvoicePreviewStyles() {
+  let style = document.getElementById('pm-tc-invoice-preview-style');
+  if (!style) {
+    style = document.createElement('style');
+    style.id = 'pm-tc-invoice-preview-style';
+    document.head.appendChild(style);
+  }
+  style.textContent = _pmTimeChargeInvoiceDocStyles();
+}
+
+function _pmTimeChargeInvoicePreviewCacheKey() {
+  const batchId = String(PM_STATE.currentBatch?.id || '').trim();
+  const lineCount = (PM_STATE.currentLines || []).length;
+  const month = String(PM_STATE.currentBatch?.billing_month || '').trim();
+  return `${batchId}:${month}:${lineCount}`;
+}
+
+function _pmRenderTimeChargeInvoiceEmptyGuide() {
+  const wrap = document.getElementById('pm-tc-invoice-modal-preview');
+  if (!wrap) return;
+  delete wrap.dataset.invoiceCacheKey;
+  wrap.innerHTML = '<div class="pm-inv-doc-preview-empty">하단 <b>청구서 생성·출력</b> 버튼을 누르면 청구서가 표시됩니다.</div>';
 }
 
 function _pmHoursText(minutes) {
@@ -3431,23 +3473,141 @@ function _pmSyncTimeChargeDocTabUi() {
   setActive('pm-tc-doc-tab-invoice-btn', tab === 'invoice');
   setActive('pm-tc-doc-tab-tax-btn', tab === 'tax');
   const statusWrap = document.getElementById('pm-tc-doc-status-wrap');
-  const invWrap = document.getElementById('pm-tc-doc-invoice-wrap');
   const taxWrap = document.getElementById('pm-tc-doc-tax-wrap');
-  if (statusWrap) statusWrap.style.display = tab === 'status' ? '' : 'none';
-  if (invWrap) invWrap.style.display = tab === 'invoice' ? '' : 'none';
+  if (statusWrap) statusWrap.style.display = tab === 'tax' ? 'none' : '';
   if (taxWrap) taxWrap.style.display = tab === 'tax' ? '' : 'none';
-  const reqBtn = document.getElementById('pm-tc-request-btn');
-  const closeBtn = document.getElementById('pm-tc-invoice-close-btn');
-  if (reqBtn) reqBtn.style.display = '';
-  if (closeBtn) closeBtn.style.display = tab === 'invoice' ? '' : 'none';
 }
 
-function _pmRenderTimeChargeInvoicePreviewHtml() {
+const PM_TC_COMPANY = {
+  legalName: 'Hanjoo Certified Customs Agency',
+  address: 'Blue square B/D, 217 Bongeunsa-ro, Gangnam-gu, Seoul, 06109, Korea',
+  tel: '+82-2-545-5115',
+  fax: '+82-2-3444-5115',
+  website: 'www.hjcustoms.co.kr',
+  logoPath: 'assets/hanjoo-logo.png',
+};
+
+const PM_TC_INVOICE_LAYOUT = {
+  padX: 14,
+  padY: 18,
+  pdfMarginPt: 16,
+  frameWidth: 794,
+};
+
+const PM_TC_DOC_FONT = "'Malgun Gothic','맑은 고딕',Arial,Helvetica,sans-serif";
+
+const PM_TC_TABLE_BORDER = '#c4ccd7';
+const PM_TC_TABLE_BORDER_WIDTH = '0.5px';
+
+function _pmPublicAssetUrl(relPath) {
+  try {
+    return new URL(String(relPath || ''), window.location.href).href;
+  } catch {
+    return String(relPath || '');
+  }
+}
+
+function _pmTimeChargeInvoiceDocNo(projectCode, billingMonth) {
+  const code = String(projectCode || '').trim() || 'PROJECT';
+  const ym = String(billingMonth || '').replace(/-/g, '').trim();
+  return `HJTC-${code}${ym ? `-${ym}` : ''}`;
+}
+
+function _pmTimeChargeInvoiceDateText(dateInput) {
+  const d = dateInput ? new Date(dateInput) : new Date();
+  if (Number.isNaN(d.getTime())) return '';
+  const months = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
+  return `${d.getDate()}.${months[d.getMonth()]}.${d.getFullYear()}`;
+}
+
+function _pmRenderTimeChargeInvoiceLogoHtml() {
+  const logoUrl = _pmPublicAssetUrl(PM_TC_COMPANY.logoPath);
+  return `<div class="pm-tc-invoice-logo-wrap">
+    <img class="pm-tc-invoice-logo" src="${_pmEsc(logoUrl)}" alt="HANJOO" />
+  </div>`;
+}
+
+function _pmRenderTimeChargeInvoiceLetterhead(projectCode, billingMonth, project) {
+  const docNo = _pmTimeChargeInvoiceDocNo(projectCode, billingMonth);
+  const issueDate = _pmTimeChargeInvoiceDateText();
+  const clientName = String(project?.client_name || '').trim() || '-';
+  const projectName = String(project?.project_name || '').trim() || '-';
+  const billingLabel = String(billingMonth || '').trim() || '-';
+  return `<div class="pm-tc-invoice-letterhead">
+    <div class="pm-tc-invoice-header-row">
+      ${_pmRenderTimeChargeInvoiceLogoHtml()}
+      <div class="pm-tc-invoice-company-block">
+        <div class="pm-tc-invoice-company-name">${_pmEsc(PM_TC_COMPANY.legalName)}</div>
+        <div class="pm-tc-invoice-company-line">${_pmEsc(PM_TC_COMPANY.address)}</div>
+        <div class="pm-tc-invoice-company-line">Tel ${_pmEsc(PM_TC_COMPANY.tel)}&nbsp;&nbsp;&nbsp;Fax ${_pmEsc(PM_TC_COMPANY.fax)}&nbsp;&nbsp;&nbsp;${_pmEsc(PM_TC_COMPANY.website)}</div>
+      </div>
+    </div>
+    <div class="pm-tc-invoice-divider" aria-hidden="true"></div>
+    <h1 class="pm-tc-invoice-title">INVOICE</h1>
+    <div class="pm-tc-invoice-info-row">
+      <div class="pm-tc-invoice-bill-to">
+        <div class="pm-tc-invoice-info-label">Bill To</div>
+        <div class="pm-tc-invoice-info-value">${_pmEsc(clientName)}</div>
+      </div>
+      <div class="pm-tc-invoice-doc-meta">
+        <div class="pm-tc-invoice-meta-line"><span class="pm-tc-invoice-doc-label">INVOICE No.</span> ${_pmEsc(docNo)}</div>
+        <div class="pm-tc-invoice-meta-line"><span class="pm-tc-invoice-doc-label">DATE</span> ${_pmEsc(issueDate)}</div>
+      </div>
+    </div>
+    <div class="pm-tc-invoice-project-strip">
+      <div class="pm-tc-invoice-strip-item">
+        <span class="pm-tc-invoice-info-label">Project Code</span>
+        <span class="pm-tc-invoice-info-value">${_pmEsc(projectCode || '-')}</span>
+      </div>
+      <div class="pm-tc-invoice-strip-item">
+        <span class="pm-tc-invoice-info-label">Project Name</span>
+        <span class="pm-tc-invoice-info-value">${_pmEsc(projectName)}</span>
+      </div>
+      <div class="pm-tc-invoice-strip-item">
+        <span class="pm-tc-invoice-info-label">Billing Month</span>
+        <span class="pm-tc-invoice-info-value">${_pmEsc(billingLabel)}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function _pmTimeChargeBillingContext() {
   const lines = PM_STATE.currentLines || [];
-  if (!lines.length) return '<div class="pm-inv-doc-preview-empty">표시할 타임차지 데이터가 없습니다.</div>';
   const projectCode = String(document.getElementById('pm-tc-project')?.value || PM_STATE.currentBatch?.project_code || '').trim();
   const project = PM_STATE.projectByCode[projectCode] || {};
-  const summaryRich = _pmTimechargeSummaryRich(lines);
+  const billingMonth = String(PM_STATE.currentBatch?.billing_month || _pmTimeChargeBatchMonth(projectCode)).trim();
+  const summaryRich = lines.length ? _pmTimechargeSummaryRich(lines) : [];
+  return { lines, projectCode, project, billingMonth, summaryRich };
+}
+
+function _pmRenderTimeChargeBillingMetaHeader(projectCode, billingMonth, project) {
+  const clientName = String(project?.client_name || '').trim() || '-';
+  const projectName = String(project?.project_name || '').trim() || '-';
+  const billingLabel = String(billingMonth || '').trim() || '-';
+  return `<div class="pm-tc-billing-head">
+    <h3 class="pm-tc-billing-title">청구내역</h3>
+    <div class="pm-tc-billing-meta-strip">
+      <div class="pm-tc-billing-meta-item">
+        <span class="pm-tc-invoice-info-label">프로젝트코드</span>
+        <span class="pm-tc-invoice-info-value">${_pmEsc(projectCode || '-')}</span>
+      </div>
+      <div class="pm-tc-billing-meta-item">
+        <span class="pm-tc-invoice-info-label">고객사</span>
+        <span class="pm-tc-invoice-info-value">${_pmEsc(clientName)}</span>
+      </div>
+      <div class="pm-tc-billing-meta-item">
+        <span class="pm-tc-invoice-info-label">프로젝트명</span>
+        <span class="pm-tc-invoice-info-value">${_pmEsc(projectName)}</span>
+      </div>
+      <div class="pm-tc-billing-meta-item">
+        <span class="pm-tc-invoice-info-label">청구월</span>
+        <span class="pm-tc-invoice-info-value">${_pmEsc(billingLabel)}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function _pmBuildTimeChargeBillingBlocks(projectCode, summaryRich) {
   const summaryRows = summaryRich
     .slice()
     .sort((a, b) => String(a.Consultant).localeCompare(String(b.Consultant), 'ko'));
@@ -3486,19 +3646,17 @@ function _pmRenderTimeChargeInvoicePreviewHtml() {
           <td style="text-align:center">${_pmEsc(r.work_date || '')}</td>
           <td style="text-align:center">${_pmEsc(parts.timeRange || '-')}</td>
           <td style="text-align:center">${_pmEsc(_pmHoursText(minutes))}</td>
-          <td style="text-align:center">${_pmEsc(parts.site || '-')}</td>
-          <td title="${_pmEsc(parts.content || '-')}" style="text-align:center;white-space:normal;word-break:keep-all;line-height:1.4">${_pmEsc(parts.content || '-')}</td>
+          <td title="${_pmEsc(parts.content || '-')}" style="text-align:left;white-space:normal;word-break:keep-all;line-height:1.4">${_pmEsc(parts.content || '-')}</td>
           <td style="text-align:right">${_pmKrw(amount)}</td>
         </tr>`;
       }).join('');
-      return `<div class="tc-detail-section" style="${idx === 0 ? 'margin-top:12px' : 'margin-top:18px'}">
-        <div style="font-size:13px;font-weight:700;color:#0f172a;margin:0 0 6px">${idx + 1}. ${_pmEsc(person.Consultant)} (${_pmEsc(person.Position)})</div>
+      return `<div class="tc-detail-section" style="${idx === 0 ? 'margin-top:4px' : 'margin-top:18px'}">
+        <div class="pm-tc-invoice-person-head">${idx + 1}. ${_pmEsc(person.Consultant)} (${_pmEsc(person.Position)})</div>
         <table class="data-table pm-tc-invoice-detail-table" style="table-layout:fixed;width:100%;margin-top:6px">
           <colgroup>
             <col style="width:44px" />
             <col style="width:96px" />
             <col style="width:96px" />
-            <col style="width:84px" />
             <col style="width:84px" />
             <col />
             <col style="width:112px" />
@@ -3509,7 +3667,6 @@ function _pmRenderTimeChargeInvoicePreviewHtml() {
               <th style="width:120px;text-align:center">용역일자</th>
               <th style="width:120px;text-align:center">수행시간</th>
               <th style="width:90px;text-align:center">투입시간</th>
-              <th style="width:120px;text-align:center">수행장소</th>
               <th style="text-align:center">수행업무</th>
               <th style="width:120px;text-align:center">용역금액</th>
             </tr>
@@ -3517,21 +3674,19 @@ function _pmRenderTimeChargeInvoicePreviewHtml() {
           <tbody>
             ${detailHtml}
             <tr class="pm-tc-subtotal-row">
-              <td colspan="3" style="text-align:center;font-weight:700">개인별 소계</td>
-              <td style="text-align:center;font-weight:700">${_pmEsc(Number(person.Time || 0).toFixed(1))}h</td>
-              <td colspan="2" style="text-align:center;font-weight:700">적용단가 ${_pmKrw(Number(person['Time Rate'] || 0))}</td>
-              <td style="text-align:right;font-weight:700">${_pmKrw(Number(person['Time Charge'] || 0))}</td>
+              <td colspan="3" style="text-align:center;font-weight:500">개인별 소계</td>
+              <td style="text-align:center;font-weight:500">${_pmEsc(Number(person.Time || 0).toFixed(1))}h</td>
+              <td style="text-align:center;font-weight:500">적용단가 ${_pmKrw(Number(person['Time Rate'] || 0))}</td>
+              <td style="text-align:right;font-weight:500">${_pmKrw(Number(person['Time Charge'] || 0))}</td>
             </tr>
           </tbody>
         </table>
       </div>`;
     }).join('');
-  return `<div class="pm-tax-preview-paper">
-    <div class="pm-tax-preview-head">
-      <h4 style="margin:0">컨설팅 용역 보수액 산정 요약(Summary)</h4>
-      <div style="font-size:12px;color:#64748b;margin-top:4px">${_pmEsc(projectCode)} · ${_pmEsc(project.client_name || '-')}</div>
+  return `<div class="pm-tc-invoice-section">
+      <h4 class="pm-tc-invoice-section-title">컨설팅 용역 보수액 산정 요약 (Summary)</h4>
     </div>
-    <table class="data-table pm-tc-invoice-total-table" style="margin-top:8px;table-layout:fixed;width:100%">
+    <table class="data-table pm-tc-invoice-total-table" style="table-layout:fixed;width:100%">
       <colgroup>
         <col />
         <col style="width:180px" />
@@ -3551,8 +3706,10 @@ function _pmRenderTimeChargeInvoicePreviewHtml() {
         </tr>
       </tbody>
     </table>
-    <div style="margin-top:12px;font-size:12px;color:#334155"><b>투입인력 전체 요약</b></div>
-    <table class="data-table pm-tc-invoice-summary-table" style="margin-top:6px;table-layout:fixed;width:100%">
+    <div class="pm-tc-invoice-section">
+      <h4 class="pm-tc-invoice-section-title">투입인력 전체 요약</h4>
+    </div>
+    <table class="data-table pm-tc-invoice-summary-table" style="table-layout:fixed;width:100%">
       <colgroup>
         <col style="width:44px" />
         <col style="width:150px" />
@@ -3564,8 +3721,31 @@ function _pmRenderTimeChargeInvoicePreviewHtml() {
       <thead><tr><th style="width:42px;text-align:center">No</th><th style="text-align:center">Consultant</th><th style="text-align:center">Position</th><th style="text-align:center">Time Rate</th><th style="text-align:center">Time</th><th style="text-align:center">Time Charge</th></tr></thead>
       <tbody>${rowsHtml}</tbody>
     </table>
-    <div style="margin-top:12px;font-size:12px;color:#334155"><b>개인별 상세내역</b></div>
-    ${detailSections}
+    <div class="pm-tc-invoice-section">
+      <h4 class="pm-tc-invoice-section-title">개인별 상세내역</h4>
+    </div>
+    ${detailSections}`;
+}
+
+function _pmRenderTimeChargeBillingDetailHtml() {
+  const { lines, projectCode, project, billingMonth, summaryRich } = _pmTimeChargeBillingContext();
+  if (!lines.length) return '<div class="pm-inv-doc-preview-empty">표시할 타임차지 데이터가 없습니다.</div>';
+  const meta = _pmRenderTimeChargeBillingMetaHeader(projectCode, billingMonth, project);
+  const blocks = _pmBuildTimeChargeBillingBlocks(projectCode, summaryRich);
+  return `<div class="pm-tc-billing-doc pm-tc-billing-page pm-tc-doc-surface">
+    ${meta}
+    ${blocks}
+  </div>`;
+}
+
+function _pmRenderTimeChargeInvoicePreviewHtml() {
+  const { lines, projectCode, project, billingMonth, summaryRich } = _pmTimeChargeBillingContext();
+  if (!lines.length) return '<div class="pm-inv-doc-preview-empty">표시할 타임차지 데이터가 없습니다.</div>';
+  const letterhead = _pmRenderTimeChargeInvoiceLetterhead(projectCode, billingMonth, project);
+  const blocks = _pmBuildTimeChargeBillingBlocks(projectCode, summaryRich);
+  return `<div class="pm-tc-invoice-doc pm-tc-invoice-page pm-tc-doc-surface">
+    ${letterhead}
+    ${blocks}
   </div>`;
 }
 
@@ -3593,11 +3773,70 @@ function _pmRenderTimeChargeTaxPreviewHtml() {
   </div>`;
 }
 
+function _pmHideTimeChargeBillingDetail() {
+  const wrap = document.getElementById('pm-tc-billing-modal-preview');
+  if (wrap) {
+    delete wrap.dataset.billingCacheKey;
+    wrap.innerHTML = '';
+  }
+  if (typeof closeModal === 'function') closeModal('pmTcBillingDetailModal');
+}
+
+function _pmShowTimeChargeBillingDetail(force) {
+  _pmEnsureTimeChargeInvoicePreviewStyles();
+  const wrap = document.getElementById('pm-tc-billing-modal-preview');
+  if (!wrap) return '';
+  const cacheKey = _pmTimeChargeInvoicePreviewCacheKey();
+  if (!force && wrap.dataset.billingCacheKey === cacheKey && wrap.querySelector('.pm-tc-billing-doc')) {
+    return wrap.querySelector('.pm-tc-billing-doc').outerHTML;
+  }
+  const html = _pmRenderTimeChargeBillingDetailHtml();
+  wrap.innerHTML = html;
+  wrap.dataset.billingCacheKey = cacheKey;
+  return html;
+}
+
+function _pmRequireTimeChargeBillingLines() {
+  if (!(PM_STATE.currentLines || []).length) {
+    Toast.warning('먼저 Time Charge 라인을 불러오세요.');
+    return false;
+  }
+  return true;
+}
+
+function _pmShowTimeChargeInvoicePreview(force) {
+  _pmEnsureTimeChargeInvoicePreviewStyles();
+  const wrap = document.getElementById('pm-tc-invoice-modal-preview');
+  if (!wrap) return '';
+  const cacheKey = _pmTimeChargeInvoicePreviewCacheKey();
+  if (!force && wrap.dataset.invoiceCacheKey === cacheKey && wrap.querySelector('.pm-tc-invoice-doc')) {
+    return wrap.querySelector('.pm-tc-invoice-doc').outerHTML;
+  }
+  const html = _pmRenderTimeChargeInvoicePreviewHtml();
+  wrap.innerHTML = html;
+  wrap.dataset.invoiceCacheKey = cacheKey;
+  return html;
+}
+
+function pmTimeChargeOpenInvoiceModal(force) {
+  if (!(PM_STATE.currentLines || []).length) {
+    Toast.warning('먼저 Time Charge 라인을 불러오세요.');
+    return;
+  }
+  if (!_pmIsTimeChargeInvoiceReady()) {
+    _pmRenderTimeChargeInvoiceEmptyGuide();
+    if (typeof openModal === 'function') openModal('pmTcInvoiceModal');
+    Toast.info('청구서가 아직 생성되지 않았습니다. 하단 청구서 생성·출력 버튼을 사용하세요.');
+    return;
+  }
+  _pmShowTimeChargeInvoicePreview(force);
+  if (typeof openModal === 'function') openModal('pmTcInvoiceModal');
+}
+
 function pmPreviewTimeChargeDocument() {
   const tab = PM_STATE.timechargeDocTab || 'status';
   if (tab === 'invoice') {
-    const wrap = document.getElementById('pm-tc-invoice-preview');
-    if (wrap) wrap.innerHTML = _pmRenderTimeChargeInvoicePreviewHtml();
+    pmTimeChargeOpenInvoiceModal();
     return;
   }
   if (tab === 'tax') {
@@ -3608,8 +3847,280 @@ function pmPreviewTimeChargeDocument() {
   Toast.info('타임쉬트 현황표는 현재 화면에서 바로 확인할 수 있습니다.');
 }
 
-function _pmBuildTimeChargePrintHtml(html) {
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Time Charge Print</title><style>body{font-family:Arial,sans-serif;padding:20px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #cbd5e1;padding:8px;font-size:12px;vertical-align:middle;text-align:center}th{background:#f1f5f9}.pm-tc-subtotal-row td{background:#f8fbff;font-weight:700}.pm-tc-invoice-detail-table td:nth-child(6){text-align:center;white-space:normal;word-break:keep-all;line-height:1.4}.pm-tc-invoice-summary-table td:nth-child(4),.pm-tc-invoice-summary-table td:nth-child(6),.pm-tc-invoice-detail-table td:nth-child(7){text-align:right}.tc-detail-section{break-inside:avoid;page-break-inside:avoid}</style></head><body>${html}</body></html>`;
+function _pmTimeChargePdfPageHeightPx() {
+  const { frameWidth, pdfMarginPt } = PM_TC_INVOICE_LAYOUT;
+  const a4Ratio = (841.89 - pdfMarginPt * 2) / 595.28;
+  return Math.floor(frameWidth * a4Ratio);
+}
+
+function _pmTimeChargeDocSurfaceTableCss() {
+  const border = PM_TC_TABLE_BORDER;
+  const borderWidth = PM_TC_TABLE_BORDER_WIDTH;
+  const scope = '.pm-tc-doc-surface,.pm-tc-export-mode .pm-tc-billing-doc,.pm-tc-export-mode .pm-tc-invoice-doc,.pm-tc-pdf-page';
+  return `
+${scope} .data-table{border-collapse:collapse!important;border-spacing:0!important;table-layout:fixed!important;width:100%!important;font-size:12px!important}
+${scope} .data-table th,${scope} .data-table td{border:${borderWidth} solid ${border}!important;background:#fff!important;padding:8px!important;vertical-align:middle!important;box-sizing:border-box!important;max-width:none!important;white-space:normal!important;overflow:visible!important;text-overflow:clip!important;font-family:${PM_TC_DOC_FONT}!important;font-weight:400!important;color:#111827!important}
+${scope} .data-table thead th{background:#fff!important;font-weight:500!important;color:#374151!important;text-align:center!important}
+${scope} .data-table tbody tr:hover{background:transparent!important}
+${scope} .pm-tc-invoice-total-table tbody th,${scope} .pm-tc-invoice-total-table tbody td{background:#fff!important}
+${scope} .pm-tc-invoice-total-table .pm-tc-invoice-total-claim-row th,${scope} .pm-tc-invoice-total-table .pm-tc-invoice-total-claim-row td{background:#fff!important;font-weight:600!important;color:#0f172a!important}
+${scope} .pm-tc-subtotal-row td{background:#fff!important}
+${scope} .pm-tc-invoice-detail-table td:nth-child(5){text-align:left!important}
+${scope} .pm-tc-invoice-summary-table td:nth-child(4),${scope} .pm-tc-invoice-summary-table td:nth-child(6),${scope} .pm-tc-invoice-detail-table td:nth-child(6){text-align:right!important}`;
+}
+
+function _pmApplyTimeChargeCrispTableBorders(rootDoc) {
+  const border = PM_TC_TABLE_BORDER;
+  const borderWidth = PM_TC_TABLE_BORDER_WIDTH;
+  const doc = rootDoc || document;
+  doc.querySelectorAll('.pm-tc-doc-surface table, .pm-tc-billing-doc table, .pm-tc-invoice-doc table, .pm-tc-pdf-page table').forEach((table) => {
+    table.style.borderCollapse = 'collapse';
+    table.style.borderSpacing = '0';
+    table.querySelectorAll('th,td').forEach((cell) => {
+      cell.style.border = `${borderWidth} solid ${border}`;
+      cell.style.background = '#ffffff';
+      cell.style.boxSizing = 'border-box';
+      cell.style.fontFamily = PM_TC_DOC_FONT;
+      cell.style.fontWeight = cell.closest('thead') ? '500' : '400';
+    });
+  });
+}
+
+function _pmGetTimeChargeBillingHtmlForExport() {
+  _pmEnsureTimeChargeInvoicePreviewStyles();
+  _pmShowTimeChargeBillingDetail(true);
+  const docEl = document.querySelector('#pm-tc-billing-modal-preview .pm-tc-billing-doc');
+  return docEl?.outerHTML || _pmRenderTimeChargeBillingDetailHtml();
+}
+
+function _pmGetTimeChargeInvoiceHtmlForExport() {
+  _pmEnsureTimeChargeInvoicePreviewStyles();
+  _pmShowTimeChargeInvoicePreview(true);
+  const docEl = document.querySelector('#pm-tc-invoice-modal-preview .pm-tc-invoice-doc');
+  return docEl?.outerHTML || _pmRenderTimeChargeInvoicePreviewHtml();
+}
+
+function _pmTimeChargeExportResetCss() {
+  return _pmTimeChargeDocSurfaceTableCss();
+}
+
+async function _pmWaitTimeChargeExportDocumentReady(doc) {
+  const links = Array.from(doc.querySelectorAll('link[rel="stylesheet"]'));
+  if (links.length) {
+    await Promise.all(links.map((link) => new Promise((resolve) => {
+      if (link.sheet) return resolve();
+      link.addEventListener('load', resolve, { once: true });
+      link.addEventListener('error', resolve, { once: true });
+      setTimeout(resolve, 2000);
+    })));
+  }
+  if (doc.fonts && typeof doc.fonts.ready === 'object') {
+    await doc.fonts.ready.catch(() => {});
+  }
+  await new Promise((resolve) => setTimeout(resolve, 300));
+}
+
+function _pmTimeChargeInvoiceDocStyles() {
+  const { padX, padY, frameWidth } = PM_TC_INVOICE_LAYOUT;
+  const font = PM_TC_DOC_FONT;
+  const docScope = '.pm-tc-invoice-doc,.pm-tc-billing-doc,.pm-tc-pdf-page,.pm-tc-doc-surface';
+  return `
+.pm-tc-billing-page{width:${frameWidth}px;max-width:100%;margin:0 auto;padding:${padY}px ${padX}px;box-sizing:border-box}
+.pm-tc-billing-title{margin:0 0 12px;font-size:16px;font-weight:600;color:#0f172a;text-align:center!important}
+.pm-tc-billing-meta-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 18px;margin:0 0 22px;padding:12px 14px;border:1px solid #dbe3ef;border-radius:8px;background:#f8fafc}
+.pm-tc-billing-meta-item{display:flex;flex-direction:column;gap:3px;font-size:12px}
+.pm-tc-invoice-page{width:${frameWidth}px;max-width:100%;margin:0 auto;padding:${padY}px ${padX}px;box-sizing:border-box}
+.pm-tc-invoice-doc,.pm-tc-billing-doc,.pm-tc-pdf-page{font-family:${font};font-weight:400;color:#111827;background:#fff;width:100%;max-width:100%;margin:0;box-sizing:border-box;padding:0}
+.pm-tc-invoice-header-row{display:flex!important;align-items:flex-end;justify-content:space-between;gap:28px;padding:0 2px}
+.pm-tc-invoice-logo-wrap{flex:0 0 auto;display:flex;align-items:flex-end;min-width:92px}
+.pm-tc-invoice-logo{height:88px;width:auto;display:block}
+.pm-tc-invoice-company-block{flex:1;text-align:right;padding:0}
+.pm-tc-invoice-company-name{font-size:20px;font-weight:600;margin-bottom:8px;color:#111827}
+.pm-tc-invoice-company-line{font-size:12px;line-height:1.65;color:#334155;font-weight:400}
+.pm-tc-invoice-divider{display:block;width:100%;height:0;border:none;border-top:2px solid #000;margin:16px 0 22px;background:transparent;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.pm-tc-invoice-doc h1.pm-tc-invoice-title{display:block;width:100%;margin:0 0 20px;font-size:36px;letter-spacing:5px;font-weight:600;text-align:center!important;color:#111827}
+.pm-tc-invoice-info-row{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:14px}
+.pm-tc-invoice-bill-to{flex:1;min-width:0;text-align:left!important}
+.pm-tc-invoice-info-label{display:block;font-size:11px;font-weight:500;color:#64748b;letter-spacing:.3px;margin-bottom:4px}
+.pm-tc-invoice-info-value{font-size:13px;color:#111827;line-height:1.5;font-weight:400}
+.pm-tc-invoice-doc-meta{text-align:right;font-size:12px;line-height:1.85;min-width:240px;font-weight:400}
+.pm-tc-invoice-meta-line{white-space:nowrap}
+.pm-tc-invoice-doc-label{font-weight:500;color:#111827;margin-right:8px}
+.pm-tc-invoice-project-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 18px;margin:0 0 22px;padding:12px 14px;border:1px solid #dbe3ef;border-radius:8px;background:#f8fafc}
+.pm-tc-invoice-strip-item{display:flex;flex-direction:column;gap:3px;font-size:12px}
+.pm-tc-invoice-section{margin:20px 0 8px;text-align:left}
+.pm-tc-invoice-section-title{margin:0;font-size:13px;font-weight:600;color:#0f172a;text-align:left!important}
+.pm-tc-invoice-person-head{font-size:13px;font-weight:600;color:#0f172a;margin:0 0 6px;text-align:left!important}
+${_pmTimeChargeDocSurfaceTableCss()}
+.tc-detail-section{break-inside:auto;page-break-inside:auto}
+.tc-detail-section .pm-tc-invoice-person-head{break-after:avoid;page-break-after:avoid}
+.pm-tc-pdf-page{box-sizing:border-box;background:#fff;overflow:hidden}
+@media print{
+html,body{overflow:visible!important;height:auto!important;font-family:${font}}
+.pm-tc-invoice-doc thead,.pm-tc-billing-doc thead,.pm-tc-pdf-page thead{display:table-header-group!important}
+.pm-tc-invoice-doc table,.pm-tc-billing-doc table,.pm-tc-pdf-page table{page-break-inside:auto}
+.pm-tc-invoice-detail-table thead tr,.pm-tc-invoice-summary-table thead tr{break-inside:avoid;page-break-inside:avoid}
+.pm-tc-invoice-detail-table tbody tr,.pm-tc-invoice-summary-table tbody tr{break-inside:avoid;page-break-inside:avoid}
+.tc-detail-section{break-inside:auto;page-break-inside:auto}
+}`;
+}
+
+function _pmMeasureTimeChargeNodeHeight(doc, node, frameWidth) {
+  const body = doc.body;
+  const probe = doc.createElement('div');
+  probe.style.position = 'absolute';
+  probe.style.left = '-20000px';
+  probe.style.top = '0';
+  probe.style.width = `${frameWidth}px`;
+  probe.style.visibility = 'hidden';
+  probe.style.pointerEvents = 'none';
+  probe.appendChild(node.cloneNode(true));
+  body.appendChild(probe);
+  const h = probe.offsetHeight;
+  body.removeChild(probe);
+  return h;
+}
+
+function _pmCreateTimeChargePdfPage(doc, frameWidth, root) {
+  const page = doc.createElement('div');
+  const isBilling = root?.classList?.contains('pm-tc-billing-doc');
+  const pageClass = isBilling ? 'pm-tc-billing-page' : 'pm-tc-invoice-page';
+  const docClass = isBilling ? 'pm-tc-billing-doc' : 'pm-tc-invoice-doc';
+  page.className = `${docClass} pm-tc-pdf-page ${pageClass}`;
+  page.style.width = `${frameWidth}px`;
+  page.style.boxSizing = 'border-box';
+  page.style.background = '#fff';
+  page.style.overflow = 'hidden';
+  return page;
+}
+
+function _pmCloneTimeChargeDetailTableChunk(doc, table, dataRows, includeSubtotal, subtotalRow, includeThead) {
+  const newTable = doc.createElement('table');
+  newTable.className = table.className;
+  const tableStyle = table.getAttribute('style');
+  if (tableStyle) newTable.setAttribute('style', tableStyle);
+  const colgroup = table.querySelector('colgroup');
+  const thead = table.querySelector('thead');
+  if (colgroup) newTable.appendChild(colgroup.cloneNode(true));
+  if (includeThead !== false && thead) newTable.appendChild(thead.cloneNode(true));
+  const tbody = doc.createElement('tbody');
+  dataRows.forEach((row) => tbody.appendChild(row.cloneNode(true)));
+  if (includeSubtotal && subtotalRow) tbody.appendChild(subtotalRow.cloneNode(true));
+  newTable.appendChild(tbody);
+  return newTable;
+}
+
+function _pmAppendTimeChargeDetailSectionPages(doc, section, pageState) {
+  const { frameWidth, maxPageHeight } = pageState;
+  const personHead = section.querySelector('.pm-tc-invoice-person-head');
+  const table = section.querySelector('.pm-tc-invoice-detail-table');
+  if (!table) {
+    _pmAppendTimeChargePdfNode(doc, section.cloneNode(true), pageState);
+    return;
+  }
+  const tbody = table.querySelector('tbody');
+  if (!tbody) {
+    _pmAppendTimeChargePdfNode(doc, section.cloneNode(true), pageState);
+    return;
+  }
+  const allRows = [...tbody.querySelectorAll('tr')];
+  const subtotalRow = allRows.find((row) => row.classList.contains('pm-tc-subtotal-row')) || null;
+  const dataRows = allRows.filter((row) => !row.classList.contains('pm-tc-subtotal-row'));
+  let personHeadUsed = false;
+
+  const buildChunk = (chunkRows, isLast) => {
+    const wrap = doc.createElement('div');
+    wrap.className = section.className || 'tc-detail-section';
+    const sectionStyle = section.getAttribute('style');
+    if (sectionStyle) wrap.setAttribute('style', sectionStyle);
+    if (personHead && !personHeadUsed) {
+      wrap.appendChild(personHead.cloneNode(true));
+      personHeadUsed = true;
+    }
+    wrap.appendChild(_pmCloneTimeChargeDetailTableChunk(doc, table, chunkRows, isLast, subtotalRow, true));
+    return wrap;
+  };
+
+  const appendChunk = (chunkRows, isLast) => {
+    if (!chunkRows.length) return;
+    _pmAppendTimeChargePdfNode(doc, buildChunk(chunkRows, isLast), pageState);
+  };
+
+  let chunk = [];
+  dataRows.forEach((row) => {
+    const trial = buildChunk([...chunk, row], false);
+    const trialHeight = _pmMeasureTimeChargeNodeHeight(doc, trial, frameWidth);
+    const currentHeight = pageState.page.offsetHeight;
+    const overflow = pageState.page.childNodes.length > 0 && currentHeight + trialHeight > maxPageHeight;
+    if (overflow && chunk.length > 0) {
+      appendChunk(chunk, false);
+      _pmStartTimeChargePdfPage(doc, pageState);
+      chunk = [row];
+      return;
+    }
+    if (overflow && chunk.length === 0) {
+      _pmStartTimeChargePdfPage(doc, pageState);
+      chunk = [row];
+      return;
+    }
+    chunk.push(row);
+  });
+  appendChunk(chunk, true);
+}
+
+function _pmStartTimeChargePdfPage(doc, pageState) {
+  const page = _pmCreateTimeChargePdfPage(doc, pageState.frameWidth, pageState.root);
+  doc.body.appendChild(page);
+  pageState.page = page;
+  pageState.pages.push(page);
+}
+
+function _pmAppendTimeChargePdfNode(doc, node, pageState) {
+  const { frameWidth, maxPageHeight } = pageState;
+  const nodeHeight = _pmMeasureTimeChargeNodeHeight(doc, node, frameWidth);
+  const currentHeight = pageState.page.offsetHeight;
+  if (pageState.page.childNodes.length > 0 && currentHeight + nodeHeight > maxPageHeight) {
+    _pmStartTimeChargePdfPage(doc, pageState);
+  }
+  pageState.page.appendChild(node);
+}
+
+function _pmPaginateTimeChargeDocForPdf(doc) {
+  const { frameWidth } = PM_TC_INVOICE_LAYOUT;
+  const root = doc.body.querySelector('.pm-tc-invoice-doc, .pm-tc-billing-doc') || doc.body.firstElementChild;
+  if (!root) return [];
+  const sourceChildren = [...root.children];
+  doc.body.innerHTML = '';
+  doc.body.style.margin = '0';
+  doc.body.style.padding = '0';
+  doc.body.style.background = '#fff';
+  const pageState = {
+    root,
+    frameWidth,
+    maxPageHeight: _pmTimeChargePdfPageHeightPx(),
+    pages: [],
+    page: null,
+  };
+  _pmStartTimeChargePdfPage(doc, pageState);
+  sourceChildren.forEach((child) => {
+    if (child.classList?.contains('tc-detail-section')) {
+      _pmAppendTimeChargeDetailSectionPages(doc, child, pageState);
+      return;
+    }
+    _pmAppendTimeChargePdfNode(doc, child.cloneNode(true), pageState);
+  });
+  return pageState.pages;
+}
+
+function _pmBuildTimeChargePrintHtml(html, title) {
+  const { frameWidth } = PM_TC_INVOICE_LAYOUT;
+  const docTitle = String(title || 'Time Charge Document').trim();
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${docTitle}</title><style>
+html{margin:0;padding:0;width:${frameWidth}px}
+@page{size:A4;margin:0}
+body.pm-tc-export-mode{font-family:${PM_TC_DOC_FONT};width:${frameWidth}px;box-sizing:border-box;padding:0;color:#111827;background:#fff;margin:0}
+${_pmTimeChargeInvoiceDocStyles()}
+</style></head><body class="pm-tc-export-mode">${html}</body></html>`;
 }
 
 async function _pmEnsureTimeChargeInvoiceGenerated() {
@@ -3639,111 +4150,16 @@ async function _pmEnsureTimeChargeInvoiceGenerated() {
 async function pmGenerateAndPrintTimeChargeDocument() {
   const generated = await _pmEnsureTimeChargeInvoiceGenerated();
   if (!generated) return;
-  pmTimeChargeSwitchDocTab('invoice');
-  pmPrintTimeChargeDocument();
+  pmTimeChargeOpenInvoiceModal(true);
+  Toast.success('청구서를 생성했습니다. 인쇄·PDF 버튼을 사용하세요.');
 }
 
-async function _pmEnsureJsPdfForTimeCharge() {
-  if (window.jspdf && window.html2canvas) return true;
-  const loadScript = (src) => new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = src;
-    s.async = true;
-    s.onload = resolve;
-    s.onerror = () => reject(new Error(`스크립트 로드 실패: ${src}`));
-    document.head.appendChild(s);
-  });
-  try {
-    if (!window.html2canvas) await loadScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js');
-    if (!window.jspdf) await loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js');
-    return !!(window.jspdf && window.html2canvas);
-  } catch (e) {
-    console.warn(e);
-    return false;
-  }
-}
-
-async function pmDownloadTimeChargePdf() {
-  const generated = await _pmEnsureTimeChargeInvoiceGenerated();
-  if (!generated) return;
-  const html = _pmRenderTimeChargeInvoicePreviewHtml();
-  const wrap = document.getElementById('pm-tc-invoice-preview');
-  if (wrap) wrap.innerHTML = html;
-  pmTimeChargeSwitchDocTab('invoice');
-  const ok = await _pmEnsureJsPdfForTimeCharge();
-  if (!ok) {
-    Toast.warning('PDF 라이브러리를 불러오지 못해 인쇄 대화상자로 전환합니다.');
-    pmPrintTimeChargeDocument();
-    return;
-  }
-  let container = null;
-  try {
-    const { jsPDF } = window.jspdf;
-    container = document.createElement('div');
-    container.style.position = 'fixed';
-    container.style.left = '-100000px';
-    container.style.top = '0';
-    container.style.width = '1024px';
-    container.style.background = '#ffffff';
-    container.innerHTML = html;
-    document.body.appendChild(container);
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    const canvas = await window.html2canvas(container, {
-      scale: 2,
-      useCORS: true,
-      backgroundColor: '#ffffff',
-      logging: false,
-    });
-    const imgData = canvas.toDataURL('image/jpeg', 0.98);
-    const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' });
-    const margin = 24;
-    const pageW = doc.internal.pageSize.getWidth();
-    const pageH = doc.internal.pageSize.getHeight();
-    const usableW = pageW - margin * 2;
-    const usableH = pageH - margin * 2;
-    const imgW = usableW;
-    const imgH = (canvas.height * imgW) / canvas.width;
-    let remainingH = imgH;
-    let y = margin;
-    doc.addImage(imgData, 'JPEG', margin, y, imgW, imgH, undefined, 'FAST');
-    remainingH -= usableH;
-    while (remainingH > 0) {
-      doc.addPage();
-      y = margin - (imgH - remainingH);
-      doc.addImage(imgData, 'JPEG', margin, y, imgW, imgH, undefined, 'FAST');
-      remainingH -= usableH;
-    }
-    const code = generated.projectCode || 'timecharge';
-    const month = String(generated.batch?.billing_month || _pmNowMonth()).replace('-', '');
-    doc.save(`타임차지청구서_${code}_${month}.pdf`);
-  } catch (e) {
-    console.error(e);
-    Toast.error('PDF 다운로드 실패: ' + (e.message || ''));
-  } finally {
-    if (container && container.parentNode) container.parentNode.removeChild(container);
-  }
-}
-
-function pmPrintTimeChargeDocument() {
-  const tab = PM_STATE.timechargeDocTab || 'status';
-  let html = '';
-  if (tab === 'status') {
-    const source = document.getElementById('pm-tc-doc-status-wrap');
-    html = String(source?.innerHTML || '').trim();
-  } else if (tab === 'invoice') {
-    html = _pmRenderTimeChargeInvoicePreviewHtml();
-    const wrap = document.getElementById('pm-tc-invoice-preview');
-    if (wrap) wrap.innerHTML = html;
-  } else {
-    html = _pmRenderTimeChargeTaxPreviewHtml();
-    const wrap = document.getElementById('pm-tc-tax-preview');
-    if (wrap) wrap.innerHTML = html;
-  }
+function _pmPrintTimeChargeHtmlDocument(html, title) {
   if (!String(html || '').trim()) {
     Toast.warning('출력할 내용이 없습니다.');
     return;
   }
-  const printDocHtml = _pmBuildTimeChargePrintHtml(html);
+  const printDocHtml = _pmBuildTimeChargePrintHtml(html, title);
   const frameId = 'pm-print-frame';
   let frame = document.getElementById(frameId);
   if (frame && frame.parentNode) frame.parentNode.removeChild(frame);
@@ -3767,7 +4183,7 @@ function pmPrintTimeChargeDocument() {
   printDoc.open();
   printDoc.write(printDocHtml);
   printDoc.close();
-  setTimeout(() => {
+  const runPrint = () => {
     try {
       printWin.focus();
       printWin.print();
@@ -3780,7 +4196,195 @@ function pmPrintTimeChargeDocument() {
         if (old && old.parentNode) old.parentNode.removeChild(old);
       }, 800);
     }
-  }, 80);
+  };
+  _pmWaitTimeChargeExportDocumentReady(printDoc).then(() => {
+    setTimeout(runPrint, 80);
+  });
+}
+
+async function _pmDownloadTimeChargeHtmlPdf(html, filenameBase) {
+  const ok = await _pmEnsureJsPdfForTimeCharge();
+  if (!ok) {
+    Toast.warning('PDF 라이브러리를 불러오지 못해 인쇄 대화상자로 전환합니다.');
+    _pmPrintTimeChargeHtmlDocument(html, filenameBase);
+    return;
+  }
+  let frame = null;
+  try {
+    const { jsPDF } = window.jspdf;
+    const { frameWidth, pdfMarginPt: margin } = PM_TC_INVOICE_LAYOUT;
+    const mounted = await _pmMountTimeChargePrintDocument(html, { paginateForPdf: true });
+    frame = mounted.frame;
+    const { pages } = mounted;
+    const pageEls = Array.isArray(pages) && pages.length ? pages : [mounted.captureEl];
+    const pdfDoc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' });
+    const pageW = pdfDoc.internal.pageSize.getWidth();
+    const usableW = pageW - margin * 2;
+    for (let i = 0; i < pageEls.length; i += 1) {
+      const pageEl = pageEls[i];
+      const pageHeight = Math.max(pageEl.offsetHeight, 1);
+      const canvas = await window.html2canvas(pageEl, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+        scrollX: 0,
+        scrollY: 0,
+        x: 0,
+        y: 0,
+        width: frameWidth,
+        height: pageHeight,
+        windowWidth: frameWidth,
+        windowHeight: pageHeight,
+      });
+      if (i > 0) pdfDoc.addPage();
+      const imgH = (canvas.height * usableW) / canvas.width;
+      pdfDoc.addImage(canvas.toDataURL('image/png'), 'PNG', margin, margin, usableW, imgH, undefined, 'FAST');
+    }
+    pdfDoc.save(`${filenameBase}.pdf`);
+  } catch (e) {
+    console.error(e);
+    Toast.error('PDF 다운로드 실패: ' + (e.message || ''));
+  } finally {
+    _pmUnmountTimeChargePrintFrame(frame);
+  }
+}
+
+function pmPrintTimeChargeBillingDetail() {
+  if (!_pmRequireTimeChargeBillingLines()) return;
+  const html = _pmGetTimeChargeBillingHtmlForExport();
+  _pmPrintTimeChargeHtmlDocument(html, '타임차지 청구내역');
+}
+
+async function pmDownloadTimeChargeBillingPdf() {
+  if (!_pmRequireTimeChargeBillingLines()) return;
+  const html = _pmGetTimeChargeBillingHtmlForExport();
+  const code = String(PM_STATE.currentBatch?.project_code || document.getElementById('pm-tc-project')?.value || 'timecharge').trim();
+  const month = String(PM_STATE.currentBatch?.billing_month || _pmNowMonth()).replace('-', '');
+  await _pmDownloadTimeChargeHtmlPdf(html, `타임차지청구내역_${code}_${month}`);
+}
+
+function pmPrintTimeChargeInvoice() {
+  if (!_pmRequireTimeChargeInvoiceReady()) return;
+  const html = _pmGetTimeChargeInvoiceHtmlForExport();
+  _pmPrintTimeChargeHtmlDocument(html, '타임차지 청구서');
+}
+
+async function _pmEnsureJsPdfForTimeCharge() {
+  if (window.jspdf && window.html2canvas) return true;
+  const loadScript = (src) => new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error(`스크립트 로드 실패: ${src}`));
+    document.head.appendChild(s);
+  });
+  try {
+    if (!window.html2canvas) await loadScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js');
+    if (!window.jspdf) await loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js');
+    return !!(window.jspdf && window.html2canvas);
+  } catch (e) {
+    console.warn(e);
+    return false;
+  }
+}
+
+async function _pmMountTimeChargePrintDocument(html, options) {
+  const opts = options || {};
+  const { frameWidth } = PM_TC_INVOICE_LAYOUT;
+  const printDocHtml = _pmBuildTimeChargePrintHtml(html);
+  const frame = document.createElement('iframe');
+  frame.style.position = 'fixed';
+  frame.style.left = '-12000px';
+  frame.style.top = '0';
+  frame.style.width = `${frameWidth}px`;
+  frame.style.height = '800px';
+  frame.style.border = '0';
+  frame.style.overflow = 'hidden';
+  frame.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(frame);
+  const win = frame.contentWindow;
+  const doc = frame.contentDocument || win?.document;
+  if (!doc) throw new Error('iframe 문서를 생성할 수 없습니다.');
+  doc.open();
+  doc.write(printDocHtml);
+  doc.close();
+  doc.body.classList.add('pm-tc-export-mode');
+  doc.documentElement.style.overflow = 'hidden';
+  doc.body.style.overflow = 'hidden';
+  await _pmWaitTimeChargeExportDocumentReady(doc);
+  _pmApplyTimeChargeCrispTableBorders(doc);
+  const captureEl = doc.body;
+  const imgs = Array.from(captureEl.querySelectorAll('img'));
+  await Promise.all(imgs.map((img) => {
+    if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+    return new Promise((resolve) => {
+      img.onload = resolve;
+      img.onerror = resolve;
+      setTimeout(resolve, 3000);
+    });
+  }));
+  let pages = null;
+  if (opts.paginateForPdf) {
+    pages = _pmPaginateTimeChargeDocForPdf(doc);
+    _pmApplyTimeChargeCrispTableBorders(doc);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    frame.style.height = `${Math.max(doc.body.scrollHeight + 48, 800)}px`;
+  } else {
+    frame.style.height = `${Math.max(captureEl.scrollHeight + 48, 800)}px`;
+  }
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  return { frame, captureEl, frameWidth, pages };
+}
+
+function _pmUnmountTimeChargePrintFrame(frame) {
+  if (frame && frame.parentNode) frame.parentNode.removeChild(frame);
+}
+
+function _pmAddCanvasPagesToPdf(doc, canvas, margin) {
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const usableW = pageW - margin * 2;
+  const usableH = pageH - margin * 2;
+  const imgW = usableW;
+  const imgH = (canvas.height * imgW) / canvas.width;
+  const imgData = canvas.toDataURL('image/png');
+  let heightLeft = imgH;
+  let position = margin;
+  doc.addImage(imgData, 'PNG', margin, position, imgW, imgH, undefined, 'FAST');
+  heightLeft -= usableH;
+  while (heightLeft > 0) {
+    position = margin - (imgH - heightLeft);
+    doc.addPage();
+    doc.addImage(imgData, 'PNG', margin, position, imgW, imgH, undefined, 'FAST');
+    heightLeft -= usableH;
+  }
+}
+
+async function pmDownloadTimeChargePdf() {
+  if (!_pmRequireTimeChargeInvoiceReady()) return;
+  const html = _pmGetTimeChargeInvoiceHtmlForExport();
+  const code = String(PM_STATE.currentBatch?.project_code || document.getElementById('pm-tc-project')?.value || 'timecharge').trim();
+  const month = String(PM_STATE.currentBatch?.billing_month || _pmNowMonth()).replace('-', '');
+  await _pmDownloadTimeChargeHtmlPdf(html, `타임차지청구서_${code}_${month}`);
+}
+
+function pmPrintTimeChargeDocument() {
+  const tab = PM_STATE.timechargeDocTab || 'status';
+  let html = '';
+  if (tab === 'status') {
+    const source = document.getElementById('pm-tc-doc-status-wrap');
+    html = String(source?.innerHTML || '').trim();
+  } else if (tab === 'invoice') {
+    html = _pmShowTimeChargeInvoicePreview();
+  } else {
+    html = _pmRenderTimeChargeTaxPreviewHtml();
+    const wrap = document.getElementById('pm-tc-tax-preview');
+    if (wrap) wrap.innerHTML = html;
+  }
+  _pmPrintTimeChargeHtmlDocument(html, 'Time Charge');
 }
 
 function pmTimeChargeSwitchViewTab(tab) {
@@ -3897,16 +4501,11 @@ async function init_project_management() {
     document.getElementById('pm-tc-upload-save-btn')?.addEventListener('click', pmCommitPendingTimeChargeUpload);
     document.getElementById('pm-tc-upload-cancel-btn')?.addEventListener('click', pmCancelPendingTimeChargeUpload);
     document.getElementById('pm-tc-generate-print-btn')?.addEventListener('click', pmGenerateAndPrintTimeChargeDocument);
+    document.getElementById('pm-tc-invoice-print-btn')?.addEventListener('click', pmPrintTimeChargeInvoice);
     document.getElementById('pm-tc-invoice-pdf-btn')?.addEventListener('click', pmDownloadTimeChargePdf);
+    document.getElementById('pm-tc-billing-print-btn')?.addEventListener('click', pmPrintTimeChargeBillingDetail);
+    document.getElementById('pm-tc-billing-pdf-btn')?.addEventListener('click', pmDownloadTimeChargeBillingPdf);
     document.getElementById('pm-tc-request-btn')?.addEventListener('click', requestTimeChargeInvoice);
-    document.getElementById('pm-tc-invoice-close-btn')?.addEventListener('click', () => {
-      pmTimeChargeSwitchDocTab('status');
-      pmTimeChargeSwitchViewTab('overall');
-      const wrap = document.getElementById('pm-tc-doc-status-wrap');
-      if (wrap) {
-        try { wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (_) {}
-      }
-    });
     document.getElementById('pm-tc-project')?.addEventListener('change', () => {
       _pmSyncTimeChargeActionAvailability();
       loadProjectMgmtTimeCharge();
@@ -5910,7 +6509,7 @@ function _pmRenderTimechargeUploadPendingState() {
     if (minEl) minEl.textContent = '0분';
     if (issueEl) issueEl.textContent = '0 / 0';
     if (pendingWrap) pendingWrap.style.display = 'none';
-    if (pendingBody) pendingBody.innerHTML = '<tr><td colspan="8" class="table-empty"><i class="fas fa-inbox"></i><p>검토 중인 데이터가 없습니다.</p></td></tr>';
+    if (pendingBody) pendingBody.innerHTML = '<tr><td colspan="7" class="table-empty"><i class="fas fa-inbox"></i><p>검토 중인 데이터가 없습니다.</p></td></tr>';
     _pmSyncTimeChargeActionAvailability();
     return;
   }
@@ -5932,7 +6531,6 @@ function _pmRenderTimechargeUploadPendingState() {
         <td>${_pmEsc(r.user_name || '-')}</td>
         <td>${_pmEsc(parts.timeRange)}</td>
         <td>${_pmEsc(_pmHoursText(Number(r.final_minutes || r.base_minutes || 0)))}</td>
-        <td>${_pmEsc(parts.site)}</td>
         <td title="${_pmEsc(parts.content)}">${_pmEsc(parts.content)}</td>
         <td style="text-align:center"><span class="badge badge-blue">검토대기</span></td>
       </tr>`;
@@ -5995,6 +6593,7 @@ function _pmSyncTimeChargePeriodRange(lines) {
 }
 
 function _pmRenderTimeChargeStatusSummary(projectCode, batch, lines) {
+  _pmHideTimeChargeBillingDetail();
   const body = document.getElementById('pm-tc-status-summary-body');
   if (!body) return;
   const code = String(projectCode || '').trim();
@@ -6019,25 +6618,26 @@ function _pmRenderTimeChargeStatusSummary(projectCode, batch, lines) {
     <td style="text-align:right">${_pmEsc(_pmHoursText(totalMinutes))}</td>
     <td style="text-align:right">${_pmEsc(_pmKrw(subtotal))}</td>
     <td style="text-align:center">
-      <button type="button" class="btn btn-xs btn-outline" onclick="pmTimeChargeOpenInvoiceFromSummary()" title="청구서 상세보기">
-        <i class="fas fa-file-lines"></i>
+      <button type="button" class="btn btn-xs btn-outline" onclick="pmTimeChargeOpenBillingDetail()" title="청구내역 상세보기">
+        <i class="fas fa-eye"></i>
       </button>
     </td>
   </tr>`;
 }
 
+function pmTimeChargeOpenBillingDetail() {
+  if (!_pmRequireTimeChargeBillingLines()) return;
+  _pmShowTimeChargeBillingDetail();
+  if (typeof openModal === 'function') openModal('pmTcBillingDetailModal');
+}
+
+function pmTimeChargeScrollToInvoiceView() {
+  pmTimeChargeOpenInvoiceModal();
+}
+
+/** @deprecated pmTimeChargeOpenBillingDetail 사용 */
 function pmTimeChargeOpenInvoiceFromSummary() {
-  const lines = PM_STATE.currentLines || [];
-  if (!lines.length) {
-    Toast.warning('먼저 Time Charge 라인을 불러오세요.');
-    return;
-  }
-  pmTimeChargeSwitchDocTab('invoice');
-  pmPreviewTimeChargeDocument();
-  const wrap = document.getElementById('pm-tc-doc-invoice-wrap');
-  if (wrap) {
-    try { wrap.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) {}
-  }
+  pmTimeChargeOpenBillingDetail();
 }
 
 function _pmTimechargeContractCap(projectCode) {
@@ -6499,7 +7099,7 @@ async function _pmSaveTimeChargeInvoiceSnapshot({ batch, project, summaryRows, s
     project_name: String(batch.project_name || project?.project_name || ''),
     client_name: String(batch.client_name || project?.client_name || ''),
     billing_month: String(batch.billing_month || ''),
-    doc_no: `TCINV-${String(batch.project_code || '').trim()}-${String(batch.billing_month || '').replace('-', '')}`,
+    doc_no: _pmTimeChargeInvoiceDocNo(batch.project_code, batch.billing_month),
     version_no: 1,
     created_by: String(session?.id || ''),
     created_by_name: String(session?.name || ''),
@@ -6508,6 +7108,7 @@ async function _pmSaveTimeChargeInvoiceSnapshot({ batch, project, summaryRows, s
     claim_amount: Math.round(Number(claim || 0)),
     payload: {
       generated_at: Date.now(),
+      company: { ...PM_TC_COMPANY },
       summary_rows: summaryRows,
       totals: {
         subtotal: Math.round(Number(subtotal || 0)),
@@ -6547,7 +7148,6 @@ async function pmExportTimeChargeStatusWorkbook() {
         컨설턴트: String(r.user_name || ''),
         수행시간: parts.timeRange,
         투입시간: _pmHoursText(Number(r.final_minutes || r.base_minutes || 0)),
-        수행장소: parts.site,
         수행업무: parts.content,
       };
     });
@@ -6569,7 +7169,6 @@ async function pmExportTimeChargeStatusWorkbook() {
         용역일자: String(r.work_date || ''),
         용역시간: parts.timeRange,
         투입시간: _pmHoursText(Number(r.final_minutes || r.base_minutes || 0)),
-        수행장소: parts.site,
         수행업무: parts.content,
       };
     });
@@ -6599,10 +7198,16 @@ async function pmExportTimeChargeInvoiceWorkbook() {
   const claim = cap > 0 ? Math.min(subtotal, cap) : subtotal;
   const wb = XLSX.utils.book_new();
   const invoiceMeta = XLSX.utils.json_to_sheet([
+    { 항목: '발행사', 값: PM_TC_COMPANY.legalName },
+    { 항목: '주소', 값: PM_TC_COMPANY.address },
+    { 항목: '전화', 값: PM_TC_COMPANY.tel },
+    { 항목: '팩스', 값: PM_TC_COMPANY.fax },
+    { 항목: '웹사이트', 값: PM_TC_COMPANY.website },
     { 항목: '프로젝트코드', 값: projectCode },
     { 항목: '고객사', 값: String(project.client_name || batch.client_name || '') },
     { 항목: '기준월', 값: billingMonth },
-    { 항목: '문서번호', 값: `TCINV-${projectCode}-${String(billingMonth || '').replace('-', '')}` },
+    { 항목: '문서번호', 값: _pmTimeChargeInvoiceDocNo(projectCode, billingMonth) },
+    { 항목: '발행일', 값: _pmTimeChargeInvoiceDateText() },
     { 항목: '생성일시', 값: new Date().toLocaleString('ko-KR') },
     { 항목: '작성자', 값: createdBy },
   ]);
@@ -9391,7 +9996,13 @@ window.pmTimeChargeSwitchDocTab = pmTimeChargeSwitchDocTab;
 window.pmPreviewTimeChargeDocument = pmPreviewTimeChargeDocument;
 window.pmPrintTimeChargeDocument = pmPrintTimeChargeDocument;
 window.pmGenerateAndPrintTimeChargeDocument = pmGenerateAndPrintTimeChargeDocument;
+window.pmPrintTimeChargeInvoice = pmPrintTimeChargeInvoice;
 window.pmDownloadTimeChargePdf = pmDownloadTimeChargePdf;
+window.pmPrintTimeChargeBillingDetail = pmPrintTimeChargeBillingDetail;
+window.pmDownloadTimeChargeBillingPdf = pmDownloadTimeChargeBillingPdf;
+window.pmTimeChargeOpenInvoiceModal = pmTimeChargeOpenInvoiceModal;
+window.pmTimeChargeOpenBillingDetail = pmTimeChargeOpenBillingDetail;
+window.pmTimeChargeScrollToInvoiceView = pmTimeChargeScrollToInvoiceView;
 window.pmTimeChargeOpenInvoiceFromSummary = pmTimeChargeOpenInvoiceFromSummary;
 window.pmTimeChargeOpenConsultantDetail = pmTimeChargeOpenConsultantDetail;
 window.loadProjectMgmtInvoices = loadProjectMgmtInvoices;
