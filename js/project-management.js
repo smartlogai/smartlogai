@@ -2875,6 +2875,109 @@ function _pmEntryToWorkDate(entry) {
   return _pmTsToDateText(ts);
 }
 
+function _pmIsBatchTimeHeader(entry) {
+  const mode = String(entry && entry.entry_mode || '').trim();
+  if (mode === 'batch') return true;
+  return String(entry && entry.work_description || '').trim().startsWith('[일괄기록]');
+}
+
+function _pmRowProjectCode(row) {
+  return String(row && row.project_code || '').trim();
+}
+
+function _pmRowMatchesProject(row, projectCode, projectMeta) {
+  const code = _pmRowProjectCode(row);
+  if (code) return code === projectCode;
+  const cat = String(row.work_category_name || '').trim();
+  if (cat !== '프로젝트업무') return false;
+  const projClient = String(projectMeta?.client_name || '').trim();
+  const rowClient = String(row.client_name || '').trim();
+  return !!(projClient && rowClient && projClient === rowClient);
+}
+
+function _pmRowInBillingMonth(row, billingMonth) {
+  const ym = String(billingMonth || '').trim();
+  if (!ym) return true;
+  const workDate = _pmEntryToWorkDate(row);
+  return !!(workDate && workDate.startsWith(ym));
+}
+
+async function _pmLoadBatchDetailsByEntryIds(entryIds) {
+  const ids = [...new Set((entryIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
+  if (!ids.length) return [];
+  const chunkSize = 40;
+  const out = [];
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    const filter = `entry_id=in.(${chunk.map((id) => encodeURIComponent(id)).join(',')})`;
+    const rows = await API.listAllPages('time_entry_details', {
+      filter,
+      sort: 'row_order',
+      limit: 200,
+      maxPages: 20,
+    }).catch(() => []);
+    out.push(...(Array.isArray(rows) ? rows : []));
+  }
+  return out;
+}
+
+async function _pmExpandApprovedEntriesForTimeCharge(entries) {
+  const list = Array.isArray(entries) ? entries : [];
+  const batchIds = list.filter(_pmIsBatchTimeHeader).map((e) => String(e.id || '')).filter(Boolean);
+  const detailByEntryId = new Map();
+  if (batchIds.length) {
+    const details = await _pmLoadBatchDetailsByEntryIds(batchIds);
+    details.forEach((d) => {
+      const eid = String(d.entry_id || '').trim();
+      if (!eid) return;
+      if (!detailByEntryId.has(eid)) detailByEntryId.set(eid, []);
+      detailByEntryId.get(eid).push(d);
+    });
+  }
+  const out = [];
+  list.forEach((e) => {
+    const eid = String(e.id || '').trim();
+    const dRows = eid ? (detailByEntryId.get(eid) || []) : [];
+    if (!_pmIsBatchTimeHeader(e) || !dRows.length) {
+      out.push(e);
+      return;
+    }
+    dRows.forEach((d) => {
+      out.push({
+        ...e,
+        parent_entry_id: e.id,
+        work_category_id: d.work_category_id || e.work_category_id,
+        work_category_name: d.work_category_name || e.work_category_name,
+        work_subcategory_id: d.work_subcategory_id || e.work_subcategory_id,
+        work_subcategory_name: d.work_subcategory_name || e.work_subcategory_name,
+        client_id: d.client_id || e.client_id || '',
+        client_name: d.client_name || e.client_name || '',
+        project_code: d.project_code || e.project_code || '',
+        project_name: d.project_name || e.project_name || '',
+        work_start_at: d.from_at != null ? d.from_at : e.work_start_at,
+        work_end_at: d.to_at != null ? d.to_at : e.work_end_at,
+        duration_minutes: Number(d.duration_minutes || 0),
+        work_description: d.work_note || e.work_description || '',
+      });
+    });
+  });
+  return out;
+}
+
+async function _pmLoadApprovedTimeRowsForProject(projectCode, billingMonth) {
+  const projectMeta = PM_STATE.projectByCode[projectCode] || {};
+  const entries = await API.listAllPages('time_entries', {
+    filter: 'status=eq.approved',
+    limit: 500,
+    maxPages: 50,
+    sort: 'updated_at',
+  });
+  const expanded = await _pmExpandApprovedEntriesForTimeCharge(entries || []);
+  return expanded.filter((row) =>
+    _pmRowMatchesProject(row, projectCode, projectMeta) && _pmRowInBillingMonth(row, billingMonth)
+  );
+}
+
 async function _pmLoadProjects(opts = {}) {
   const force = !!opts.force;
   const now = Date.now();
@@ -6512,23 +6615,23 @@ async function importTimeChargeFromEntries() {
   try {
     const batch = await _pmFindOrCreateBatch(projectCode, billingMonth);
     PM_STATE.currentBatch = batch;
-    const entries = await API.listAllPages('time_entries', {
-      filter: `status=eq.approved&project_code=eq.${encodeURIComponent(projectCode)}`,
-      limit: 500,
-      maxPages: 50,
-      sort: 'updated_at',
-    });
-    const scoped = (entries || []);
+    const scoped = await _pmLoadApprovedTimeRowsForProject(projectCode, billingMonth);
+    if (!scoped.length) {
+      Toast.info('선택한 프로젝트·청구월에 해당하는 승인 타임시트가 없습니다.');
+      return;
+    }
     const grouped = {};
     scoped.forEach((e) => {
       const workDate = _pmEntryToWorkDate(e);
       const userId = String(e.user_id || '');
       const cat = String(e.work_category_name || '').trim();
-      const sourceKey = `${userId}|${workDate}|${cat}`;
+      const sub = String(e.work_subcategory_name || '').trim();
+      const sourceKey = `${userId}|${workDate}|${cat}|${sub}`;
       if (!grouped[sourceKey]) {
+        const parentId = String(e.parent_entry_id || e.id || '');
         grouped[sourceKey] = {
           source_key: sourceKey,
-          entry_id: String(e.id || ''),
+          entry_id: parentId,
           project_code: projectCode,
           project_name: e.project_name || (PM_STATE.projectByCode[projectCode]?.project_name || ''),
           client_name: e.client_name || (PM_STATE.projectByCode[projectCode]?.client_name || ''),
@@ -6537,7 +6640,7 @@ async function importTimeChargeFromEntries() {
           role_key: _pmResolveTimeChargeTitleKey(PM_STATE.usersById[userId] || null, '', e.user_name || ''),
           work_date: workDate || null,
           work_category_name: cat,
-          work_subcategory_name: e.work_subcategory_name || '',
+          work_subcategory_name: sub,
           description: String(e.work_description || '').replace(/\s+/g, ' ').slice(0, 120),
           base_minutes: 0,
         };
