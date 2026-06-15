@@ -2875,6 +2875,41 @@ function _pmEntryToWorkDate(entry) {
   return _pmTsToDateText(ts);
 }
 
+function _pmFormatTimeTextFromTs(ts) {
+  const n = Number(ts || 0);
+  if (!n) return '';
+  const d = new Date(n);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function _pmFormatTimeRangeFromTs(startTs, endTs) {
+  const start = _pmFormatTimeTextFromTs(startTs);
+  const end = _pmFormatTimeTextFromTs(endTs);
+  if (!start || !end) return '';
+  return `${start}~${end}`;
+}
+
+function _pmStripTimechargeMetaFromDescription(raw) {
+  return String(raw || '')
+    .replace(/(?:^|\/)\s*장소:[^/]+/g, '')
+    .replace(/(?:^|\/)\s*비고:[^/]+/g, '')
+    .replace(/(?:^|\/)\s*시간대:[^/]+/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function _pmBuildTimechargeDescription(note, startTs, endTs, extras = {}) {
+  const text = _pmStripTimechargeMetaFromDescription(note);
+  const range = _pmFormatTimeRangeFromTs(startTs, endTs);
+  const place = String(extras.place || '').trim();
+  const remark = String(extras.note || '').trim();
+  let out = text;
+  if (range) out += ` / 시간대:${range}`;
+  if (place) out += ` / 장소:${place}`;
+  if (remark) out += ` / 비고:${remark}`;
+  return out.slice(0, 240);
+}
+
 function _pmIsBatchTimeHeader(entry) {
   const mode = String(entry && entry.entry_mode || '').trim();
   if (mode === 'batch') return true;
@@ -5838,13 +5873,13 @@ function _pmTimechargeDisplayParts(row) {
   const noteMatch = raw.match(/(?:^|\/)\s*비고:([^/]+)/);
   const rangeMatch = raw.match(/(?:^|\/)\s*시간대:([^/]+)/);
   const site = siteMatch ? String(siteMatch[1] || '').trim() : '';
-  const timeRange = rangeMatch ? String(rangeMatch[1] || '').trim() : '';
-  const content = raw
-    .replace(/(?:^|\/)\s*장소:[^/]+/g, '')
-    .replace(/(?:^|\/)\s*비고:[^/]+/g, '')
-    .replace(/(?:^|\/)\s*시간대:[^/]+/g, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+  let timeRange = rangeMatch ? String(rangeMatch[1] || '').trim() : '';
+  if (!timeRange) {
+    const start = String(row?.start_time || '').trim();
+    const end = String(row?.end_time || '').trim();
+    if (start && end) timeRange = `${start}~${end}`;
+  }
+  const content = _pmStripTimechargeMetaFromDescription(raw);
   return {
     site: site || '-',
     timeRange: timeRange || '-',
@@ -6627,8 +6662,11 @@ async function importTimeChargeFromEntries() {
       const cat = String(e.work_category_name || '').trim();
       const sub = String(e.work_subcategory_name || '').trim();
       const sourceKey = `${userId}|${workDate}|${cat}|${sub}`;
+      const startTs = Number(e.work_start_at) || 0;
+      const endTs = Number(e.work_end_at) || 0;
       if (!grouped[sourceKey]) {
         const parentId = String(e.parent_entry_id || e.id || '');
+        const note = String(e.work_description || '').replace(/\s+/g, ' ').trim();
         grouped[sourceKey] = {
           source_key: sourceKey,
           entry_id: parentId,
@@ -6641,11 +6679,26 @@ async function importTimeChargeFromEntries() {
           work_date: workDate || null,
           work_category_name: cat,
           work_subcategory_name: sub,
-          description: String(e.work_description || '').replace(/\s+/g, ' ').slice(0, 120),
+          _note: note,
+          _startTs: startTs,
+          _endTs: endTs,
           base_minutes: 0,
         };
+      } else {
+        if (startTs && (!grouped[sourceKey]._startTs || startTs < grouped[sourceKey]._startTs)) {
+          grouped[sourceKey]._startTs = startTs;
+        }
+        if (endTs && endTs > grouped[sourceKey]._endTs) {
+          grouped[sourceKey]._endTs = endTs;
+        }
       }
       grouped[sourceKey].base_minutes += Number(e.duration_minutes || 0);
+    });
+    Object.values(grouped).forEach((row) => {
+      row.description = _pmBuildTimechargeDescription(row._note, row._startTs, row._endTs);
+      delete row._note;
+      delete row._startTs;
+      delete row._endTs;
     });
 
     const existing = await _pmListAllPagesSortFallback('project_timecharge_lines', {
