@@ -4201,6 +4201,43 @@ textarea.form-control {
   border-style: dashed;
   background: #ffffff;
 }
+#page-project-register .pm-tc-client-suggestions {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  display: none;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
+}
+#page-project-register .pm-tc-client-suggestions.is-open {
+  display: block;
+}
+#page-project-register .pm-tc-client-suggestion-btn {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid #eef2f7;
+  background: #fff;
+  color: #111827;
+  text-align: left;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+#page-project-register .pm-tc-client-suggestion-btn:hover,
+#page-project-register .pm-tc-client-suggestion-btn:focus {
+  background: #f8fafc;
+  outline: none;
+}
+#page-project-register .pm-tc-client-suggestion-btn:last-child {
+  border-bottom: 0;
+}
 #page-project-register #pm-tc-upload-preview {
   margin-top: 10px;
   color: var(--text-secondary);

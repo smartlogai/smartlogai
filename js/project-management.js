@@ -3336,28 +3336,68 @@ function _pmTimeChargeClientMatches(clientName, query) {
   return client.startsWith(needle) || client.includes(needle);
 }
 
+function _pmTimeChargeClientFilteredOptions(query) {
+  const catalog = (PM_STATE.timeChargeClientCatalog || []).slice();
+  if (!query) return catalog;
+  return catalog
+    .filter((client) => _pmTimeChargeClientMatches(client, query))
+    .sort((a, b) => {
+      const aa = _pmTimeChargeClientComparable(a);
+      const bb = _pmTimeChargeClientComparable(b);
+      const q = _pmTimeChargeClientComparable(query);
+      const aPrefix = aa.startsWith(q) ? 0 : 1;
+      const bPrefix = bb.startsWith(q) ? 0 : 1;
+      if (aPrefix !== bPrefix) return aPrefix - bPrefix;
+      return String(a).localeCompare(String(b), 'ko');
+    });
+}
+
+function _pmCloseTimeChargeClientSuggestions() {
+  const box = document.getElementById('pm-tc-client-suggestions');
+  if (!box) return;
+  box.classList.remove('is-open');
+  box.innerHTML = '';
+}
+
+function _pmSelectTimeChargeClient(clientName) {
+  const input = document.getElementById('pm-tc-client-search');
+  if (input) input.value = String(clientName || '').trim();
+  _pmCloseTimeChargeClientSuggestions();
+  _pmFillTimeChargeBaseFilters();
+  _pmApplyTimeChargeProjectFilter();
+  _pmSyncTimeChargeActionAvailability();
+  _pmCloseTimeChargeClientSuggestions();
+  loadProjectMgmtTimeCharge();
+}
+
 function _pmRenderTimeChargeClientOptions() {
   const clientList = document.getElementById('pm-tc-client-options');
-  if (!clientList) return;
+  const suggestionBox = document.getElementById('pm-tc-client-suggestions');
   const query = _pmTimeChargeClientQuery();
-  const catalog = (PM_STATE.timeChargeClientCatalog || []).slice();
-  const filtered = query
-    ? catalog
-      .filter((client) => _pmTimeChargeClientMatches(client, query))
-      .sort((a, b) => {
-        const aa = _pmTimeChargeClientComparable(a);
-        const bb = _pmTimeChargeClientComparable(b);
-        const q = _pmTimeChargeClientComparable(query);
-        const aPrefix = aa.startsWith(q) ? 0 : 1;
-        const bPrefix = bb.startsWith(q) ? 0 : 1;
-        if (aPrefix !== bPrefix) return aPrefix - bPrefix;
-        return String(a).localeCompare(String(b), 'ko');
-      })
-    : catalog;
-  clientList.innerHTML = filtered
+  const filtered = _pmTimeChargeClientFilteredOptions(query);
+  if (clientList) {
+    clientList.innerHTML = filtered
+      .slice(0, 80)
+      .map((v) => `<option value="${_pmEsc(v)}"></option>`)
+      .join('');
+  }
+  if (!suggestionBox) return;
+  const visible = query ? filtered.slice(0, 20) : [];
+  if (!visible.length) {
+    _pmCloseTimeChargeClientSuggestions();
+    return;
+  }
+  suggestionBox.innerHTML = visible
     .slice(0, 80)
-    .map((v) => `<option value="${_pmEsc(v)}"></option>`)
+    .map((v) => `<button type="button" class="pm-tc-client-suggestion-btn" data-client-name="${_pmEsc(v)}" role="option">${_pmEsc(v)}</button>`)
     .join('');
+  suggestionBox.classList.add('is-open');
+  suggestionBox.querySelectorAll('.pm-tc-client-suggestion-btn').forEach((btn) => {
+    btn.addEventListener('mousedown', (ev) => {
+      ev.preventDefault();
+      _pmSelectTimeChargeClient(btn.dataset.clientName || btn.textContent || '');
+    });
+  });
 }
 
 function _pmSelectedTimeChargeClient() {
@@ -4554,6 +4594,12 @@ async function init_project_management() {
       _pmFillTimeChargeBaseFilters();
       _pmApplyTimeChargeProjectFilter();
       _pmSyncTimeChargeActionAvailability();
+    });
+    document.getElementById('pm-tc-client-search')?.addEventListener('focus', () => {
+      _pmRenderTimeChargeClientOptions();
+    });
+    document.getElementById('pm-tc-client-search')?.addEventListener('blur', () => {
+      setTimeout(_pmCloseTimeChargeClientSuggestions, 120);
     });
     document.getElementById('pm-tc-client-search')?.addEventListener('change', () => {
       _pmNormalizeTimeChargeClientInput();
