@@ -3297,14 +3297,14 @@ function _pmFillTimeChargeBaseFilters() {
     .sort((a, b) => a.localeCompare(b, 'ko'));
   PM_STATE.timeChargeClientCatalog = clients.slice();
   if (clientList) {
-    clientList.innerHTML = clients.map((v) => `<option value="${_pmEsc(v)}"></option>`).join('');
+    _pmRenderTimeChargeClientOptions();
   }
-  const selectedClient = _pmSelectedTimeChargeClient();
+  const clientQuery = _pmTimeChargeClientQuery();
   if (mainSel) {
     const prev = String(mainSel.value || '').trim();
     const byMain = {};
     rows.forEach((p) => {
-      if (selectedClient && String(p?.client_name || '').trim() !== selectedClient) return;
+      if (clientQuery && !_pmTimeChargeClientMatches(p?.client_name, clientQuery)) return;
       const mc = _pmTimeChargeMainCodeFromProject(p);
       if (!mc) return;
       if (!byMain[mc]) {
@@ -3314,18 +3314,57 @@ function _pmFillTimeChargeBaseFilters() {
         byMain[mc] = label;
       }
     });
-    const mainPlaceholder = selectedClient ? '해당 고객사 대분류' : '전체 대분류';
+    const mainPlaceholder = clientQuery ? '해당 고객사 대분류' : '전체 대분류';
     mainSel.innerHTML = `<option value="">${mainPlaceholder}</option>`
       + Object.keys(byMain).sort((a, b) => a.localeCompare(b)).map((mc) => `<option value="${_pmEsc(mc)}">${_pmEsc(byMain[mc])}</option>`).join('');
     if (prev && [...mainSel.options].some((o) => o.value === prev)) mainSel.value = prev;
   }
 }
 
+function _pmTimeChargeClientQuery() {
+  return String(document.getElementById('pm-tc-client-search')?.value || '').trim();
+}
+
+function _pmTimeChargeClientComparable(value) {
+  return String(value || '').trim().toLocaleLowerCase('ko-KR');
+}
+
+function _pmTimeChargeClientMatches(clientName, query) {
+  const client = _pmTimeChargeClientComparable(clientName);
+  const needle = _pmTimeChargeClientComparable(query);
+  if (!needle) return true;
+  return client.startsWith(needle) || client.includes(needle);
+}
+
+function _pmRenderTimeChargeClientOptions() {
+  const clientList = document.getElementById('pm-tc-client-options');
+  if (!clientList) return;
+  const query = _pmTimeChargeClientQuery();
+  const catalog = (PM_STATE.timeChargeClientCatalog || []).slice();
+  const filtered = query
+    ? catalog
+      .filter((client) => _pmTimeChargeClientMatches(client, query))
+      .sort((a, b) => {
+        const aa = _pmTimeChargeClientComparable(a);
+        const bb = _pmTimeChargeClientComparable(b);
+        const q = _pmTimeChargeClientComparable(query);
+        const aPrefix = aa.startsWith(q) ? 0 : 1;
+        const bPrefix = bb.startsWith(q) ? 0 : 1;
+        if (aPrefix !== bPrefix) return aPrefix - bPrefix;
+        return String(a).localeCompare(String(b), 'ko');
+      })
+    : catalog;
+  clientList.innerHTML = filtered
+    .slice(0, 80)
+    .map((v) => `<option value="${_pmEsc(v)}"></option>`)
+    .join('');
+}
+
 function _pmSelectedTimeChargeClient() {
-  const raw = String(document.getElementById('pm-tc-client-search')?.value || '').trim();
+  const raw = _pmTimeChargeClientQuery();
   if (!raw) return '';
   const catalog = (PM_STATE.timeChargeClientCatalog || []).slice();
-  const exact = catalog.find((c) => String(c).toLowerCase() === raw.toLowerCase());
+  const exact = catalog.find((c) => _pmTimeChargeClientComparable(c) === _pmTimeChargeClientComparable(raw));
   return exact || '';
 }
 
@@ -3347,12 +3386,12 @@ function _pmApplyTimeChargeProjectFilter() {
   const projectSel = document.getElementById('pm-tc-project');
   if (!projectSel) return;
   const prev = String(projectSel.value || '').trim();
-  const selectedClient = _pmSelectedTimeChargeClient();
+  const clientQuery = _pmTimeChargeClientQuery();
   const mainCode = String(document.getElementById('pm-tc-main-code')?.value || '').trim();
   const rows = (PM_STATE.projects || []).filter((p) => {
     const code = String(p?.project_code || '').trim();
     if (!code) return false;
-    if (selectedClient && String(p?.client_name || '').trim() !== selectedClient) return false;
+    if (clientQuery && !_pmTimeChargeClientMatches(p?.client_name, clientQuery)) return false;
     if (mainCode && _pmTimeChargeMainCodeFromProject(p) !== mainCode) return false;
     return true;
   }).sort((a, b) => String(a.project_code || '').localeCompare(String(b.project_code || '')));
@@ -4511,7 +4550,9 @@ async function init_project_management() {
       loadProjectMgmtTimeCharge();
     });
     document.getElementById('pm-tc-client-search')?.addEventListener('input', () => {
-      // 입력 중에는 고객사 "지정" 전 단계이므로 드롭다운 자동변경을 하지 않는다.
+      _pmRenderTimeChargeClientOptions();
+      _pmFillTimeChargeBaseFilters();
+      _pmApplyTimeChargeProjectFilter();
       _pmSyncTimeChargeActionAvailability();
     });
     document.getElementById('pm-tc-client-search')?.addEventListener('change', () => {
