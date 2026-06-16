@@ -2920,14 +2920,9 @@ function _pmRowProjectCode(row) {
   return String(row && row.project_code || '').trim();
 }
 
-function _pmRowMatchesProject(row, projectCode, projectMeta) {
+function _pmRowMatchesProject(row, projectCode) {
   const code = _pmRowProjectCode(row);
-  if (code) return code === projectCode;
-  const cat = String(row.work_category_name || '').trim();
-  if (cat !== '프로젝트업무') return false;
-  const projClient = String(projectMeta?.client_name || '').trim();
-  const rowClient = String(row.client_name || '').trim();
-  return !!(projClient && rowClient && projClient === rowClient);
+  return !!(code && code === projectCode);
 }
 
 function _pmRowInBillingMonth(row, billingMonth) {
@@ -3000,7 +2995,6 @@ async function _pmExpandApprovedEntriesForTimeCharge(entries) {
 }
 
 async function _pmLoadApprovedTimeRowsForProject(projectCode, billingMonth) {
-  const projectMeta = PM_STATE.projectByCode[projectCode] || {};
   const entries = await API.listAllPages('time_entries', {
     filter: 'status=eq.approved',
     limit: 500,
@@ -3009,7 +3003,7 @@ async function _pmLoadApprovedTimeRowsForProject(projectCode, billingMonth) {
   });
   const expanded = await _pmExpandApprovedEntriesForTimeCharge(entries || []);
   return expanded.filter((row) =>
-    _pmRowMatchesProject(row, projectCode, projectMeta) && _pmRowInBillingMonth(row, billingMonth)
+    _pmRowMatchesProject(row, projectCode) && _pmRowInBillingMonth(row, billingMonth)
   );
 }
 
