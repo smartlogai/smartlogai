@@ -3379,7 +3379,7 @@ function _pmRenderTimeChargeAuditModal(model) {
     <div style="width:min(1120px,94vw);max-height:min(86vh,820px);overflow:auto;background:#f8fafc;border-radius:14px;border:1px solid #e2e8f0;padding:14px">
       <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px">
         <div>
-          <div style="font-size:15px;font-weight:800;color:#1a2b45"><i class="fas fa-search" style="margin-right:8px;color:#2563eb"></i>Time Charge 원천 비교</div>
+          <div style="font-size:15px;font-weight:800;color:#1a2b45"><i class="fas fa-search" style="margin-right:8px;color:#2563eb"></i>Time Charge 누락시간확인</div>
           <div style="font-size:12px;color:#64748b;margin-top:4px">프로젝트 ${_pmEsc(model.projectCode)} · 수행기간 ${_pmEsc(scopeLabel)} · 배치 ${_pmEsc(model.batch?.billing_month || '없음')}</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center">
@@ -3436,7 +3436,7 @@ async function pmOpenTimeChargeSourceAudit() {
   }
   const scope = _pmTimeChargeWorkDateScope();
   try {
-    Toast.info('Time Charge 원천을 비교 중입니다...');
+    Toast.info('Time Charge 누락시간을 확인 중입니다...');
     const [rawRows, tc] = await Promise.all([
       _pmLoadRawTimeRowsForProjectAudit(projectCode),
       _pmLoadTimeChargeLinesForAudit(projectCode),
@@ -3451,7 +3451,7 @@ async function pmOpenTimeChargeSourceAudit() {
     _pmRenderTimeChargeAuditModal(model);
   } catch (e) {
     console.error(e);
-    Toast.error('Time Charge 원천 비교 실패: ' + (e.message || ''));
+    Toast.error('Time Charge 누락시간확인 실패: ' + (e.message || ''));
   }
 }
 
