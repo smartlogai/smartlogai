@@ -4971,12 +4971,11 @@ input[type=date].filter-control {
 /* Approval 화면에도 동일 배치 확장 */
 #page-approval .filter-bar {
   display: grid;
-  grid-template-columns: 390px minmax(0, 1fr);
-  grid-template-rows: 36px 32px;
-  align-items: stretch;
-  column-gap: 8px;
-  gap: 8px;
-  padding: 12px 8px 12px 14px;
+  grid-template-columns: minmax(320px, 390px) minmax(116px, .7fr) minmax(108px, .65fr) minmax(220px, 1.35fr) minmax(112px, .7fr);
+  grid-template-rows: 36px 36px;
+  align-items: end;
+  gap: 10px 12px;
+  padding: 14px 16px;
 }
 #page-approval .approval-filter-row {
   display: grid;
@@ -4998,12 +4997,12 @@ input[type=date].filter-control {
 #page-approval .filter-group-period {
   grid-column: 1;
   grid-row: 1 / span 2;
-  min-width: 390px;
-  max-width: 390px;
-  width: 390px;
+  min-width: 0;
+  max-width: none;
+  width: 100%;
   position: relative;
-  padding-right: 10px;
-  margin-right: 2px;
+  padding-right: 14px;
+  margin-right: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -5024,25 +5023,19 @@ input[type=date].filter-control {
 #page-approval #filter-approval-category-group,
 #page-approval #filter-approval-subcategory-group,
 #page-approval #filter-approval-status-group {
-  flex: 0 0 auto;
-  min-width: 108px;
+  min-width: 0;
+  width: 100%;
 }
-#page-approval #filter-approval-hq-group { min-width: 120px; }
-#page-approval #filter-approval-team-group { min-width: 110px; }
-#page-approval #filter-approval-client-group { min-width: 190px; max-width: 190px; flex: 0 0 190px; }
-#page-approval #filter-approval-staff-group { min-width: 110px; max-width: 110px; flex: 0 0 110px; }
-#page-approval #filter-approval-category-group { min-width: 120px; max-width: 120px; flex: 0 0 120px; }
-#page-approval #filter-approval-subcategory-group { min-width: 110px; max-width: 110px; flex: 0 0 110px; }
-#page-approval #filter-approval-status-group { min-width: 190px; max-width: 190px; flex: 0 0 190px; }
-#page-approval #filter-approval-hq-group { grid-column: 1; }
-#page-approval #filter-approval-team-group { grid-column: 2; }
-#page-approval #filter-approval-client-group { grid-column: 3; }
-#page-approval #filter-approval-staff-group { grid-column: 4; }
-#page-approval #filter-approval-category-group { grid-column: 1; }
-#page-approval #filter-approval-subcategory-group { grid-column: 2; }
-#page-approval #filter-approval-status-group { grid-column: 3; }
+#page-approval #filter-approval-hq-group { grid-column: 2; grid-row: 1; }
+#page-approval #filter-approval-team-group { grid-column: 3; grid-row: 1; }
+#page-approval #filter-approval-client-group { grid-column: 4; grid-row: 1; }
+#page-approval #filter-approval-staff-group { grid-column: 5; grid-row: 1; }
+#page-approval #filter-approval-category-group { grid-column: 2; grid-row: 2; }
+#page-approval #filter-approval-subcategory-group { grid-column: 3; grid-row: 2; }
+#page-approval #filter-approval-status-group { grid-column: 4; grid-row: 2; }
 #page-approval #filter-approval-actions {
-  grid-column: 4;
+  grid-column: 5;
+  grid-row: 2;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -5072,18 +5065,14 @@ input[type=date].filter-control {
 #page-approval #filter-approval-staff-group .filter-control,
 #page-approval #filter-approval-team-group .filter-control {
   width: 100% !important;
+  min-width: 0 !important;
 }
 #page-approval .filter-group-period .filter-period-row input[type="date"].filter-control,
 #page-approval #filter-approval-client-group .filter-control,
-#page-approval #filter-approval-staff-group .filter-control {
-  height: 36px;
-  min-height: 36px;
-  max-height: 36px;
-  line-height: 1.2;
-  padding-top: 0;
-  padding-bottom: 0;
-  box-sizing: border-box;
-}
+#page-approval #filter-approval-staff-group .filter-control,
+#page-approval #filter-approval-category-group .filter-control,
+#page-approval #filter-approval-subcategory-group .filter-control,
+#page-approval #filter-approval-status-group .filter-control,
 #page-approval #filter-approval-hq-group .filter-control,
 #page-approval #filter-approval-team-group .filter-control {
   height: 36px;
@@ -5094,14 +5083,9 @@ input[type=date].filter-control {
   padding-bottom: 0;
   box-sizing: border-box;
 }
-#page-approval #filter-approval-category-group .filter-control,
-#page-approval #filter-approval-subcategory-group .filter-control,
-#page-approval #filter-approval-status-group .filter-control {
-  height: 32px;
-  line-height: 32px;
-}
 #page-approval #filter-approval-client-wrap.cs-wrap {
   width: 100% !important;
+  min-height: 36px !important;
 }
 #page-approval #filter-approval-client-wrap .cs-selected-box.form-control,
 #page-approval #filter-approval-client-wrap .cs-search-box .form-control {
@@ -5125,7 +5109,7 @@ input[type=date].filter-control {
 }
 #page-approval .filter-group-period .filter-period-row input[type="date"].filter-control {
   flex: 1 1 0;
-  min-width: 154px;
+  min-width: 0;
   width: auto !important;
 }
 #page-approval .approval-main-tabs {
