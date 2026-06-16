@@ -6742,6 +6742,20 @@ async function openEntryDetailModal(entryId) {
     } else {
       // ── 일반 엔트리 기존 레이아웃 ────────────────
       const detailSubLabel = _entryProjectSubcategoryLabel(entry) || '-';
+      const isProjectEntry = String(entry.work_category_name || '').trim() === '프로젝트업무';
+      const projectCode = String(entry.project_code || '').trim();
+      const projectName = String(entry.project_name || '').trim();
+      const projectInfoHtml = isProjectEntry && (projectCode || projectName)
+        ? `
+        <div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">프로젝트코드</div>
+          <div style="font-size:13px;font-weight:600;color:var(--text-primary)">${Utils.escHtml(projectCode || '-')}</div>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">프로젝트명</div>
+          <div style="font-size:13px;font-weight:600;color:var(--text-primary)">${Utils.escHtml(projectName || '-')}</div>
+        </div>`
+        : '';
       const infoGrid = document.createElement('div');
       infoGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;margin-bottom:16px';
       infoGrid.innerHTML = `
@@ -6769,6 +6783,7 @@ async function openEntryDetailModal(entryId) {
           <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">소분류</div>
           <div style="font-size:13px;color:var(--text-primary)">${Utils.escHtml(detailSubLabel)}</div>
         </div>
+        ${projectInfoHtml}
         <div>
           <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">시작</div>
           <div style="font-size:13px;color:var(--text-primary)">${Utils.formatDate(entry.work_start_at,'datetime')}</div>
@@ -8584,6 +8599,7 @@ async function exportEntriesToExcel() {
         'Staff':     e.user_name  || '',
         '업무팀':    e.team_name  || '',
         '고객사':    e.client_name || '내부업무',
+        '프로젝트코드': isProjR ? (e.project_code || '') : '',
         '대분류':    e.work_category_name    || '',
         '소분류':    subCol,
         '수행내용':  descToPlain(e.work_description),
@@ -8606,6 +8622,7 @@ async function exportEntriesToExcel() {
       {wch:10},  // Staff
       {wch:14},  // 업무팀
       {wch:16},  // 고객사
+      {wch:18},  // 프로젝트코드
       {wch:16},  // 대분류
       {wch:20},  // 소분류
       {wch:48},  // 수행내용
