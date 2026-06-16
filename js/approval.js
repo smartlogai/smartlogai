@@ -1103,15 +1103,10 @@ async function _scopeTimeEntriesForApproval(entries, session, orgFilter, userMap
 
 function _approvalFilterSecondApproverPending(entries, session) {
   if (!Auth.canApprove2nd(session)) return entries;
-  const myId = String(session.id || '');
-  const myNameNorm = String(session.name || '').toLowerCase().replace(/\s+/g, '').trim();
-  const hitByName = (e) =>
-    String(e.reviewer2_name || '').toLowerCase().replace(/\s+/g, '').trim() === myNameNorm ||
-    String(e.approver_name || '').toLowerCase().replace(/\s+/g, '').trim() === myNameNorm;
   return (entries || []).filter((e) => {
     const st = String(e && e.status || '').trim().toLowerCase();
     if (!(st === 'submitted' || st === 'pre_approved')) return false;
-    return String(e.reviewer2_id || '') === myId || String(e.approver_id || '') === myId || hitByName(e);
+    return _approvalIsSecondApproverForEntry(session, e);
   });
 }
 
@@ -1149,6 +1144,24 @@ function _approvalCanDoFirst(session, entry) {
   if (String(entry.approver_id || '') !== myId) return false;
   // 지정된 1차 승인자(팀장/본부장/사업부장)만 1차 처리 가능
   return Auth.canApprove1st(session);
+}
+
+function _approvalIsSecondApproverForEntry(session, entry) {
+  if (!session || !entry) return false;
+  const myId = String(session.id || '').trim();
+  const myName = String(session.name || '').trim();
+  const reviewer2Id = String(entry.reviewer2_id || '').trim();
+  const reviewer2Name = String(entry.reviewer2_name || '').trim();
+  if (reviewer2Id && myId && reviewer2Id === myId) return true;
+  if (reviewer2Name && myName && _approvalIsLooseNameMatch(reviewer2Name, myName)) return true;
+
+  // 과거 데이터는 reviewer2_*가 비어 있고 approver_*에 최종 승인자가 남아 있는 경우가 있다.
+  // reviewer2가 명시된 최신 데이터에는 영향을 주지 않도록 누락 케이스에서만 fallback한다.
+  if (reviewer2Id || reviewer2Name) return false;
+  const approverId = String(entry.approver_id || '').trim();
+  const approverName = String(entry.approver_name || '').trim();
+  if (approverId && myId && approverId === myId) return true;
+  return !!(approverName && myName && _approvalIsLooseNameMatch(approverName, myName));
 }
 
 function _approvalIsDirectSecondRoute(entry) {
@@ -1576,9 +1589,9 @@ async function loadApprovalList() {
         const st = e.status;
         if (st === 'submitted') {
           if (_approvalCanDoFirst(session, e)) return true;
-          return needsSecondApproval(e) && _approvalIsDirectSecondRoute(e) && String(e.reviewer2_id || '') === myId;
+          return needsSecondApproval(e) && _approvalIsDirectSecondRoute(e) && _approvalIsSecondApproverForEntry(session, e);
         }
-        if (st === 'pre_approved') return needsSecondApproval(e) && String(e.reviewer2_id || '') === myId;
+        if (st === 'pre_approved') return needsSecondApproval(e) && _approvalIsSecondApproverForEntry(session, e);
         if (st === 'rejected') return String(e.reviewer_id || '') === myId;
         if (st === 'approved') return String(e.reviewer_id || '') === myId;
         return false;
@@ -1673,8 +1686,8 @@ async function loadApprovalList() {
       if (Auth.canApprove2nd(session2)) {
         pendingScopedNonBatch
           .filter(e =>
-            (e.status === 'pre_approved' && needsSecondApproval(e) && String(e.reviewer2_id || '') === myId2) ||
-            (_approvalIsDirectSecondRoute(e) && String(e.reviewer2_id || '') === myId2)
+            (e.status === 'pre_approved' && needsSecondApproval(e) && _approvalIsSecondApproverForEntry(session2, e)) ||
+            (_approvalIsDirectSecondRoute(e) && _approvalIsSecondApproverForEntry(session2, e))
           )
           .forEach(e => { if (e.id) pendingIdSet.add(String(e.id)); });
       }
@@ -2698,9 +2711,9 @@ async function openApprovalModal(entryId, focusReject = false) {
     // ── 분기: 1차(manager) vs 2차(본부장/사업부장) vs 상세보기
     const is1st = _approvalCanDoFirst(session, entry);
     // director: pre_approved 건 또는 (1·2차 동일 지정된 submitted 직행 건)
-    const isDirect2nd = _approvalIsDirectSecondRoute(entry) && String(entry.reviewer2_id || '') === String(session.id);
+    const isDirect2nd = _approvalIsDirectSecondRoute(entry) && _approvalIsSecondApproverForEntry(session, entry);
     const is2nd = Auth.canApprove2nd(session) && needsSecondApproval(entry) && (
-      (entry.status === 'pre_approved' && String(entry.reviewer2_id || '') === String(session.id)) ||
+      (entry.status === 'pre_approved' && _approvalIsSecondApproverForEntry(session, entry)) ||
       isDirect2nd
     );
 

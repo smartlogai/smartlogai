@@ -760,11 +760,89 @@ function _pmIsProjectInScope(session, row) {
   if (!myIds.size) return false;
   const refs = [
     row.created_by,
+    row.cpm_user_id,
+    row.reg_pa1_id,
+    row.reg_pa2_id,
+    row.reg_pa3_id,
     row.first_approved_by,
     row.second_approved_by,
     row.final_approved_by,
   ].map((v) => String(v || '').trim()).filter(Boolean);
-  return refs.some((id) => myIds.has(id));
+  return refs.some((id) => myIds.has(id)) || _pmProjectOrgInScope(session, row);
+}
+
+function _pmTextKey(v) {
+  return String(v || '').trim().toLowerCase().replace(/\s+/g, '');
+}
+
+function _pmLooseNameKey(v) {
+  let s = String(v || '').toLowerCase();
+  s = s.replace(/\([^)]*\)/g, '');
+  s = s.replace(/[^0-9a-z가-힣]/g, '');
+  s = s.replace(/(staff|manager|director|topmgr|top_mgr|cpm)$/g, '');
+  s = s.replace(/(사원|대리|과장|차장|부장|팀장|실장|본부장|사업부장|이사|상무|전무|부사장|사장)$/g, '');
+  return s.trim();
+}
+
+function _pmLooseNameMatches(a, b) {
+  const x = _pmLooseNameKey(a);
+  const y = _pmLooseNameKey(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  if (x.length >= 3 && y.includes(x)) return true;
+  if (y.length >= 3 && x.includes(y)) return true;
+  return false;
+}
+
+function _pmSessionOrgMatchesRecord(session, rec) {
+  if (!session || !rec) return false;
+  if (typeof Auth !== 'undefined' && Auth.scopeMatch && Auth.scopeMatch(session, rec)) return true;
+  const pairs = [
+    [session.dept_id, rec.dept_id],
+    [session.hq_id, rec.hq_id],
+    [session.cs_team_id, rec.cs_team_id],
+    [session.dept_name || session.department_name, rec.dept_name || rec.department_name],
+    [session.hq_name, rec.hq_name],
+    [session.cs_team_name || session.team_name, rec.cs_team_name || rec.team_name],
+  ];
+  return pairs.some(([a, b]) => {
+    const aa = _pmTextKey(a);
+    const bb = _pmTextKey(b);
+    return !!(aa && bb && aa === bb);
+  });
+}
+
+function _pmUserById(id) {
+  const key = String(id || '').trim();
+  if (!key) return null;
+  return (PM_STATE.usersById && PM_STATE.usersById[key])
+    || (Array.isArray(PM_STATE.users) ? PM_STATE.users.find((u) => String(u?.id || '').trim() === key) : null)
+    || null;
+}
+
+function _pmProjectOrgInScope(session, row) {
+  if (!session || !row) return false;
+  if (_pmSessionOrgMatchesRecord(session, row)) return true;
+
+  const linkedUsers = [
+    _pmUserById(row.cpm_user_id),
+    _pmUserById(row.created_by),
+    _pmUserById(row.updated_by),
+  ].filter(Boolean);
+  if (linkedUsers.some((u) => _pmSessionOrgMatchesRecord(session, u))) return true;
+
+  const scopedUsers = (Array.isArray(PM_STATE.users) ? PM_STATE.users : [])
+    .filter((u) => _pmSessionOrgMatchesRecord(session, u));
+  if (!scopedUsers.length) return false;
+  const scopedIds = new Set(scopedUsers.map((u) => String(u?.id || '').trim()).filter(Boolean));
+  const scopedNames = scopedUsers.map((u) => String(u?.name || '').trim()).filter(Boolean);
+  const assistants = _pmProgressParseAssistants(String(row.order_contributors_text || ''));
+  return assistants.some((a) => {
+    const uid = String(a?.user_id || '').trim();
+    const name = String(a?.name || '').trim();
+    if (uid && scopedIds.has(uid)) return true;
+    return !!(name && scopedNames.some((n) => _pmLooseNameMatches(name, n)));
+  });
 }
 
 function _pmFilterProjectsByScope(rows, session) {
@@ -2920,16 +2998,54 @@ function _pmRowProjectCode(row) {
   return String(row && row.project_code || '').trim();
 }
 
-function _pmRowMatchesProject(row, projectCode) {
-  const code = _pmRowProjectCode(row);
-  return !!(code && code === projectCode);
+function _pmProjectCodeComparable(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s+/g, '')
+    .trim()
+    .toUpperCase();
 }
 
-function _pmRowInBillingMonth(row, billingMonth) {
-  const ym = String(billingMonth || '').trim();
-  if (!ym) return true;
+function _pmRowMatchesProject(row, projectCode) {
+  const targetCode = _pmProjectCodeComparable(projectCode);
+  if (!targetCode) return false;
+  const code = _pmRowProjectCode(row);
+  if (code) return _pmProjectCodeComparable(code) === targetCode;
+  const categoryName = String(row && row.work_category_name || '').trim();
+  const subcategoryName = String(row && row.work_subcategory_name || '').trim();
+  // 과거 일괄기록은 project_code 컬럼 없이 소분류명에 프로젝트코드가 저장된 경우가 있다.
+  // 타임시트 목록/엑셀도 이 값을 프로젝트코드처럼 표시하므로 Time Charge에서도 동일하게 인정한다.
+  return categoryName === '프로젝트업무' && _pmProjectCodeComparable(subcategoryName) === targetCode;
+}
+
+function _pmTimeChargeWorkDateScope() {
+  const from = String(document.getElementById('pm-tc-work-date-from')?.value || '').trim();
+  const to = String(document.getElementById('pm-tc-work-date-to')?.value || '').trim();
+  return {
+    from: /^\d{4}-\d{2}-\d{2}$/.test(from) ? from : '',
+    to: /^\d{4}-\d{2}-\d{2}$/.test(to) ? to : '',
+  };
+}
+
+function _pmTimeChargeWorkDateScopeLabel(scope) {
+  const from = String(scope?.from || '').trim();
+  const to = String(scope?.to || '').trim();
+  if (from && to) return `${from}~${to}`;
+  if (from) return `${from} 이후`;
+  if (to) return `${to} 이전`;
+  return '전체 수행기간';
+}
+
+function _pmRowInWorkDateScope(row, scope) {
+  const from = String(scope?.from || '').trim();
+  const to = String(scope?.to || '').trim();
+  if (!from && !to) return true;
   const workDate = _pmEntryToWorkDate(row);
-  return !!(workDate && workDate.startsWith(ym));
+  if (!workDate) return false;
+  if (from && workDate < from) return false;
+  if (to && workDate > to) return false;
+  return true;
 }
 
 async function _pmLoadBatchDetailsByEntryIds(entryIds) {
@@ -2982,7 +3098,9 @@ async function _pmExpandApprovedEntriesForTimeCharge(entries) {
         work_subcategory_name: d.work_subcategory_name || e.work_subcategory_name,
         client_id: d.client_id || e.client_id || '',
         client_name: d.client_name || e.client_name || '',
-        project_code: d.project_code || e.project_code || '',
+        // 일괄기록은 상세행별 프로젝트 투입시간만 인정한다.
+        // 헤더 project_code를 상속하면 동일 일괄기록의 다른 프로젝트/내부업무까지 섞인다.
+        project_code: d.project_code || '',
         project_name: d.project_name || e.project_name || '',
         work_start_at: d.from_at != null ? d.from_at : e.work_start_at,
         work_end_at: d.to_at != null ? d.to_at : e.work_end_at,
@@ -2994,17 +3112,355 @@ async function _pmExpandApprovedEntriesForTimeCharge(entries) {
   return out;
 }
 
-async function _pmLoadApprovedTimeRowsForProject(projectCode, billingMonth) {
-  const entries = await API.listAllPages('time_entries', {
+async function _pmLoadApprovedTimeRowsForProject(projectCode, workDateScope = null) {
+  const targetCode = String(projectCode || '').trim();
+  const directEntries = targetCode ? await API.listAllPages('time_entries', {
+    filter: `status=eq.approved&project_code=eq.${encodeURIComponent(targetCode)}`,
+    limit: 500,
+    maxPages: 100,
+    sort: 'updated_at',
+  }).catch(() => []) : [];
+  const broadEntries = await API.listAllPages('time_entries', {
     filter: 'status=eq.approved',
     limit: 500,
-    maxPages: 50,
+    maxPages: 100,
     sort: 'updated_at',
+  }).catch(() => []);
+  const byId = new Map();
+  [...(directEntries || []), ...(broadEntries || [])].forEach((row) => {
+    const id = String(row?.id || '').trim();
+    if (id) byId.set(id, row);
   });
+  const entries = [...byId.values()];
+  const scope = workDateScope || _pmTimeChargeWorkDateScope();
   const expanded = await _pmExpandApprovedEntriesForTimeCharge(entries || []);
   return expanded.filter((row) =>
-    _pmRowMatchesProject(row, projectCode) && _pmRowInBillingMonth(row, billingMonth)
+    _pmRowMatchesProject(row, projectCode) && _pmRowInWorkDateScope(row, scope)
   );
+}
+
+function _pmTimeChargeAuditHours(minutes) {
+  const n = Number(minutes || 0);
+  return `${(n / 60).toFixed(2).replace(/\.?0+$/, '')}h`;
+}
+
+function _pmTimeChargeAuditUserKey(row) {
+  const id = String(row?.user_id || '').trim();
+  const name = String(row?.user_name || '').trim();
+  return id || `name:${name}`;
+}
+
+function _pmTimeChargeAuditUserName(row) {
+  return String(row?.user_name || '').trim() || String(row?.user_id || '').trim() || '-';
+}
+
+function _pmTimeChargeAuditStatusLabel(status) {
+  const st = String(status || '').trim();
+  const map = {
+    approved: '최종승인',
+    pre_approved: '승인대기중',
+    submitted: '1차검토중',
+    draft: '임시저장',
+    rejected: '반려',
+  };
+  return map[st] || st || '-';
+}
+
+function _pmTimeChargeAuditReason(row, projectCode, scope) {
+  const reasons = [];
+  if (String(row?.status || '').trim() !== 'approved') reasons.push('상태 미승인');
+  if (!_pmRowMatchesProject(row, projectCode)) reasons.push('프로젝트코드 미매칭');
+  if (!_pmRowInWorkDateScope(row, scope)) reasons.push('수행기간 제외');
+  return reasons.length ? reasons.join(', ') : '불러오기 대상';
+}
+
+async function _pmLoadRawTimeRowsForProjectAudit(projectCode) {
+  const targetCode = String(projectCode || '').trim();
+  const directEntries = targetCode ? await API.listAllPages('time_entries', {
+    filter: `project_code=eq.${encodeURIComponent(targetCode)}`,
+    limit: 500,
+    maxPages: 100,
+    sort: 'updated_at',
+  }).catch(() => []) : [];
+  const approvedEntries = await API.listAllPages('time_entries', {
+    filter: 'status=eq.approved',
+    limit: 500,
+    maxPages: 100,
+    sort: 'updated_at',
+  }).catch(() => []);
+  const byId = new Map();
+  [...(directEntries || []), ...(approvedEntries || [])].forEach((row) => {
+    const id = String(row?.id || '').trim();
+    if (id) byId.set(id, row);
+  });
+  return _pmExpandApprovedEntriesForTimeCharge([...byId.values()]);
+}
+
+async function _pmLatestTimeChargeBatchForProject(projectCode) {
+  const rows = await _pmListAllPagesSortFallback('project_timecharge_batches', {
+    filter: `project_code=eq.${encodeURIComponent(projectCode)}`,
+    limit: 50,
+    maxPages: 1,
+  }).catch(() => []);
+  const toTs = (v) => {
+    const n = Number(v || 0);
+    if (Number.isFinite(n) && n > 0) return n;
+    const t = Date.parse(String(v || ''));
+    return Number.isFinite(t) ? t : 0;
+  };
+  return (rows || []).slice().sort((a, b) =>
+    toTs(b?.updated_at || b?.created_at || 0) - toTs(a?.updated_at || a?.created_at || 0)
+  )[0] || null;
+}
+
+async function _pmLoadTimeChargeLinesForAudit(projectCode) {
+  const currentBatch = PM_STATE.currentBatch || null;
+  const batch = currentBatch && String(currentBatch.project_code || '').trim() === String(projectCode || '').trim()
+    ? currentBatch
+    : await _pmLatestTimeChargeBatchForProject(projectCode);
+  if (!batch?.id) return { batch: null, lines: [] };
+  const lines = await _pmListAllPagesSortFallback('project_timecharge_lines', {
+    filter: `batch_id=eq.${encodeURIComponent(batch.id)}`,
+    limit: 1000,
+    maxPages: 20,
+  }).catch(() => []);
+  return { batch, lines: Array.isArray(lines) ? lines : [] };
+}
+
+function _pmBuildTimeChargeAuditModel({ projectCode, scope, rawRows, tcLines, batch }) {
+  const rows = (Array.isArray(rawRows) ? rawRows : []).filter((row) => _pmRowMatchesProject(row, projectCode));
+  const lineList = Array.isArray(tcLines) ? tcLines : [];
+  const savedTimesheetKeys = new Set(
+    lineList
+      .map((line) => String(line?.source_key || '').trim())
+      .filter((key) => key && !key.startsWith('excel|'))
+  );
+  const byUser = new Map();
+  const ensure = (row) => {
+    const key = _pmTimeChargeAuditUserKey(row);
+    if (!byUser.has(key)) {
+      byUser.set(key, {
+        key,
+        name: _pmTimeChargeAuditUserName(row),
+        rawCount: 0,
+        rawMinutes: 0,
+        importCount: 0,
+        importMinutes: 0,
+        savedTimesheetCount: 0,
+        savedTimesheetMinutes: 0,
+        savedExcelCount: 0,
+        savedExcelMinutes: 0,
+        excludedMinutes: 0,
+        excludedByReason: {},
+        missingCount: 0,
+        missingMinutes: 0,
+        details: [],
+      });
+    }
+    return byUser.get(key);
+  };
+
+  rows.forEach((row) => {
+    const group = ensure(row);
+    const minutes = Number(row?.duration_minutes || 0);
+    const sourceKey = _pmTimeChargeSourceKeyFromRow(row);
+    const isImportable = String(row?.status || '').trim() === 'approved'
+      && _pmRowMatchesProject(row, projectCode)
+      && _pmRowInWorkDateScope(row, scope);
+    const isSaved = isImportable && savedTimesheetKeys.has(sourceKey);
+    group.rawCount += 1;
+    group.rawMinutes += minutes;
+    if (isImportable) {
+      group.importCount += 1;
+      group.importMinutes += minutes;
+      if (!isSaved) {
+        group.missingCount += 1;
+        group.missingMinutes += minutes;
+      }
+    } else {
+      const reason = _pmTimeChargeAuditReason(row, projectCode, scope);
+      group.excludedMinutes += minutes;
+      group.excludedByReason[reason] = Number(group.excludedByReason[reason] || 0) + minutes;
+    }
+    group.details.push({
+      workDate: _pmEntryToWorkDate(row),
+      userName: _pmTimeChargeAuditUserName(row),
+      sourceKey,
+      status: _pmTimeChargeAuditStatusLabel(row?.status),
+      minutes,
+      category: String(row?.work_category_name || '').trim(),
+      subcategory: String(row?.work_subcategory_name || '').trim(),
+      saved: isSaved,
+      reason: isImportable ? (isSaved ? 'TC 반영' : 'TC 저장 라인 없음') : _pmTimeChargeAuditReason(row, projectCode, scope),
+    });
+  });
+
+  lineList.forEach((line) => {
+    if (!_pmRowMatchesProject(line, projectCode)) return;
+    const group = ensure(line);
+    const minutes = Number(line?.final_minutes || line?.base_minutes || 0);
+    const sourceKey = String(line?.source_key || '').trim();
+    if (sourceKey.startsWith('excel|')) {
+      group.savedExcelCount += 1;
+      group.savedExcelMinutes += minutes;
+    } else {
+      group.savedTimesheetCount += 1;
+      group.savedTimesheetMinutes += minutes;
+    }
+  });
+
+  return {
+    projectCode,
+    scope,
+    batch,
+    groups: [...byUser.values()].sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko')),
+  };
+}
+
+function _pmRenderTimeChargeAuditModal(model) {
+  document.getElementById('pm-tc-audit-modal')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'pm-tc-audit-modal';
+  overlay.className = 'modal-overlay show';
+  overlay.dataset.dynamic = 'true';
+  const scopeLabel = _pmTimeChargeWorkDateScopeLabel(model.scope);
+  const totals = model.groups.reduce((acc, g) => {
+    acc.raw += g.rawMinutes;
+    acc.importable += g.importMinutes;
+    acc.tcTimesheet += g.savedTimesheetMinutes;
+    acc.tcExcel += g.savedExcelMinutes;
+    acc.missing += g.missingMinutes;
+    return acc;
+  }, { raw: 0, importable: 0, tcTimesheet: 0, tcExcel: 0, missing: 0 });
+  const focusNames = ['박지원', '임소영', '홍정희'];
+  const sortedGroups = model.groups.slice().sort((a, b) => {
+    const ai = focusNames.indexOf(String(a.name || '').trim());
+    const bi = focusNames.indexOf(String(b.name || '').trim());
+    if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    return String(a.name || '').localeCompare(String(b.name || ''), 'ko');
+  });
+  const summaryRows = sortedGroups.length ? sortedGroups.map((g) => {
+    const delta = g.importMinutes - g.savedTimesheetMinutes;
+    const warn = delta > 0 || g.savedExcelMinutes > 0 ? 'background:#fffbeb' : '';
+    const excludedText = Object.entries(g.excludedByReason || {})
+      .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
+      .map(([reason, minutes]) => `${reason} ${_pmTimeChargeAuditHours(minutes)}`)
+      .join(' / ') || '-';
+    return `<tr style="${warn}">
+      <td>${_pmEsc(g.name)}</td>
+      <td style="text-align:right">${g.rawCount}</td>
+      <td style="text-align:right">${_pmTimeChargeAuditHours(g.rawMinutes)}</td>
+      <td style="text-align:right;color:${g.excludedMinutes > 0 ? '#b45309' : '#64748b'}">${_pmTimeChargeAuditHours(g.excludedMinutes)}</td>
+      <td style="text-align:right">${_pmTimeChargeAuditHours(g.importMinutes)}</td>
+      <td style="text-align:right">${_pmTimeChargeAuditHours(g.savedTimesheetMinutes)}</td>
+      <td style="text-align:right">${_pmTimeChargeAuditHours(g.savedExcelMinutes)}</td>
+      <td style="text-align:right;color:${delta > 0 ? '#b45309' : '#64748b'}">${_pmTimeChargeAuditHours(delta)}</td>
+      <td>${_pmEsc(excludedText)}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="9" class="table-empty"><i class="fas fa-inbox"></i><p>프로젝트코드와 매칭되는 원천/TC 라인이 없습니다.</p></td></tr>`;
+  const detailRows = sortedGroups.flatMap((g) =>
+    g.details
+      .slice()
+      .sort((a, b) => String(a.workDate || '').localeCompare(String(b.workDate || '')))
+      .map((d) => {
+        const isProblem = d.reason !== 'TC 반영';
+        return `<tr style="${isProblem ? 'background:#fff7ed' : ''}">
+          <td>${_pmEsc(g.name)}</td>
+          <td>${_pmEsc(d.workDate || '-')}</td>
+          <td>${_pmEsc(d.status)}</td>
+          <td style="text-align:right">${_pmTimeChargeAuditHours(d.minutes)}</td>
+          <td>${_pmEsc(d.category || '-')}</td>
+          <td>${_pmEsc(d.subcategory || '-')}</td>
+          <td>${_pmEsc(d.reason)}</td>
+        </tr>`;
+      })
+  ).join('');
+  overlay.innerHTML = `
+    <div style="width:min(1120px,94vw);max-height:min(86vh,820px);overflow:auto;background:#f8fafc;border-radius:14px;border:1px solid #e2e8f0;padding:14px">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px">
+        <div>
+          <div style="font-size:15px;font-weight:800;color:#1a2b45"><i class="fas fa-search" style="margin-right:8px;color:#2563eb"></i>Time Charge 원천 비교</div>
+          <div style="font-size:12px;color:#64748b;margin-top:4px">프로젝트 ${_pmEsc(model.projectCode)} · 수행기간 ${_pmEsc(scopeLabel)} · 배치 ${_pmEsc(model.batch?.billing_month || '없음')}</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button type="button" class="btn btn-primary" id="pm-tc-audit-import-btn"><i class="fas fa-download"></i> 승인 타임시트 갱신</button>
+          <button type="button" class="btn btn-ghost" id="pm-tc-audit-close-btn">닫기</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-bottom:12px">
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px"><div style="font-size:11px;color:#64748b">DB 원천</div><div style="font-weight:800">${_pmTimeChargeAuditHours(totals.raw)}</div></div>
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px"><div style="font-size:11px;color:#64748b">불러오기 대상</div><div style="font-weight:800">${_pmTimeChargeAuditHours(totals.importable)}</div></div>
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px"><div style="font-size:11px;color:#64748b">TC 타임시트</div><div style="font-weight:800">${_pmTimeChargeAuditHours(totals.tcTimesheet)}</div></div>
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px"><div style="font-size:11px;color:#64748b">TC 엑셀</div><div style="font-weight:800">${_pmTimeChargeAuditHours(totals.tcExcel)}</div></div>
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px"><div style="font-size:11px;color:#64748b">대상-저장 차이</div><div style="font-weight:800;color:${totals.missing > 0 ? '#b45309' : '#1a2b45'}">${_pmTimeChargeAuditHours(totals.missing)}</div></div>
+      </div>
+      <div class="pm-summary-text" style="margin-bottom:8px">해석: '불러오기 대상'은 현재 Time Charge 불러오기 로직 기준입니다. 'TC 엑셀'은 병합되지 않고 별도 라인으로 공존합니다.</div>
+      <div class="table-wrapper" style="border:1px solid #e2e8f0;border-radius:10px;overflow:auto;margin-bottom:12px;background:#fff">
+        <table class="data-table pm-tc-table">
+          <thead><tr>
+            <th>컨설턴트</th><th style="width:80px;text-align:right">원천건수</th><th style="width:95px;text-align:right">DB 원천</th><th style="width:95px;text-align:right">원천 제외</th><th style="width:115px;text-align:right">불러오기 대상</th><th style="width:105px;text-align:right">TC 타임시트</th><th style="width:95px;text-align:right">TC 엑셀</th><th style="width:105px;text-align:right">대상-저장</th><th style="width:220px">제외 사유</th>
+          </tr></thead>
+          <tbody>${summaryRows}</tbody>
+        </table>
+      </div>
+      <div style="font-size:12px;font-weight:800;color:#1a2b45;margin:8px 0">원천 행 상세</div>
+      <div class="table-wrapper" style="border:1px solid #e2e8f0;border-radius:10px;overflow:auto;background:#fff">
+        <table class="data-table pm-tc-table">
+          <thead><tr>
+            <th style="width:120px">컨설턴트</th><th style="width:105px">수행일</th><th style="width:105px">상태</th><th style="width:85px;text-align:right">시간</th><th style="width:130px">대분류</th><th style="width:180px">소분류/코드</th><th>판정</th>
+          </tr></thead>
+          <tbody>${detailRows || `<tr><td colspan="7" class="table-empty"><i class="fas fa-inbox"></i><p>상세 원천 행이 없습니다.</p></td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#pm-tc-audit-close-btn')?.addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#pm-tc-audit-import-btn')?.addEventListener('click', async () => {
+    overlay.remove();
+    await importTimeChargeFromEntries();
+    await pmOpenTimeChargeSourceAudit();
+  });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+}
+
+async function pmOpenTimeChargeSourceAudit() {
+  const projectCode = String(document.getElementById('pm-tc-project')?.value || '').trim();
+  if (!projectCode) {
+    Toast.warning('프로젝트코드를 선택하세요.');
+    return;
+  }
+  if (!_pmHasProjectAccess(projectCode)) {
+    Toast.warning('해당 프로젝트 접근 권한이 없습니다.');
+    return;
+  }
+  const scope = _pmTimeChargeWorkDateScope();
+  try {
+    Toast.info('Time Charge 원천을 비교 중입니다...');
+    const [rawRows, tc] = await Promise.all([
+      _pmLoadRawTimeRowsForProjectAudit(projectCode),
+      _pmLoadTimeChargeLinesForAudit(projectCode),
+    ]);
+    const model = _pmBuildTimeChargeAuditModel({
+      projectCode,
+      scope,
+      rawRows,
+      tcLines: tc.lines,
+      batch: tc.batch,
+    });
+    _pmRenderTimeChargeAuditModal(model);
+  } catch (e) {
+    console.error(e);
+    Toast.error('Time Charge 원천 비교 실패: ' + (e.message || ''));
+  }
+}
+
+function _pmTimeChargeSourceKeyFromRow(row) {
+  const workDate = _pmEntryToWorkDate(row);
+  const userId = String(row?.user_id || '');
+  const cat = String(row?.work_category_name || '').trim();
+  const sub = String(row?.work_subcategory_name || '').trim();
+  return `${userId}|${workDate}|${cat}|${sub}`;
 }
 
 async function _pmLoadProjects(opts = {}) {
@@ -3014,6 +3470,7 @@ async function _pmLoadProjects(opts = {}) {
     return;
   }
   const session = getSession ? getSession() : null;
+  await _pmLoadUsers().catch(() => {});
   let rows = [];
   let codeTypes = [];
   try {
@@ -3470,6 +3927,7 @@ function _pmSyncTimeChargeActionAvailability() {
     if (el) el.disabled = !!disabled;
   };
   apply('pm-tc-download-template-btn', !canWrite);
+  apply('pm-tc-audit-btn', !canWrite || !hasProject);
   apply('pm-tc-import-btn', !canWrite || !hasProject || mode === 'excel');
   apply('pm-tc-upload-open-btn', !canWrite || !hasProject || mode === 'timesheet');
   apply('pm-tc-upload-save-btn', !canWrite || !hasProject || !hasPending || mode === 'timesheet');
@@ -4520,8 +4978,8 @@ async function init_project_management() {
   const canIssue = _pmCanIssueInvoice(session);
   const canRequestInvoice = !!session;
 
-  await _pmLoadProjects();
   await _pmLoadUsers();
+  await _pmLoadProjects();
   const canExpenseUpload = _pmCanExpenseUpload(session);
   _pmEnsureProgressDetailModalPortal();
   _pmEnsureCustomerInvoiceModalPortal();
@@ -4567,6 +5025,7 @@ async function init_project_management() {
       });
     });
     document.getElementById('pm-tc-import-btn')?.addEventListener('click', importTimeChargeFromEntries);
+    document.getElementById('pm-tc-audit-btn')?.addEventListener('click', pmOpenTimeChargeSourceAudit);
     document.getElementById('pm-tc-save-btn')?.addEventListener('click', saveTimeChargeLines);
     document.getElementById('pm-tc-download-template-btn')?.addEventListener('click', pmDownloadTimeChargeTemplate);
     document.getElementById('pm-tc-upload-open-btn')?.addEventListener('click', () => document.getElementById('pm-tc-upload-file')?.click());
@@ -4582,6 +5041,11 @@ async function init_project_management() {
     document.getElementById('pm-tc-project')?.addEventListener('change', () => {
       _pmSyncTimeChargeActionAvailability();
       loadProjectMgmtTimeCharge();
+    });
+    ['pm-tc-work-date-from', 'pm-tc-work-date-to'].forEach((id) => {
+      document.getElementById(id)?.addEventListener('change', () => {
+        _pmSyncTimeChargeSourceGuide();
+      });
     });
     document.getElementById('pm-tc-client-search')?.addEventListener('input', () => {
       _pmRenderTimeChargeClientOptions();
@@ -6629,11 +7093,12 @@ function _pmSyncTimeChargeSourceGuide() {
   const mode = _pmTimeChargeDataSource();
   const guideEl = document.getElementById('pm-tc-source-guide');
   if (guideEl) {
+    const scopeLabel = _pmTimeChargeWorkDateScopeLabel(_pmTimeChargeWorkDateScope());
     guideEl.textContent = mode === 'timesheet'
-      ? '타임시트 모드: 승인 타임시트 불러오기로만 데이터를 반영합니다.'
+      ? `타임시트 모드: 프로젝트 전체 승인 타임시트를 기본으로 반영합니다. 현재 범위: ${scopeLabel}.`
       : (mode === 'excel'
         ? '엑셀 모드: 업로드 검토/확정 저장으로만 데이터를 반영합니다.'
-        : '혼합 모드에서는 승인 타임시트 불러오기와 엑셀 업로드를 함께 사용할 수 있습니다.');
+        : `혼합 모드: 승인 타임시트 전체 불러오기와 엑셀 업로드를 함께 사용할 수 있습니다. 현재 범위: ${scopeLabel}.`);
   }
   _pmSyncTimeChargeActionAvailability();
 }
@@ -7312,6 +7777,44 @@ async function pmExportTimeChargeInvoiceWorkbook() {
   Toast.success('타임차지 청구서 산출물을 생성했습니다.');
 }
 
+function _pmIsTimesheetTimeChargeLine(row) {
+  const key = String(row?.source_key || '').trim();
+  return !!(key && !key.startsWith('excel|'));
+}
+
+async function _pmDeleteStaleTimesheetTimeChargeLines(existingLines, activeSourceKeys) {
+  const active = activeSourceKeys instanceof Set ? activeSourceKeys : new Set();
+  const stale = (Array.isArray(existingLines) ? existingLines : []).filter((row) => {
+    const id = String(row?.id || '').trim();
+    const sourceKey = String(row?.source_key || '').trim();
+    return !!(id && _pmIsTimesheetTimeChargeLine(row) && !active.has(sourceKey));
+  });
+  for (const row of stale) {
+    await API.delete('project_timecharge_lines', row.id);
+  }
+  return stale.length;
+}
+
+async function _pmSyncCurrentTimeChargeBatchTotals() {
+  const batchId = String(PM_STATE.currentBatch?.id || '').trim();
+  if (!batchId) return;
+  const rows = Array.isArray(PM_STATE.currentLines) ? PM_STATE.currentLines : [];
+  const subtotal = rows.reduce((sum, row) => {
+    const amount = Number(row?.final_amount || 0);
+    return sum + (row?.is_billable !== false ? amount : 0);
+  }, 0);
+  const tax = Math.round(subtotal * 0.1);
+  const total = subtotal + tax;
+  const patch = {
+    subtotal_amount: subtotal,
+    tax_amount: tax,
+    total_amount: total,
+    outstanding_amount: total,
+  };
+  await API.patch('project_timecharge_batches', batchId, patch);
+  PM_STATE.currentBatch = { ...(PM_STATE.currentBatch || {}), ...patch };
+}
+
 async function importTimeChargeFromEntries() {
   const mode = _pmTimeChargeDataSource();
   if (mode === 'excel') {
@@ -7325,6 +7828,8 @@ async function importTimeChargeFromEntries() {
   }
   const projectCode = String(document.getElementById('pm-tc-project')?.value || '').trim();
   const billingMonth = _pmTimeChargeBatchMonth(projectCode);
+  const workDateScope = _pmTimeChargeWorkDateScope();
+  const scopeLabel = _pmTimeChargeWorkDateScopeLabel(workDateScope);
   if (!projectCode) {
     Toast.warning('프로젝트코드를 선택하세요.');
     return;
@@ -7336,18 +7841,19 @@ async function importTimeChargeFromEntries() {
   try {
     const batch = await _pmFindOrCreateBatch(projectCode, billingMonth);
     PM_STATE.currentBatch = batch;
-    const scoped = await _pmLoadApprovedTimeRowsForProject(projectCode, billingMonth);
+    const scoped = await _pmLoadApprovedTimeRowsForProject(projectCode, workDateScope);
     if (!scoped.length) {
-      Toast.info('선택한 프로젝트·청구월에 해당하는 승인 타임시트가 없습니다.');
+      Toast.info(`선택한 프로젝트·수행기간(${scopeLabel})에 해당하는 승인 타임시트가 없습니다.`);
       return;
     }
+    const sourceHours = Math.round((scoped.reduce((sum, row) => sum + Number(row?.duration_minutes || 0), 0) / 60) * 100) / 100;
     const grouped = {};
     scoped.forEach((e) => {
       const workDate = _pmEntryToWorkDate(e);
       const userId = String(e.user_id || '');
       const cat = String(e.work_category_name || '').trim();
       const sub = String(e.work_subcategory_name || '').trim();
-      const sourceKey = `${userId}|${workDate}|${cat}|${sub}`;
+      const sourceKey = _pmTimeChargeSourceKeyFromRow(e);
       const startTs = Number(e.work_start_at) || 0;
       const endTs = Number(e.work_end_at) || 0;
       if (!grouped[sourceKey]) {
@@ -7397,6 +7903,7 @@ async function importTimeChargeFromEntries() {
 
     const project = PM_STATE.projectByCode[projectCode] || {};
     const session = getSession();
+    const activeTimesheetKeys = new Set(Object.keys(grouped));
     await _pmLoadStandardRateMasterRates(true);
     for (const key of Object.keys(grouped)) {
       const row = grouped[key];
@@ -7432,10 +7939,14 @@ async function importTimeChargeFromEntries() {
       if (existingByKey[row.source_key]) await API.patch('project_timecharge_lines', existingByKey[row.source_key].id, payload);
       else await API.create('project_timecharge_lines', payload);
     }
+    const removedCount = await _pmDeleteStaleTimesheetTimeChargeLines(existing, activeTimesheetKeys);
     await loadProjectMgmtTimeCharge();
+    await _pmSyncCurrentTimeChargeBatchTotals();
+    _pmSyncTimeChargeDocMeta(projectCode, billingMonth);
     pmTimeChargeSwitchDocTab('status');
     pmTimeChargeSwitchViewTab('overall');
-    Toast.success(`Time Charge 라인 불러오기 완료 (${Object.keys(grouped).length}건)`);
+    const removedText = removedCount ? ` · 제외 ${removedCount}건` : '';
+    Toast.success(`Time Charge 라인 불러오기 완료 (원천 ${sourceHours}h · 라인 ${Object.keys(grouped).length}건${removedText} · ${scopeLabel})`);
   } catch (e) {
     console.error(e);
     Toast.error('승인 타임시트 불러오기 실패: ' + (e.message || ''));
@@ -7488,12 +7999,14 @@ async function saveTimeChargeLines() {
     }
     const tax = Math.round(subtotal * 0.1);
     const total = subtotal + tax;
-    await API.patch('project_timecharge_batches', PM_STATE.currentBatch.id, {
+    const patch = {
       subtotal_amount: subtotal,
       tax_amount: tax,
       total_amount: total,
       outstanding_amount: total,
-    });
+    };
+    await API.patch('project_timecharge_batches', PM_STATE.currentBatch.id, patch);
+    PM_STATE.currentBatch = { ...(PM_STATE.currentBatch || {}), ...patch };
     await loadProjectMgmtTimeCharge();
     Toast.success('Time Charge 조정 내역을 저장했습니다.');
   } catch (e) {
@@ -7597,17 +8110,7 @@ async function loadProjectMgmtTimeCharge() {
     const sortedRows = (rows || []).slice().sort((a, b) =>
       toTs(b?.updated_at || b?.created_at || 0) - toTs(a?.updated_at || a?.created_at || 0)
     );
-    const prevBatchId = String(
-      PM_STATE.currentBatch && String(PM_STATE.currentBatch.project_code || '').trim() === projectCode
-        ? (PM_STATE.currentBatch.id || '')
-        : ''
-    ).trim();
-    if (prevBatchId) {
-      const matched = (rows || []).find((r) => String(r?.id || '') === prevBatchId);
-      PM_STATE.currentBatch = matched || sortedRows[0] || null;
-    } else {
-      PM_STATE.currentBatch = sortedRows[0] || null;
-    }
+    PM_STATE.currentBatch = sortedRows[0] || null;
     const batchId = PM_STATE.currentBatch ? PM_STATE.currentBatch.id : '';
     if (!batchId) {
       body.innerHTML = '<tr><td colspan="6" class="table-empty"><i class="fas fa-file-medical"></i><p>아직 생성된 배치가 없습니다. 불러오기를 눌러주세요.</p></td></tr>';
@@ -10072,6 +10575,7 @@ window.applyProjectPageMode = applyProjectPageMode;
 window.init_project_management = init_project_management;
 window.loadProjectMgmtProgress = loadProjectMgmtProgress;
 window.loadProjectMgmtTimeCharge = loadProjectMgmtTimeCharge;
+window.pmOpenTimeChargeSourceAudit = pmOpenTimeChargeSourceAudit;
 window.pmTimeChargeSwitchViewTab = pmTimeChargeSwitchViewTab;
 window.pmTimeChargeSwitchDocTab = pmTimeChargeSwitchDocTab;
 window.pmPreviewTimeChargeDocument = pmPreviewTimeChargeDocument;

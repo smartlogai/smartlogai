@@ -3523,16 +3523,25 @@
                         <option value="excel">엑셀만</option>
                       </select>
                     </div>
+                    <div class="form-group" style="margin:0">
+                      <label class="form-label">수행일자 시작</label>
+                      <input type="date" id="pm-tc-work-date-from" class="form-control" />
+                    </div>
+                    <div class="form-group" style="margin:0">
+                      <label class="form-label">수행일자 종료</label>
+                      <input type="date" id="pm-tc-work-date-to" class="form-control" />
+                    </div>
                   </div>
                   <div class="pm-action-row pm-tc-stage-actions">
                     <button type="button" class="btn btn-sm btn-outline" id="pm-tc-download-template-btn"><i class="fas fa-file-excel"></i> 업로드 양식</button>
                     <button type="button" class="btn btn-sm btn-outline" id="pm-tc-upload-open-btn"><i class="fas fa-upload"></i> 타임시트 엑셀 업로드</button>
+                    <button type="button" class="btn btn-sm btn-outline" id="pm-tc-audit-btn"><i class="fas fa-search"></i> 원천 비교</button>
                     <button type="button" class="btn btn-sm btn-primary" id="pm-tc-import-btn"><i class="fas fa-download"></i> 승인 타임시트 불러오기</button>
                     <button type="button" class="btn btn-sm btn-secondary" id="pm-tc-upload-save-btn" style="display:none"><i class="fas fa-check"></i> 검토 확정</button>
                     <button type="button" class="btn btn-sm btn-ghost" id="pm-tc-upload-cancel-btn" style="display:none"><i class="fas fa-times"></i> 업로드 취소</button>
                     <button type="button" class="btn btn-sm btn-ghost" id="pm-tc-save-btn" style="display:none"><i class="fas fa-save"></i> 저장</button>
                   </div>
-                  <div id="pm-tc-source-guide" class="pm-summary-text">혼합 모드에서는 승인 타임시트 불러오기와 엑셀 업로드를 함께 사용할 수 있습니다. (중복 기준: 프로젝트코드+일자+컨설턴트+시작/종료시간+내용)</div>
+                  <div id="pm-tc-source-guide" class="pm-summary-text">기본은 프로젝트코드에 해당하는 승인 타임시트 전체를 불러옵니다. 중간 청구가 필요한 경우에만 수행일자 범위를 지정하세요.</div>
                   <input type="file" id="pm-tc-upload-file" accept=".xlsx,.xls" style="display:none" />
                   <div id="pm-tc-upload-preview" class="pm-summary-text" style="display:none"></div>
                   <div id="pm-tc-pending-wrap" style="display:none;margin-top:10px">
@@ -6071,11 +6080,11 @@
 <script src="js/dashboard.js?v=20260514dashboardPendingSync4"></script>
 <script src="js/entry.js?v=20260609myTimesheetDraftFix1"></script>
 <script src="js/daily-module.js?v=20260419dailyModePlan1"></script>
-<script src="js/approval.js?v=20260609approvalFix1"></script>
+<script src="js/approval.js?v=20260617secondApproverNameMatch1"></script>
 <script src="js/mobile-approval.js?v=20260525mobileApprovalBatch1"></script>
 <script src="js/analysis.js?v=20260608inactiveUserTeamMap1"></script>
 <script src="js/archive.js?v=20260518archiveContentFullModal1"></script>
-<script src="js/project-management.js?v=20260514pmProgressDownload1"></script>
+<script src="js/project-management.js?v=20260617timechargeAudit1"></script>
 <script src="js/project-dashboard-v2.js?v=20260514excludeInactiveUsers1"></script>
 <!-- master.js / users.js: Settings 메뉴 진입 시 동적 로드 (초기 81KB 절감) -->
 <script src="js/main.js?v=20260515helpdeskMobileListFix1"></script>
