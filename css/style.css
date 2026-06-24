@@ -4254,6 +4254,55 @@ textarea.form-control {
   vertical-align: middle;
   padding: 10px 8px;
 }
+#page-project-register .pm-tc-lines-wrap {
+  margin-top: 12px;
+}
+#page-project-register .pm-tc-lines-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+#page-project-register .pm-tc-lines-head h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+#page-project-register .pm-tc-lines-head p {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+#page-project-register .pm-tc-line-input,
+#page-project-register .pm-tc-pending-input {
+  width: 100%;
+  min-width: 0;
+  font-size: 12px;
+}
+#page-project-register .pm-tc-number-input {
+  text-align: right;
+}
+#page-project-register .pm-tc-reason-input {
+  margin-top: 4px;
+}
+#page-project-register .pm-tc-line-source {
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+#page-project-register .pm-tc-line-row.is-manual {
+  background: #fffdf7;
+}
+#page-project-register .pm-tc-time-range-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+#page-project-register .pm-tc-lines-table td:nth-child(9) {
+  text-align: left;
+}
 #pmTcInvoiceModal .pm-tc-invoice-summary-table thead th,
 #pmTcInvoiceModal .pm-tc-invoice-summary-table tbody td,
 #pmTcInvoiceModal .pm-tc-invoice-total-table tbody th,

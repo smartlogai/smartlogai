@@ -26,6 +26,7 @@ const PM_STATE = {
   timechargeDocTab: 'status',
   timechargeDetailConsultantKey: '',
   timechargeInvoiceGeneratedByBatch: {},
+  timechargeInvoiceStaleByBatch: {},
   invoiceBillableExpanded: false,
   invoicePreviewConfirmed: false,
   invoicePreviewProjectCode: '',
@@ -3919,9 +3920,10 @@ function _pmSyncTimeChargeActionAvailability() {
   const canRequest = _pmCanRequestInvoiceForProject(session, projectCode);
   const hasProject = !!projectCode;
   const batchId = String(PM_STATE.currentBatch?.id || '').trim();
-  const invoiceReady = !!(batchId && PM_STATE.timechargeInvoiceGeneratedByBatch && PM_STATE.timechargeInvoiceGeneratedByBatch[batchId]);
+  const invoiceReady = !!(batchId && PM_STATE.timechargeInvoiceGeneratedByBatch && PM_STATE.timechargeInvoiceGeneratedByBatch[batchId] && !PM_STATE.timechargeInvoiceStaleByBatch?.[batchId]);
   const mode = _pmTimeChargeDataSource();
   const hasPending = (PM_STATE.pendingTimeChargeUploadRows || []).length > 0;
+  const canEditLines = _pmCanEditCurrentTimeChargeBatch(session);
   const apply = (id, disabled) => {
     const el = document.getElementById(id);
     if (el) el.disabled = !!disabled;
@@ -3932,7 +3934,9 @@ function _pmSyncTimeChargeActionAvailability() {
   apply('pm-tc-upload-open-btn', !canWrite || !hasProject || mode === 'timesheet');
   apply('pm-tc-upload-save-btn', !canWrite || !hasProject || !hasPending || mode === 'timesheet');
   apply('pm-tc-upload-cancel-btn', !canWrite || !hasPending);
-  apply('pm-tc-save-btn', !canWrite || !hasProject);
+  apply('pm-tc-save-btn', !canEditLines);
+  apply('pm-tc-add-line-btn', !canEditLines);
+  apply('pm-tc-pending-add-btn', !canWrite || !hasProject || mode === 'timesheet');
   apply('pm-tc-generate-print-btn', !canWrite || !hasProject);
   apply('pm-tc-invoice-print-btn', !canWrite || !hasProject || !invoiceReady);
   apply('pm-tc-invoice-pdf-btn', !canWrite || !hasProject || !invoiceReady);
@@ -3942,9 +3946,23 @@ function _pmSyncTimeChargeActionAvailability() {
   _pmSyncTimeChargeDocTabUi();
 }
 
+function _pmCanWriteTimeCharge(session = null) {
+  const s = session || (getSession ? getSession() : null);
+  return !!(s && (Auth.canApprove1st(s) || Auth.isDirector(s) || Auth.isTopMgr(s) || Auth.isAdmin(s)));
+}
+
+function _pmCanEditCurrentTimeChargeBatch(session = null) {
+  if (!_pmCanWriteTimeCharge(session)) return false;
+  const projectCode = String(document.getElementById('pm-tc-project')?.value || '').trim();
+  if (!projectCode || !_pmHasProjectAccess(projectCode)) return false;
+  const batch = PM_STATE.currentBatch || null;
+  if (!batch || !String(batch.id || '').trim()) return false;
+  return String(batch.status || 'draft').trim() === 'draft';
+}
+
 function _pmIsTimeChargeInvoiceReady() {
   const batchId = String(PM_STATE.currentBatch?.id || '').trim();
-  return !!(batchId && PM_STATE.timechargeInvoiceGeneratedByBatch && PM_STATE.timechargeInvoiceGeneratedByBatch[batchId]);
+  return !!(batchId && PM_STATE.timechargeInvoiceGeneratedByBatch && PM_STATE.timechargeInvoiceGeneratedByBatch[batchId] && !PM_STATE.timechargeInvoiceStaleByBatch?.[batchId]);
 }
 
 function _pmRequireTimeChargeInvoiceReady() {
@@ -4668,7 +4686,10 @@ async function _pmEnsureTimeChargeInvoiceGenerated() {
   const cap = _pmTimechargeContractCap(projectCode);
   const claim = cap > 0 ? Math.min(subtotal, cap) : subtotal;
   await _pmSaveTimeChargeInvoiceSnapshot({ batch, project, summaryRows, subtotal, cap, claim });
-  if (batch?.id) PM_STATE.timechargeInvoiceGeneratedByBatch[batch.id] = Date.now();
+  if (batch?.id) {
+    PM_STATE.timechargeInvoiceGeneratedByBatch[batch.id] = Date.now();
+    delete PM_STATE.timechargeInvoiceStaleByBatch[batch.id];
+  }
   const byEl = document.getElementById('pm-tc-doc-created-by');
   const atEl = document.getElementById('pm-tc-doc-created-at');
   const createdBy = getSession()?.name || '';
@@ -5027,11 +5048,29 @@ async function init_project_management() {
     document.getElementById('pm-tc-import-btn')?.addEventListener('click', importTimeChargeFromEntries);
     document.getElementById('pm-tc-audit-btn')?.addEventListener('click', pmOpenTimeChargeSourceAudit);
     document.getElementById('pm-tc-save-btn')?.addEventListener('click', saveTimeChargeLines);
+    document.getElementById('pm-tc-add-line-btn')?.addEventListener('click', pmAddTimeChargeLine);
     document.getElementById('pm-tc-download-template-btn')?.addEventListener('click', pmDownloadTimeChargeTemplate);
     document.getElementById('pm-tc-upload-open-btn')?.addEventListener('click', () => document.getElementById('pm-tc-upload-file')?.click());
     document.getElementById('pm-tc-upload-file')?.addEventListener('change', (e) => pmUploadTimeChargeExcel(e?.target || null));
     document.getElementById('pm-tc-upload-save-btn')?.addEventListener('click', pmCommitPendingTimeChargeUpload);
     document.getElementById('pm-tc-upload-cancel-btn')?.addEventListener('click', pmCancelPendingTimeChargeUpload);
+    document.getElementById('pm-tc-pending-add-btn')?.addEventListener('click', pmAddPendingTimeChargeUploadRow);
+    document.getElementById('pm-tc-lines-body')?.addEventListener('click', (e) => {
+      const btn = e.target?.closest?.('.pm-tc-delete-line-btn');
+      if (btn) pmDeleteTimeChargeLine(btn.dataset.lineId || '');
+    });
+    document.getElementById('pm-tc-lines-body')?.addEventListener('input', (e) => {
+      const input = e.target?.closest?.('.pm-tc-line-input');
+      if (input) _pmHandleTimeChargeLineInput(input);
+    });
+    document.getElementById('pm-tc-pending-body')?.addEventListener('click', (e) => {
+      const btn = e.target?.closest?.('.pm-tc-pending-delete-btn');
+      if (btn) pmDeletePendingTimeChargeUploadRow(Number(btn.dataset.index || -1));
+    });
+    document.getElementById('pm-tc-pending-body')?.addEventListener('change', (e) => {
+      const input = e.target?.closest?.('.pm-tc-pending-input');
+      if (input) _pmHandlePendingTimeChargeInput(input);
+    });
     document.getElementById('pm-tc-generate-print-btn')?.addEventListener('click', pmGenerateAndPrintTimeChargeDocument);
     document.getElementById('pm-tc-invoice-print-btn')?.addEventListener('click', pmPrintTimeChargeInvoice);
     document.getElementById('pm-tc-invoice-pdf-btn')?.addEventListener('click', pmDownloadTimeChargePdf);
@@ -7054,7 +7093,7 @@ function _pmRenderTimechargeUploadPendingState() {
     if (minEl) minEl.textContent = '0분';
     if (issueEl) issueEl.textContent = '0 / 0';
     if (pendingWrap) pendingWrap.style.display = 'none';
-    if (pendingBody) pendingBody.innerHTML = '<tr><td colspan="7" class="table-empty"><i class="fas fa-inbox"></i><p>검토 중인 데이터가 없습니다.</p></td></tr>';
+    if (pendingBody) pendingBody.innerHTML = '<tr><td colspan="8" class="table-empty"><i class="fas fa-inbox"></i><p>검토 중인 데이터가 없습니다.</p></td></tr>';
     _pmSyncTimeChargeActionAvailability();
     return;
   }
@@ -7072,16 +7111,174 @@ function _pmRenderTimechargeUploadPendingState() {
       const parts = _pmTimechargeDisplayParts(r);
       return `<tr>
         <td style="text-align:center">${idx + 1}</td>
-        <td>${_pmEsc(r.work_date || '')}</td>
-        <td>${_pmEsc(r.user_name || '-')}</td>
-        <td>${_pmEsc(parts.timeRange)}</td>
-        <td>${_pmEsc(_pmHoursText(Number(r.final_minutes || r.base_minutes || 0)))}</td>
-        <td title="${_pmEsc(parts.content)}">${_pmEsc(parts.content)}</td>
+        <td><input type="date" class="form-control pm-tc-pending-input" data-index="${idx}" data-f="work_date" value="${_pmEsc(r.work_date || '')}"></td>
+        <td><input type="text" class="form-control pm-tc-pending-input" data-index="${idx}" data-f="user_name" value="${_pmEsc(r.user_name || '')}"></td>
+        <td>
+          <div class="pm-tc-time-range-inputs">
+            <input type="time" class="form-control pm-tc-pending-input" data-index="${idx}" data-f="start_time" value="${_pmEsc(r.start_time || '')}">
+            <input type="time" class="form-control pm-tc-pending-input" data-index="${idx}" data-f="end_time" value="${_pmEsc(r.end_time || '')}">
+          </div>
+          <div class="pm-tc-line-source">${_pmEsc(parts.timeRange)}</div>
+        </td>
+        <td><input type="number" min="1" step="1" class="form-control pm-tc-pending-input pm-tc-number-input" data-index="${idx}" data-f="final_minutes" value="${_pmEsc(Number(r.final_minutes || r.base_minutes || 0))}"></td>
+        <td><input type="text" class="form-control pm-tc-pending-input" data-index="${idx}" data-f="description" value="${_pmEsc(parts.content === '-' ? '' : parts.content)}"></td>
         <td style="text-align:center"><span class="badge badge-blue">검토대기</span></td>
+        <td style="text-align:center"><button type="button" class="btn btn-xs btn-ghost pm-tc-pending-delete-btn" data-index="${idx}"><i class="fas fa-trash"></i></button></td>
       </tr>`;
     }).join('');
   }
   _pmSyncTimeChargeActionAvailability();
+}
+
+function _pmBuildPendingTimeChargeDescription(row, content) {
+  const parts = _pmTimechargeDisplayParts(row);
+  const desc = String(content || parts.content || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  const startTime = String(row?.start_time || '').trim();
+  const endTime = String(row?.end_time || '').trim();
+  const site = parts.site && parts.site !== '-' ? parts.site : '';
+  const note = parts.note && parts.note !== '-' ? parts.note : '';
+  return `${desc}${startTime && endTime ? ` / 시간대:${startTime}~${endTime}` : ''}${site ? ` / 장소:${site}` : ''}${note ? ` / 비고:${note}` : ''}`.slice(0, 240);
+}
+
+function _pmRefreshPendingTimeChargeKeysAndMeta() {
+  const rows = PM_STATE.pendingTimeChargeUploadRows || [];
+  const meta = PM_STATE.pendingTimeChargeUploadMeta || {};
+  const seen = {};
+  let duplicateRows = 0;
+  let totalMinutes = 0;
+  let totalAmount = 0;
+  rows.forEach((row) => {
+    const baseKey = _pmTimechargeUploadKey(row);
+    const count = Number(seen[baseKey] || 0);
+    seen[baseKey] = count + 1;
+    if (count > 0) duplicateRows += 1;
+    row.source_key = `excel|${baseKey}${count > 0 ? `|dup${count + 1}` : ''}`;
+    totalMinutes += Number(row.final_minutes || row.base_minutes || 0);
+    totalAmount += Number(row.final_amount || 0);
+  });
+  PM_STATE.pendingTimeChargeUploadMeta = {
+    ...meta,
+    validRows: rows.length,
+    duplicateRows,
+    totalMinutes,
+    totalAmount,
+  };
+}
+
+async function _pmRepricePendingTimeChargeRow(row) {
+  const projectCode = String(row?.project_code || PM_STATE.pendingTimeChargeUploadMeta?.projectCode || document.getElementById('pm-tc-project')?.value || '').trim();
+  const project = PM_STATE.projectByCode[projectCode] || {};
+  const userName = String(row?.user_name || '').trim();
+  const usersByName = {};
+  (PM_STATE.users || []).forEach((u) => {
+    const n = String(u?.name || '').trim();
+    if (!n) return;
+    if (!usersByName[n]) usersByName[n] = [];
+    usersByName[n].push(u);
+  });
+  const user = _pmPickBestUserForTimeCharge(usersByName[userName] || [], userName);
+  row.user_id = String(user?.id || row.user_id || '');
+  row.role_key = _pmResolveTimeChargeTitleKey(user, row.role_key || '', userName);
+  const finalMinutes = Number(row.final_minutes || row.base_minutes || 0);
+  const rateInfo = await _pmResolveRate(project, row.user_id, row.role_key, row.work_date, userName);
+  row.rate_source = rateInfo.rateSource;
+  row.unit_rate = Number(rateInfo.unitRate || 0);
+  row.base_minutes = finalMinutes;
+  row.adjusted_minutes = 0;
+  row.final_minutes = finalMinutes;
+  row.base_amount = (finalMinutes / 60) * Number(row.unit_rate || 0);
+  row.adjusted_amount = 0;
+  row.final_amount = row.base_amount;
+  row.is_billable = true;
+}
+
+async function _pmHandlePendingTimeChargeInput(input) {
+  const idx = Number(input?.dataset?.index ?? -1);
+  const field = String(input?.dataset?.f || '').trim();
+  const rows = PM_STATE.pendingTimeChargeUploadRows || [];
+  const row = rows[idx];
+  if (!row || !field) return;
+  if (field === 'final_minutes') {
+    const minutes = Math.max(1, Math.round(Number(input.value || 0)));
+    row.base_minutes = minutes;
+    row.final_minutes = minutes;
+  } else if (field === 'description') {
+    row.description = _pmBuildPendingTimeChargeDescription(row, input.value);
+  } else {
+    row[field] = String(input.value || '').trim();
+    if (field === 'start_time' || field === 'end_time') {
+      const minutes = _pmMinutesBetween(row.start_time, row.end_time);
+      if (minutes > 0) {
+        row.base_minutes = minutes;
+        row.final_minutes = minutes;
+      }
+      row.description = _pmBuildPendingTimeChargeDescription(row, _pmTimechargeDisplayParts(row).content);
+    }
+  }
+  await _pmRepricePendingTimeChargeRow(row);
+  _pmRefreshPendingTimeChargeKeysAndMeta();
+  _pmRenderTimechargeUploadPendingState();
+}
+
+function pmDeletePendingTimeChargeUploadRow(index) {
+  const idx = Number(index);
+  const rows = PM_STATE.pendingTimeChargeUploadRows || [];
+  if (!Number.isInteger(idx) || idx < 0 || idx >= rows.length) return;
+  rows.splice(idx, 1);
+  if (!rows.length) {
+    PM_STATE.pendingTimeChargeUploadRows = [];
+    PM_STATE.pendingTimeChargeUploadMeta = null;
+  } else {
+    _pmRefreshPendingTimeChargeKeysAndMeta();
+  }
+  _pmRenderTimechargeUploadPendingState();
+}
+
+async function pmAddPendingTimeChargeUploadRow() {
+  const session = getSession();
+  if (!_pmCanWriteTimeCharge(session)) {
+    Toast.warning('Time Charge 업로드 권한이 없습니다.');
+    return;
+  }
+  const meta = PM_STATE.pendingTimeChargeUploadMeta || null;
+  if (!meta) {
+    Toast.info('먼저 엑셀을 업로드해 검토 목록을 만든 뒤 행을 추가하세요.');
+    return;
+  }
+  const projectCode = String(meta.projectCode || document.getElementById('pm-tc-project')?.value || '').trim();
+  const project = PM_STATE.projectByCode[projectCode] || {};
+  const userName = String(session?.name || '').trim();
+  const userId = String(session?.id || '').trim();
+  const workDate = `${String(meta.billingMonth || _pmNowMonth()).trim()}-01`;
+  const roleKey = _pmResolveTimeChargeTitleKey(PM_STATE.usersById[userId] || null, '', userName);
+  const row = {
+    entry_id: '',
+    project_code: projectCode,
+    project_name: project.project_name || '',
+    client_name: project.client_name || '',
+    user_id: userId,
+    user_name: userName,
+    role_key: roleKey,
+    work_date: workDate,
+    work_category_name: '엑셀업로드',
+    work_subcategory_name: '',
+    description: '수동 검토 행',
+    start_time: '',
+    end_time: '',
+    base_minutes: 60,
+    adjusted_minutes: 0,
+    final_minutes: 60,
+    rate_source: 'manual',
+    unit_rate: 0,
+    base_amount: 0,
+    adjusted_amount: 0,
+    final_amount: 0,
+    is_billable: true,
+  };
+  await _pmRepricePendingTimeChargeRow(row);
+  PM_STATE.pendingTimeChargeUploadRows = (PM_STATE.pendingTimeChargeUploadRows || []).concat(row);
+  _pmRefreshPendingTimeChargeKeysAndMeta();
+  _pmRenderTimechargeUploadPendingState();
 }
 
 function _pmTimeChargeDataSource() {
@@ -7169,6 +7366,115 @@ function _pmRenderTimeChargeStatusSummary(projectCode, batch, lines) {
       </button>
     </td>
   </tr>`;
+}
+
+function _pmTimeChargeRoleOptionsHtml(selectedRoleKey) {
+  const selected = _pmNormalizeTimeChargeTitleKey(selectedRoleKey);
+  const roles = [
+    'senior',
+    'associate',
+    'principal',
+    'team_lead',
+    'division_head',
+    'bu_head',
+    'ceo',
+  ];
+  return ['<option value="">-</option>'].concat(roles.map((key) => {
+    const label = _pmTimeChargeTitleLabel(key);
+    return `<option value="${_pmEsc(key)}"${key === selected ? ' selected' : ''}>${_pmEsc(label)}</option>`;
+  })).join('');
+}
+
+function _pmTimeChargeLineSourceLabel(row) {
+  const key = String(row?.source_key || '').trim();
+  if (key.startsWith('manual|')) return '수동';
+  if (key.startsWith('excel|')) return '엑셀';
+  return '타임시트';
+}
+
+function _pmIsManualTimeChargeLine(row) {
+  const key = String(row?.source_key || '').trim();
+  return key.startsWith('manual|') || String(row?.rate_source || '').trim() === 'manual';
+}
+
+function _pmTimeChargeSetSaveButtonVisible(visible) {
+  const btn = document.getElementById('pm-tc-save-btn');
+  if (btn) btn.style.display = visible ? '' : 'none';
+}
+
+function _pmRenderTimeChargeEditableLines(lines, message = '') {
+  const body = document.getElementById('pm-tc-lines-body');
+  if (!body) return;
+  const list = Array.isArray(lines) ? lines : [];
+  const canEdit = _pmCanEditCurrentTimeChargeBatch();
+  const hasBatch = !!String(PM_STATE.currentBatch?.id || '').trim();
+  const disabledAttr = canEdit ? '' : ' disabled';
+  _pmTimeChargeSetSaveButtonVisible(hasBatch && list.length > 0);
+  const addBtn = document.getElementById('pm-tc-add-line-btn');
+  if (addBtn) addBtn.disabled = !canEdit;
+  if (!list.length) {
+    const emptyText = message || (hasBatch ? '저장된 Time Charge 라인이 없습니다.' : '프로젝트를 선택하고 Time Charge 배치를 불러오세요.');
+    body.innerHTML = `<tr><td colspan="10" class="table-empty"><i class="fas fa-layer-group"></i><p>${_pmEsc(emptyText)}</p></td></tr>`;
+    _pmSyncTimeChargeActionAvailability();
+    return;
+  }
+  const sorted = list.slice().sort((a, b) => {
+    const ad = String(a?.work_date || '');
+    const bd = String(b?.work_date || '');
+    if (ad !== bd) return ad.localeCompare(bd);
+    const an = String(a?.user_name || '');
+    const bn = String(b?.user_name || '');
+    if (an !== bn) return an.localeCompare(bn, 'ko');
+    return String(a?.id || '').localeCompare(String(b?.id || ''));
+  });
+  body.innerHTML = sorted.map((row, idx) => {
+    const id = String(row?.id || '').trim();
+    const baseMinutes = Number(row?.base_minutes || 0);
+    const finalMinutes = Number(row?.final_minutes || baseMinutes || 0);
+    const unitRate = Math.round(Number(row?.unit_rate || 0));
+    const finalAmount = Math.round(Number(row?.final_amount || 0));
+    const billable = row?.is_billable !== false;
+    const sourceLabel = _pmTimeChargeLineSourceLabel(row);
+    const manualClass = _pmIsManualTimeChargeLine(row) ? ' is-manual' : '';
+    return `<tr class="pm-tc-line-row${manualClass}" data-line-id="${_pmEsc(id)}" data-base-minutes="${_pmEsc(baseMinutes)}" data-base-amount="${_pmEsc(Number(row?.base_amount || 0))}" data-rate-source="${_pmEsc(row?.rate_source || '')}" data-source-key="${_pmEsc(row?.source_key || '')}">
+      <td style="text-align:center">${idx + 1}<div class="pm-tc-line-source">${_pmEsc(sourceLabel)}</div></td>
+      <td><input type="date" class="form-control pm-tc-line-input" data-f="work_date" value="${_pmEsc(row?.work_date || '')}"${disabledAttr}></td>
+      <td><input type="text" class="form-control pm-tc-line-input" data-f="user_name" value="${_pmEsc(row?.user_name || '')}"${disabledAttr}></td>
+      <td><select class="form-control pm-tc-line-input" data-f="role_key"${disabledAttr}>${_pmTimeChargeRoleOptionsHtml(row?.role_key || '')}</select></td>
+      <td><input type="number" min="0" step="1" class="form-control pm-tc-line-input pm-tc-number-input" data-f="minutes" value="${_pmEsc(finalMinutes)}"${disabledAttr}></td>
+      <td><input type="number" min="0" step="1000" class="form-control pm-tc-line-input pm-tc-number-input" data-f="rate" value="${_pmEsc(unitRate)}"${disabledAttr}></td>
+      <td><input type="number" min="0" step="1000" class="form-control pm-tc-line-input pm-tc-number-input" data-f="amount" value="${_pmEsc(finalAmount)}"${disabledAttr}></td>
+      <td>
+        <select class="form-control pm-tc-line-input" data-f="billable"${disabledAttr}>
+          <option value="Y"${billable ? ' selected' : ''}>청구</option>
+          <option value="N"${!billable ? ' selected' : ''}>제외</option>
+        </select>
+      </td>
+      <td>
+        <input type="text" class="form-control pm-tc-line-input" data-f="description" value="${_pmEsc(row?.description || '')}" placeholder="수행업무"${disabledAttr}>
+        <input type="text" class="form-control pm-tc-line-input pm-tc-reason-input" data-f="reason" value="${_pmEsc(row?.adjust_reason || '')}" placeholder="조정사유"${disabledAttr}>
+      </td>
+      <td style="text-align:center">
+        <button type="button" class="btn btn-xs btn-ghost pm-tc-delete-line-btn" data-line-id="${_pmEsc(id)}"${disabledAttr}><i class="fas fa-trash"></i></button>
+      </td>
+    </tr>`;
+  }).join('');
+  _pmSyncTimeChargeActionAvailability();
+}
+
+function _pmHandleTimeChargeLineInput(input) {
+  const tr = input?.closest?.('tr[data-line-id]');
+  if (!tr) return;
+  const field = String(input.dataset.f || '').trim();
+  if (field === 'minutes' || field === 'rate') {
+    const minutes = Number(tr.querySelector('[data-f="minutes"]')?.value || 0);
+    const rate = Number(tr.querySelector('[data-f="rate"]')?.value || 0);
+    const amountEl = tr.querySelector('[data-f="amount"]');
+    if (amountEl) amountEl.value = String(Math.round((minutes / 60) * rate));
+  }
+  tr.dataset.rateSource = 'manual';
+  tr.classList.add('is-manual');
+  _pmTimeChargeSetSaveButtonVisible(true);
 }
 
 function pmTimeChargeOpenBillingDetail() {
@@ -7766,7 +8072,10 @@ async function pmExportTimeChargeInvoiceWorkbook() {
   ]));
   XLSX.utils.book_append_sheet(wb, invoiceSummary, '청구서');
   await _pmSaveTimeChargeInvoiceSnapshot({ batch, project, summaryRows, subtotal, cap, claim });
-  if (batch?.id) PM_STATE.timechargeInvoiceGeneratedByBatch[batch.id] = Date.now();
+  if (batch?.id) {
+    PM_STATE.timechargeInvoiceGeneratedByBatch[batch.id] = Date.now();
+    delete PM_STATE.timechargeInvoiceStaleByBatch[batch.id];
+  }
   const byEl = document.getElementById('pm-tc-doc-created-by');
   const atEl = document.getElementById('pm-tc-doc-created-at');
   if (byEl) byEl.textContent = String(createdBy || '-');
@@ -7779,7 +8088,7 @@ async function pmExportTimeChargeInvoiceWorkbook() {
 
 function _pmIsTimesheetTimeChargeLine(row) {
   const key = String(row?.source_key || '').trim();
-  return !!(key && !key.startsWith('excel|'));
+  return !!(key && !key.startsWith('excel|') && !key.startsWith('manual|'));
 }
 
 async function _pmDeleteStaleTimesheetTimeChargeLines(existingLines, activeSourceKeys) {
@@ -7910,6 +8219,8 @@ async function importTimeChargeFromEntries() {
       const rateInfo = await _pmResolveRate(project, row.user_id, row.role_key, row.work_date, row.user_name);
       const finalMinutes = Number(row.base_minutes || 0);
       const baseAmount = (finalMinutes / 60) * Number(rateInfo.unitRate || 0);
+      const existingRow = existingByKey[row.source_key] || null;
+      const preserveManual = _pmIsManualTimeChargeLine(existingRow);
       const payload = {
         batch_id: batch.id,
         source_key: row.source_key,
@@ -7936,6 +8247,18 @@ async function importTimeChargeFromEntries() {
         created_by: session.id,
         created_by_name: session.name || '',
       };
+      if (preserveManual) {
+        payload.description = existingRow.description || payload.description;
+        payload.adjusted_minutes = Number(existingRow.adjusted_minutes || 0);
+        payload.final_minutes = Number(existingRow.final_minutes || finalMinutes);
+        payload.rate_source = 'manual';
+        payload.unit_rate = Number(existingRow.unit_rate || 0);
+        payload.base_amount = Number(existingRow.base_amount || baseAmount);
+        payload.adjusted_amount = Number(existingRow.adjusted_amount || 0);
+        payload.final_amount = Number(existingRow.final_amount || 0);
+        payload.is_billable = existingRow.is_billable !== false;
+        payload.adjust_reason = String(existingRow.adjust_reason || '');
+      }
       if (existingByKey[row.source_key]) await API.patch('project_timecharge_lines', existingByKey[row.source_key].id, payload);
       else await API.create('project_timecharge_lines', payload);
     }
@@ -7955,30 +8278,65 @@ async function importTimeChargeFromEntries() {
 
 function _pmReadLineRow(tr) {
   const id = tr.dataset.lineId || '';
+  const original = (PM_STATE.currentLines || []).find((row) => String(row?.id || '') === String(id)) || {};
   const baseMinutes = Number(tr.dataset.baseMinutes || 0);
+  const baseAmount = Number(tr.dataset.baseAmount || original.base_amount || 0);
   const minutes = Number(tr.querySelector('[data-f="minutes"]')?.value || 0);
   const rate = Number(tr.querySelector('[data-f="rate"]')?.value || 0);
   const amountInput = Number(tr.querySelector('[data-f="amount"]')?.value || 0);
   const calcAmount = (minutes / 60) * rate;
-  const isManual = Math.abs(amountInput - calcAmount) >= 1;
-  const finalAmount = amountInput;
+  const finalAmount = Math.round(amountInput);
+  const workDate = String(tr.querySelector('[data-f="work_date"]')?.value || '').trim();
+  const userName = String(tr.querySelector('[data-f="user_name"]')?.value || '').trim();
+  const roleKey = _pmNormalizeTimeChargeTitleKey(tr.querySelector('[data-f="role_key"]')?.value || '', userName);
+  const description = String(tr.querySelector('[data-f="description"]')?.value || '').trim().slice(0, 240);
+  const reason = String(tr.querySelector('[data-f="reason"]')?.value || '').trim().slice(0, 240);
+  const wasManual = _pmIsManualTimeChargeLine(original);
+  const originalBillable = original.is_billable !== false;
+  const nextBillable = tr.querySelector('[data-f="billable"]')?.value === 'Y';
+  const changedFinancials = Math.abs(Number(original.final_minutes || original.base_minutes || 0) - minutes) > 0.01
+    || Math.abs(Number(original.unit_rate || 0) - rate) > 0.01
+    || Math.abs(Number(original.final_amount || 0) - finalAmount) > 0.01
+    || String(original.adjust_reason || '') !== reason
+    || originalBillable !== nextBillable;
+  const isManual = wasManual || changedFinancials || Math.abs(finalAmount - calcAmount) >= 1;
+  const usersByName = {};
+  (PM_STATE.users || []).forEach((u) => {
+    const n = String(u?.name || '').trim();
+    if (!n) return;
+    if (!usersByName[n]) usersByName[n] = [];
+    usersByName[n].push(u);
+  });
+  const matchedUser = _pmPickBestUserForTimeCharge(usersByName[userName] || [], userName);
   return {
     id,
+    workDate,
+    userId: String(matchedUser?.id || original.user_id || ''),
+    userName,
+    roleKey,
+    description,
     baseMinutes,
     minutes,
     rate,
     calcAmount,
     finalAmount,
-    isBillable: tr.querySelector('[data-f="billable"]')?.value === 'Y',
-    reason: tr.querySelector('[data-f="reason"]')?.value || '',
+    isBillable: nextBillable,
+    reason,
     source: isManual ? 'manual' : (tr.dataset.rateSource || 'user_base'),
+    baseAmount,
+    adjustedMinutes: minutes - baseMinutes,
+    adjustedAmount: finalAmount - baseAmount,
   };
 }
 
 async function saveTimeChargeLines() {
   const session = getSession();
-  if (!(Auth.canApprove1st(session) || Auth.isDirector(session) || Auth.isTopMgr(session) || Auth.isAdmin(session))) {
+  if (!_pmCanWriteTimeCharge(session)) {
     Toast.warning('Time Charge 저장 권한이 없습니다.');
+    return;
+  }
+  if (!_pmCanEditCurrentTimeChargeBatch(session)) {
+    Toast.warning('draft 상태의 Time Charge 배치만 수정할 수 있습니다.');
     return;
   }
   if (!PM_STATE.currentBatch || !PM_STATE.currentBatch.id) {
@@ -7986,32 +8344,160 @@ async function saveTimeChargeLines() {
     return;
   }
   try {
-    let subtotal = 0;
-    const rows = PM_STATE.currentLines || [];
-    if (!rows.length) {
+    const trs = Array.from(document.querySelectorAll('#pm-tc-lines-body tr[data-line-id]'));
+    if (!trs.length) {
       Toast.info('저장할 라인이 없습니다.');
       return;
     }
-    for (const row of rows) {
-      const amount = Number(row.final_amount || 0);
-      const isBillable = row.is_billable !== false;
-      subtotal += isBillable ? amount : 0;
+    let patched = 0;
+    for (const tr of trs) {
+      const row = _pmReadLineRow(tr);
+      if (!row.id) continue;
+      if (!row.workDate || !/^\d{4}-\d{2}-\d{2}$/.test(row.workDate)) {
+        Toast.warning('용역일자 형식이 올바르지 않습니다. (YYYY-MM-DD)');
+        return;
+      }
+      if (!row.userName) {
+        Toast.warning('컨설턴트명을 입력하세요.');
+        return;
+      }
+      if (row.minutes <= 0) {
+        Toast.warning('투입시간은 0보다 커야 합니다.');
+        return;
+      }
+      const payload = {
+        user_id: row.userId,
+        user_name: row.userName,
+        role_key: row.roleKey,
+        work_date: row.workDate,
+        description: row.description,
+        adjusted_minutes: Math.round(row.adjustedMinutes),
+        final_minutes: Math.round(row.minutes),
+        rate_source: row.source,
+        unit_rate: row.rate,
+        adjusted_amount: row.adjustedAmount,
+        final_amount: row.finalAmount,
+        adjust_reason: row.reason,
+        is_billable: row.isBillable,
+      };
+      await API.patch('project_timecharge_lines', row.id, payload);
+      patched += 1;
     }
-    const tax = Math.round(subtotal * 0.1);
-    const total = subtotal + tax;
-    const patch = {
-      subtotal_amount: subtotal,
-      tax_amount: tax,
-      total_amount: total,
-      outstanding_amount: total,
-    };
-    await API.patch('project_timecharge_batches', PM_STATE.currentBatch.id, patch);
-    PM_STATE.currentBatch = { ...(PM_STATE.currentBatch || {}), ...patch };
     await loadProjectMgmtTimeCharge();
-    Toast.success('Time Charge 조정 내역을 저장했습니다.');
+    await _pmSyncCurrentTimeChargeBatchTotals();
+    _pmInvalidateTimeChargeInvoiceForCurrentBatch(true);
+    Toast.success(`Time Charge 조정 내역을 저장했습니다. (${patched}건)`);
   } catch (e) {
     console.error(e);
     Toast.error('Time Charge 저장 실패: ' + (e.message || ''));
+  }
+}
+
+function _pmInvalidateTimeChargeInvoiceForCurrentBatch(showGuide = false) {
+  const batchId = String(PM_STATE.currentBatch?.id || '').trim();
+  if (!batchId) return;
+  PM_STATE.timechargeInvoiceGeneratedByBatch[batchId] = false;
+  PM_STATE.timechargeInvoiceStaleByBatch[batchId] = Date.now();
+  _pmRenderTimeChargeInvoiceEmptyGuide();
+  _pmSyncTimeChargeActionAvailability();
+  if (showGuide) Toast.info('라인이 변경되어 청구서 생성·출력이 다시 필요합니다.');
+}
+
+function _pmManualTimeChargeSourceKey() {
+  const id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return `manual|${id}`;
+}
+
+async function pmAddTimeChargeLine() {
+  const session = getSession();
+  if (!_pmCanWriteTimeCharge(session)) {
+    Toast.warning('Time Charge 저장 권한이 없습니다.');
+    return;
+  }
+  if (!_pmCanEditCurrentTimeChargeBatch(session)) {
+    Toast.warning('draft 상태의 Time Charge 배치만 수정할 수 있습니다.');
+    return;
+  }
+  const batch = PM_STATE.currentBatch || null;
+  if (!batch?.id) {
+    Toast.warning('먼저 Time Charge 배치를 불러오세요.');
+    return;
+  }
+  try {
+    const projectCode = String(batch.project_code || document.getElementById('pm-tc-project')?.value || '').trim();
+    const project = PM_STATE.projectByCode[projectCode] || {};
+    const userName = String(session?.name || '').trim();
+    const userId = String(session?.id || '').trim();
+    const roleKey = _pmResolveTimeChargeTitleKey(PM_STATE.usersById[userId] || null, '', userName);
+    const workDate = _pmTodayDateText();
+    const rateInfo = await _pmResolveRate(project, userId, roleKey, workDate, userName);
+    const baseMinutes = 60;
+    const unitRate = Number(rateInfo?.unitRate || 0);
+    const amount = Math.round((baseMinutes / 60) * unitRate);
+    const payload = {
+      batch_id: batch.id,
+      source_key: _pmManualTimeChargeSourceKey(),
+      entry_id: '',
+      project_code: projectCode,
+      project_name: String(batch.project_name || project.project_name || ''),
+      client_name: String(batch.client_name || project.client_name || ''),
+      user_id: userId,
+      user_name: userName,
+      role_key: roleKey,
+      work_date: workDate,
+      work_category_name: '수동조정',
+      work_subcategory_name: '',
+      description: '수동 추가',
+      base_minutes: baseMinutes,
+      adjusted_minutes: 0,
+      final_minutes: baseMinutes,
+      rate_source: 'manual',
+      unit_rate: unitRate,
+      base_amount: amount,
+      adjusted_amount: 0,
+      final_amount: amount,
+      adjust_reason: '수동 추가',
+      is_billable: true,
+      created_by: String(session?.id || ''),
+      created_by_name: String(session?.name || ''),
+    };
+    await API.create('project_timecharge_lines', payload);
+    await loadProjectMgmtTimeCharge();
+    await _pmSyncCurrentTimeChargeBatchTotals();
+    _pmInvalidateTimeChargeInvoiceForCurrentBatch(true);
+    Toast.success('Time Charge 수동 행을 추가했습니다.');
+  } catch (e) {
+    console.error(e);
+    Toast.error('Time Charge 행 추가 실패: ' + (e.message || ''));
+  }
+}
+
+async function pmDeleteTimeChargeLine(lineId) {
+  const session = getSession();
+  if (!_pmCanWriteTimeCharge(session)) {
+    Toast.warning('Time Charge 저장 권한이 없습니다.');
+    return;
+  }
+  if (!_pmCanEditCurrentTimeChargeBatch(session)) {
+    Toast.warning('draft 상태의 Time Charge 배치만 수정할 수 있습니다.');
+    return;
+  }
+  const id = String(lineId || '').trim();
+  if (!id) return;
+  const row = (PM_STATE.currentLines || []).find((item) => String(item?.id || '') === id) || null;
+  const sourceLabel = _pmTimeChargeLineSourceLabel(row);
+  const restoreHint = sourceLabel === '타임시트' ? '\n\n타임시트 원천 행은 승인 타임시트 불러오기를 다시 실행하면 복원될 수 있습니다.' : '';
+  if (!window.confirm(`선택한 Time Charge 행을 삭제할까요?${restoreHint}`)) return;
+  try {
+    await API.delete('project_timecharge_lines', id);
+    PM_STATE.currentLines = (PM_STATE.currentLines || []).filter((item) => String(item?.id || '') !== id);
+    await _pmSyncCurrentTimeChargeBatchTotals();
+    await loadProjectMgmtTimeCharge();
+    _pmInvalidateTimeChargeInvoiceForCurrentBatch(true);
+    Toast.success('Time Charge 행을 삭제했습니다.');
+  } catch (e) {
+    console.error(e);
+    Toast.error('Time Charge 행 삭제 실패: ' + (e.message || ''));
   }
 }
 
@@ -8026,8 +8512,7 @@ async function requestTimeChargeInvoice() {
     Toast.warning('먼저 Time Charge 배치를 불러오세요.');
     return;
   }
-  const generated = !!PM_STATE.timechargeInvoiceGeneratedByBatch[String(PM_STATE.currentBatch.id || '').trim()];
-  if (!generated) {
+  if (!_pmIsTimeChargeInvoiceReady()) {
     Toast.warning('먼저 청구서 생성·출력 또는 PDF 다운로드를 실행해 문서를 생성하세요.');
     return;
   }
@@ -8082,6 +8567,7 @@ async function loadProjectMgmtTimeCharge() {
     PM_STATE.currentBatch = null;
     PM_STATE.currentLines = [];
     _pmRenderTimeChargeStatusSummary('', null, []);
+    _pmRenderTimeChargeEditableLines([], '프로젝트를 선택하세요.');
     if (summaryTextEl) summaryTextEl.textContent = '현재 배치 0건 · 공급가액 0원';
     _pmSyncTimeChargeDocMeta('', '');
     _pmSyncTimeChargePeriodRange([]);
@@ -8091,13 +8577,16 @@ async function loadProjectMgmtTimeCharge() {
     body.innerHTML = '<tr><td colspan="6" class="table-empty"><i class="fas fa-ban"></i><p>해당 프로젝트 접근 권한이 없습니다.</p></td></tr>';
     if (statusBadge) statusBadge.textContent = '접근 제한';
     _pmRenderTimeChargeStatusSummary(projectCode, null, []);
+    PM_STATE.currentBatch = null;
+    PM_STATE.currentLines = [];
+    _pmRenderTimeChargeEditableLines([], '해당 프로젝트 접근 권한이 없습니다.');
     if (summaryTextEl) summaryTextEl.textContent = '현재 배치 0건 · 공급가액 0원';
     _pmSyncTimeChargeDocMeta(projectCode, billingMonth);
     return;
   }
   try {
     const rows = await _pmListAllPagesSortFallback('project_timecharge_batches', {
-      filter: `project_code=eq.${encodeURIComponent(projectCode)}`,
+      filter: `project_code=eq.${encodeURIComponent(projectCode)}&billing_month=eq.${encodeURIComponent(billingMonth)}`,
       limit: 50,
       maxPages: 1,
     }).catch(() => []);
@@ -8116,6 +8605,8 @@ async function loadProjectMgmtTimeCharge() {
       body.innerHTML = '<tr><td colspan="6" class="table-empty"><i class="fas fa-file-medical"></i><p>아직 생성된 배치가 없습니다. 불러오기를 눌러주세요.</p></td></tr>';
       if (statusBadge) statusBadge.textContent = '배치 없음';
       _pmRenderTimeChargeStatusSummary(projectCode, PM_STATE.currentBatch, []);
+      PM_STATE.currentLines = [];
+      _pmRenderTimeChargeEditableLines([], '아직 생성된 배치가 없습니다. 불러오기를 눌러주세요.');
       if (summaryTextEl) summaryTextEl.textContent = '현재 배치 0건 · 공급가액 0원';
       _pmSyncTimeChargeDocMeta(projectCode, billingMonth);
       _pmSyncTimeChargePeriodRange([]);
@@ -8140,6 +8631,7 @@ async function loadProjectMgmtTimeCharge() {
     if (!PM_STATE.currentLines.length) {
       body.innerHTML = '<tr><td colspan="6" class="table-empty"><i class="fas fa-inbox"></i><p>저장된 Time Charge 라인이 없습니다.</p></td></tr>';
       _pmRenderTimeChargeStatusSummary(projectCode, PM_STATE.currentBatch, []);
+      _pmRenderTimeChargeEditableLines([], '저장된 Time Charge 라인이 없습니다.');
       if (summaryTextEl) summaryTextEl.textContent = '현재 배치 0건 · 공급가액 0원';
       _pmSyncTimeChargeDocMeta(projectCode, billingMonth);
       _pmSyncTimeChargePeriodRange([]);
@@ -8160,6 +8652,7 @@ async function loadProjectMgmtTimeCharge() {
 
     const subtotal = PM_STATE.currentLines.reduce((sum, r) => sum + Number(r?.is_billable !== false ? (r?.final_amount || 0) : 0), 0);
     _pmRenderTimeChargeStatusSummary(projectCode, PM_STATE.currentBatch, PM_STATE.currentLines);
+    _pmRenderTimeChargeEditableLines(PM_STATE.currentLines);
     if (summaryTextEl) {
       summaryTextEl.textContent = `현재 배치 ${PM_STATE.currentLines.length.toLocaleString('ko-KR')}건 · 공급가액 ${_pmKrw(subtotal)}`;
     }
@@ -8171,6 +8664,7 @@ async function loadProjectMgmtTimeCharge() {
     console.error(e);
     body.innerHTML = '<tr><td colspan="6" class="table-empty"><i class="fas fa-exclamation-triangle"></i><p>Time Charge 조회 실패</p></td></tr>';
     _pmRenderTimeChargeStatusSummary(projectCode, PM_STATE.currentBatch, []);
+    _pmRenderTimeChargeEditableLines([], 'Time Charge 조회 실패');
     if (summaryTextEl) summaryTextEl.textContent = '현재 배치 0건 · 공급가액 0원';
     _pmSyncTimeChargePeriodRange([]);
   }
