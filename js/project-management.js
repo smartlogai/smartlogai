@@ -2978,13 +2978,6 @@ function _pmStripTimechargeMetaFromDescription(raw) {
     .trim();
 }
 
-function _pmStripTimeRangeFromDescription(raw) {
-  return String(raw || '')
-    .replace(/(?:^|\/)\s*시간대:[^/]+/g, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-}
-
 function _pmTimeChargeDescriptionContent(raw) {
   return _pmTimechargeDisplayParts({ description: raw }).content;
 }
@@ -2992,8 +2985,10 @@ function _pmTimeChargeDescriptionContent(raw) {
 function _pmTimeChargeDescriptionForSave(contentEdited, originalRaw) {
   const base = _pmStripTimechargeMetaFromDescription(contentEdited);
   let out = base;
+  const rangeMatch = String(originalRaw || '').match(/(?:^|\/)\s*시간대:([^/]+)/);
   const placeMatch = String(originalRaw || '').match(/(?:^|\/)\s*장소:([^/]+)/);
   const noteMatch = String(originalRaw || '').match(/(?:^|\/)\s*비고:([^/]+)/);
+  if (rangeMatch) out += ` / 시간대:${String(rangeMatch[1] || '').trim()}`;
   if (placeMatch) out += ` / 장소:${String(placeMatch[1] || '').trim()}`;
   if (noteMatch) out += ` / 비고:${String(noteMatch[1] || '').trim()}`;
   return out.slice(0, 240);
@@ -3001,12 +2996,60 @@ function _pmTimeChargeDescriptionForSave(contentEdited, originalRaw) {
 
 function _pmBuildTimechargeDescription(note, startTs, endTs, extras = {}) {
   const text = _pmStripTimechargeMetaFromDescription(note);
+  const range = _pmFormatTimeRangeFromTs(startTs, endTs);
   const place = String(extras.place || '').trim();
   const remark = String(extras.note || '').trim();
   let out = text;
+  if (range) out += ` / 시간대:${range}`;
   if (place) out += ` / 장소:${place}`;
   if (remark) out += ` / 비고:${remark}`;
   return out.slice(0, 240);
+}
+
+function _pmHasTimeRangeInDescription(raw) {
+  return /(?:^|\/)\s*시간대:[^/]+/.test(String(raw || ''));
+}
+
+async function _pmEnrichTimeChargeLineTimeRanges(lines) {
+  const list = Array.isArray(lines) ? lines.slice() : [];
+  const missing = list.filter((row) => {
+    if (_pmHasTimeRangeInDescription(row?.description)) return false;
+    const start = String(row?.start_time || '').trim();
+    const end = String(row?.end_time || '').trim();
+    if (start && end) return false;
+    if (String(row?._displayTimeRange || '').trim()) return false;
+    return !!String(row?.entry_id || '').trim();
+  });
+  if (!missing.length) return list;
+
+  const ids = [...new Set(missing.map((row) => String(row.entry_id || '').trim()).filter(Boolean))];
+  const entryById = {};
+  const chunkSize = 40;
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    const filter = `id=in.(${chunk.map((id) => encodeURIComponent(id)).join(',')})`;
+    const rows = await API.listAllPages('time_entries', {
+      filter,
+      limit: 200,
+      maxPages: 5,
+    }).catch(() => []);
+    (rows || []).forEach((entry) => {
+      const id = String(entry?.id || '').trim();
+      if (id) entryById[id] = entry;
+    });
+  }
+
+  return list.map((row) => {
+    if (_pmHasTimeRangeInDescription(row?.description)) return row;
+    const start = String(row?.start_time || '').trim();
+    const end = String(row?.end_time || '').trim();
+    if (start && end) return row;
+    const entry = entryById[String(row?.entry_id || '').trim()];
+    if (!entry) return row;
+    const range = _pmFormatTimeRangeFromTs(Number(entry.work_start_at) || 0, Number(entry.work_end_at) || 0);
+    if (!range) return row;
+    return { ...row, _displayTimeRange: range };
+  });
 }
 
 function _pmIsBatchTimeHeader(entry) {
@@ -7124,6 +7167,10 @@ function _pmTimechargeDisplayParts(row) {
     const end = String(row?.end_time || '').trim();
     if (start && end) timeRange = `${start}~${end}`;
   }
+  if (!timeRange) {
+    const cached = String(row?._displayTimeRange || '').trim();
+    if (cached) timeRange = cached;
+  }
   const content = _pmStripTimechargeMetaFromDescription(raw);
   return {
     site: site || '-',
@@ -7199,7 +7246,7 @@ function _pmBuildPendingTimeChargeDescription(row, content) {
   const endTime = String(row?.end_time || '').trim();
   const site = parts.site && parts.site !== '-' ? parts.site : '';
   const note = parts.note && parts.note !== '-' ? parts.note : '';
-  return `${desc}${site ? ` / 장소:${site}` : ''}${note ? ` / 비고:${note}` : ''}`.slice(0, 240);
+  return `${desc}${startTime && endTime ? ` / 시간대:${startTime}~${endTime}` : ''}${site ? ` / 장소:${site}` : ''}${note ? ` / 비고:${note}` : ''}`.slice(0, 240);
 }
 
 function _pmRefreshPendingTimeChargeKeysAndMeta() {
@@ -7506,7 +7553,6 @@ function _pmRenderTimeChargeEditableLines(lines, message = '') {
     const sourceLabel = _pmTimeChargeLineSourceLabel(row);
     const manualClass = _pmIsManualTimeChargeLine(row) ? ' is-manual' : '';
     const descRaw = String(row?.description || '').trim();
-    const desc = _pmStripTimeRangeFromDescription(descRaw);
     const descContent = _pmTimeChargeDescriptionContent(descRaw);
     return `<tr class="pm-tc-line-row${manualClass}" data-line-id="${_pmEsc(id)}" data-base-minutes="${_pmEsc(baseMinutes)}" data-base-amount="${_pmEsc(Number(row?.base_amount || 0))}" data-rate-source="${_pmEsc(row?.rate_source || '')}" data-source-key="${_pmEsc(row?.source_key || '')}">
       <td style="text-align:center">${idx + 1}<div class="pm-tc-line-source">${_pmEsc(sourceLabel)}</div></td>
@@ -7523,7 +7569,7 @@ function _pmRenderTimeChargeEditableLines(lines, message = '') {
         </select>
       </td>
       <td>
-        <input type="hidden" class="pm-tc-line-input" data-f="description" value="${_pmEsc(desc)}">
+        <input type="hidden" class="pm-tc-line-input" data-f="description" value="${_pmEsc(descRaw)}">
         <div class="pm-tc-line-text-preview" data-preview="description" title="${_pmEsc(descContent)}">${_pmEsc(_pmTimeChargeTextPreview(descRaw))}</div>
         <button type="button" class="btn btn-xs btn-outline pm-tc-edit-line-text-btn" data-line-id="${_pmEsc(id)}"${disabledAttr}><i class="fas fa-pen"></i> 크게 편집</button>
       </td>
@@ -7741,7 +7787,7 @@ async function pmUploadTimeChargeExcel(fileInput) {
         work_date: workDate,
         work_category_name: '엑셀업로드',
         work_subcategory_name: '',
-        description: `${desc}${place ? ` / 장소:${place}` : ''}${note ? ` / 비고:${note}` : ''}`.slice(0, 240),
+        description: `${desc}${startTime && endTime ? ` / 시간대:${startTime}~${endTime}` : ''}${place ? ` / 장소:${place}` : ''}${note ? ` / 비고:${note}` : ''}`.slice(0, 240),
         start_time: startTime,
         end_time: endTime,
         base_minutes: baseMinutes,
@@ -8737,7 +8783,7 @@ async function loadProjectMgmtTimeCharge() {
       limit: 800,
       maxPages: 10,
     }).catch(() => []);
-    PM_STATE.currentLines = lines || [];
+    PM_STATE.currentLines = await _pmEnrichTimeChargeLineTimeRanges(lines || []);
     const project = PM_STATE.projectByCode[projectCode] || {};
     await _pmRefreshCurrentTimeChargeRates(project);
     const docs = await _pmListAllPagesSortFallback('project_timecharge_documents', {
