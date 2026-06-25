@@ -4485,9 +4485,10 @@ function pmPreviewTimeChargeDocument() {
 }
 
 function _pmTimeChargePdfPageHeightPx() {
-  const { frameWidth, pdfMarginPt } = PM_TC_INVOICE_LAYOUT;
+  const { frameWidth, pdfMarginPt, padY } = PM_TC_INVOICE_LAYOUT;
   const a4Ratio = (841.89 - pdfMarginPt * 2) / 595.28;
-  return Math.floor(frameWidth * a4Ratio);
+  const safety = 32;
+  return Math.floor(frameWidth * a4Ratio) - padY * 2 - safety;
 }
 
 function _pmTimeChargeDocSurfaceTableCss() {
@@ -4591,7 +4592,7 @@ function _pmTimeChargeInvoiceDocStyles() {
 ${_pmTimeChargeDocSurfaceTableCss()}
 .tc-detail-section{break-inside:auto;page-break-inside:auto}
 .tc-detail-section .pm-tc-invoice-person-head{break-after:avoid;page-break-after:avoid}
-.pm-tc-pdf-page{box-sizing:border-box;background:#fff;overflow:hidden}
+.pm-tc-pdf-page{box-sizing:border-box;background:#fff;overflow:visible;padding-bottom:12px}
 @media print{
 html,body{overflow:visible!important;height:auto!important;font-family:${font}}
 .pm-tc-invoice-doc thead,.pm-tc-billing-doc thead,.pm-tc-pdf-page thead{display:table-header-group!important}
@@ -4627,7 +4628,8 @@ function _pmCreateTimeChargePdfPage(doc, frameWidth, root) {
   page.style.width = `${frameWidth}px`;
   page.style.boxSizing = 'border-box';
   page.style.background = '#fff';
-  page.style.overflow = 'hidden';
+  page.style.overflow = 'visible';
+  page.style.paddingBottom = '12px';
   return page;
 }
 
@@ -4663,16 +4665,20 @@ function _pmAppendTimeChargeDetailSectionPages(doc, section, pageState) {
   const allRows = [...tbody.querySelectorAll('tr')];
   const subtotalRow = allRows.find((row) => row.classList.contains('pm-tc-subtotal-row')) || null;
   const dataRows = allRows.filter((row) => !row.classList.contains('pm-tc-subtotal-row'));
-  let personHeadUsed = false;
+  const sectionStyle = section.getAttribute('style') || '';
+  let appendedChunks = 0;
 
-  const buildChunk = (chunkRows, isLast) => {
+  const buildChunk = (chunkRows, isLast, chunkNo) => {
     const wrap = doc.createElement('div');
     wrap.className = section.className || 'tc-detail-section';
-    const sectionStyle = section.getAttribute('style');
-    if (sectionStyle) wrap.setAttribute('style', sectionStyle);
-    if (personHead && !personHeadUsed) {
-      wrap.appendChild(personHead.cloneNode(true));
-      personHeadUsed = true;
+    wrap.setAttribute('style', chunkNo > 0 ? 'margin-top:8px' : sectionStyle);
+    if (personHead) {
+      const head = personHead.cloneNode(true);
+      const label = String(personHead.textContent || '').trim();
+      if (chunkNo > 0 && label && !label.includes('(계속)')) {
+        head.textContent = `${label} (계속)`;
+      }
+      wrap.appendChild(head);
     }
     wrap.appendChild(_pmCloneTimeChargeDetailTableChunk(doc, table, chunkRows, isLast, subtotalRow, true));
     return wrap;
@@ -4680,12 +4686,13 @@ function _pmAppendTimeChargeDetailSectionPages(doc, section, pageState) {
 
   const appendChunk = (chunkRows, isLast) => {
     if (!chunkRows.length) return;
-    _pmAppendTimeChargePdfNode(doc, buildChunk(chunkRows, isLast), pageState);
+    _pmAppendTimeChargePdfNode(doc, buildChunk(chunkRows, isLast, appendedChunks), pageState);
+    appendedChunks += 1;
   };
 
   let chunk = [];
   dataRows.forEach((row) => {
-    const trial = buildChunk([...chunk, row], false);
+    const trial = buildChunk([...chunk, row], false, appendedChunks);
     const trialHeight = _pmMeasureTimeChargeNodeHeight(doc, trial, frameWidth);
     const currentHeight = pageState.page.offsetHeight;
     const overflow = pageState.page.childNodes.length > 0 && currentHeight + trialHeight > maxPageHeight;
@@ -4862,7 +4869,7 @@ async function _pmDownloadTimeChargeHtmlPdf(html, filenameBase) {
     const usableW = pageW - margin * 2;
     for (let i = 0; i < pageEls.length; i += 1) {
       const pageEl = pageEls[i];
-      const pageHeight = Math.max(pageEl.offsetHeight, 1);
+      const pageHeight = Math.max(pageEl.scrollHeight, pageEl.offsetHeight, 1) + 8;
       const canvas = await window.html2canvas(pageEl, {
         scale: 2,
         useCORS: true,
