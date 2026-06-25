@@ -158,6 +158,53 @@ function _userJobTitleToBaseRole(jobTitle, fallbackRole = 'staff') {
   return fb || 'staff';
 }
 
+function _userJobTitleLabel(jobTitle, role) {
+  const map = {
+    associate: '전임',
+    senior: '선임',
+    principal: '책임',
+    team_lead: '팀장',
+    division_head: '본부장',
+    bu_head: '사업부장',
+    system_admin: '시스템관리자',
+    ceo: '대표이사',
+    mgmt_support: '경영지원팀장(레거시)',
+  };
+  const key = String(jobTitle || '').trim().toLowerCase();
+  if (key && map[key]) return map[key];
+  const r = String(role || '').trim();
+  return (typeof ROLE_LABEL !== 'undefined' && ROLE_LABEL[r]) ? ROLE_LABEL[r] : (r || '');
+}
+
+function _userTitleRank(u) {
+  const t = String(u?.job_title || '').trim().toLowerCase();
+  const r = String(u?.role || '').trim().toLowerCase();
+  if (t === 'associate' || t === 'staff') return 1;
+  if (t === 'senior') return 2;
+  if (t === 'principal') return 3;
+  if (t === 'team_lead' || t === 'manager') return 4;
+  if (t === 'division_head' || t === 'director') return 5;
+  if (t === 'bu_head' || t === 'top_mgr') return 6;
+  if (t === 'ceo') return 7;
+  if (r === 'staff') return 1;
+  if (r === 'manager') return 4;
+  if (r === 'director') return 5;
+  if (r === 'top_mgr') return 6;
+  if (r === 'admin') return 98;
+  return 99;
+}
+
+function _userSortForDisplay(users) {
+  return [...(users || [])].sort((a, b) => {
+    const deptCmp = String(a?.dept_name || a?.department || '').trim()
+      .localeCompare(String(b?.dept_name || b?.department || '').trim(), 'ko');
+    if (deptCmp !== 0) return deptCmp;
+    const rankCmp = _userTitleRank(b) - _userTitleRank(a);
+    if (rankCmp !== 0) return rankCmp;
+    return String(a?.name || '').trim().localeCompare(String(b?.name || '').trim(), 'ko');
+  });
+}
+
 function _onUserJobTitleChange() {
   const roleEl = document.getElementById('user-role-input');
   const titleEl = document.getElementById('user-job-title-input');
@@ -387,39 +434,7 @@ async function loadUsers() {
     return;
   }
 
-  const titleRank = (u) => {
-    const t = String(u?.job_title || '').trim().toLowerCase();
-    const r = String(u?.role || '').trim().toLowerCase();
-    // 전임(associate) → 선임(senior) → 책임(principal) → 팀장 → 본부장 → 사업부장 → 대표이사
-    if (t === 'associate' || t === 'staff') return 1;
-    if (t === 'senior') return 2;
-    if (t === 'principal') return 3;
-    if (t === 'team_lead' || t === 'manager') return 4;
-    if (t === 'division_head' || t === 'director') return 5;
-    if (t === 'bu_head' || t === 'top_mgr') return 6;
-    if (t === 'ceo') return 7;
-    // job_title 누락 시 role로 보정
-    if (r === 'staff') return 1;
-    if (r === 'manager') return 4;
-    if (r === 'director') return 5;
-    if (r === 'top_mgr') return 6;
-    if (r === 'admin') return 98;
-    return 99;
-  };
-
-  const sortedUsers = [...users].sort((a, b) => {
-    const deptA = String(a?.dept_name || a?.department || '').trim();
-    const deptB = String(b?.dept_name || b?.department || '').trim();
-    const deptCmp = deptA.localeCompare(deptB, 'ko');
-    if (deptCmp !== 0) return deptCmp;
-
-    const rankCmp = titleRank(b) - titleRank(a);
-    if (rankCmp !== 0) return rankCmp;
-
-    const nameA = String(a?.name || '').trim();
-    const nameB = String(b?.name || '').trim();
-    return nameA.localeCompare(nameB, 'ko');
-  });
+  const sortedUsers = _userSortForDisplay(users);
 
   tbody.innerHTML = sortedUsers.map((u, i) => {
     // ── 역할 배지 ──────────────────────────────────────────
@@ -1173,19 +1188,28 @@ async function exportUsersToExcel() {
   try {
     Master.invalidate('users');
     const users = await Master.users();
-    const rows = (users || []).filter(u => u && u.deleted !== true);
+    const rows = _userSortForDisplay((users || []).filter((u) => u && u.deleted !== true));
+    if (!rows.length) {
+      Toast.info('다운로드할 직원 데이터가 없습니다.');
+      return;
+    }
 
     if (typeof XLSX === 'undefined') await LibLoader.load('xlsx');
     const wb = XLSX.utils.book_new();
+    const emailById = {};
+    rows.forEach((u) => {
+      const id = String(u?.id || '').trim();
+      if (id) emailById[id] = String(u?.email || '').trim();
+    });
 
     const headers = [
-      '이름', '이메일', '권한',
+      'No', '이름', '이메일', '직책', '권한',
       '사업부', '본부', '고객지원팀',
-      '1차승인자', '2차승인자',
-      '활성여부(Y/N)', '타임시트대상',
-      '시간제(Y/N)', '일일(Y/N)',
+      '1차승인자', '1차승인자이메일',
+      '2차승인자', '2차승인자이메일',
+      '활성여부', '타임시트대상', '시간제(Y/N)', '일일(Y/N)',
     ];
-    const body = rows.map((u) => {
+    const body = rows.map((u, idx) => {
       const role = String(u.role || '');
       const isTimesheetRole = role === 'staff' || role === 'manager' || role === 'director' || role === 'top_mgr';
       const isActive = u.is_active === false ? 'N' : 'Y';
@@ -1198,15 +1222,21 @@ async function exportUsersToExcel() {
       const tsDaily = isTimesheetRole
         ? ((u.timesheet_daily === true || u.timesheet_daily === 'true') ? 'Y' : 'N')
         : '';
+      const approverId = String(u.approver_id || '').trim();
+      const reviewer2Id = String(u.reviewer2_id || '').trim();
       return [
+        idx + 1,
         u.name || '',
         u.email || '',
-        role,
+        _userJobTitleLabel(u.job_title, role),
+        (typeof ROLE_LABEL !== 'undefined' && ROLE_LABEL[role]) ? ROLE_LABEL[role] : role,
         u.dept_name || '',
         u.hq_name || '',
         u.cs_team_name || '',
         u.approver_name || '',
+        emailById[approverId] || '',
         u.reviewer2_name || '',
+        emailById[reviewer2Id] || '',
         isActive,
         tsTarget,
         tsHourly,
@@ -1215,18 +1245,21 @@ async function exportUsersToExcel() {
     });
     const ws = XLSX.utils.aoa_to_sheet([headers, ...body]);
     ws['!cols'] = [
-      { wch: 12 }, { wch: 28 }, { wch: 12 },
+      { wch: 6 }, { wch: 12 }, { wch: 28 }, { wch: 12 }, { wch: 12 },
       { wch: 12 }, { wch: 14 }, { wch: 14 },
-      { wch: 14 }, { wch: 14 },
-      { wch: 13 }, { wch: 12 }, { wch: 10 }, { wch: 10 },
+      { wch: 12 }, { wch: 28 },
+      { wch: 12 }, { wch: 28 },
+      { wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 10 },
     ];
-    XLSX.utils.book_append_sheet(wb, ws, '직원데이터');
+    XLSX.utils.book_append_sheet(wb, ws, '계정정보');
 
     const d = new Date();
     const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-    await xlsxDownload(wb, `직원관리_데이터_${ymd}.xlsx`);
-    Toast.success(`직원 데이터 ${rows.length}건을 다운로드했습니다.`);
+    await xlsxDownload(wb, `User등록_계정정보_${ymd}.xlsx`);
+    Toast.success(`계정 정보 ${rows.length}건을 다운로드했습니다.`);
   } catch (err) {
-    Toast.error('직원 데이터 다운로드 실패: ' + (err?.message || ''));
+    Toast.error('계정 정보 다운로드 실패: ' + (err?.message || ''));
   }
 }
+
+window.exportUsersToExcel = exportUsersToExcel;
