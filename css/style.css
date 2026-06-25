@@ -4284,8 +4284,18 @@ textarea.form-control {
 #page-project-register .pm-tc-number-input {
   text-align: right;
 }
-#page-project-register .pm-tc-reason-input {
-  margin-top: 4px;
+#page-project-register .pm-tc-line-text-preview {
+  min-height: 36px;
+  padding: 7px 8px;
+  border: 1px solid #e5eaf2;
+  border-radius: 8px;
+  background: #fff;
+  color: #1f2937;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  word-break: keep-all;
 }
 #page-project-register .pm-tc-line-source {
   margin-top: 3px;
@@ -4302,6 +4312,39 @@ textarea.form-control {
 }
 #page-project-register .pm-tc-lines-table td:nth-child(9) {
   text-align: left;
+}
+#pmTcLineEditModal .pm-tc-line-edit-modal {
+  width: min(520px, calc(100vw - 40px));
+  max-width: 520px;
+  max-height: min(82vh, 720px);
+}
+#pmTcLineEditModal .pm-tc-line-edit-modal-body {
+  padding: 14px 18px;
+  overflow-y: auto;
+}
+.pm-tc-line-edit-meta {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px dashed #dbe5f3;
+  border-radius: 8px;
+  background: #f8fbff;
+  color: #475569;
+  font-size: 12px;
+}
+#pmTcLineEditModal .pm-tc-line-edit-textarea {
+  width: 100%;
+  min-height: 96px;
+  max-height: 220px;
+  resize: vertical;
+  line-height: 1.55;
+  box-sizing: border-box;
+}
+#page-project-register .pm-tc-hours-input {
+  max-width: 88px;
+  margin-left: auto;
+  text-align: right;
+  font-weight: 600;
+  color: #1e3a8a;
 }
 #pmTcInvoiceModal .pm-tc-invoice-summary-table thead th,
 #pmTcInvoiceModal .pm-tc-invoice-summary-table tbody td,

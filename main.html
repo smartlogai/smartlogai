@@ -3463,6 +3463,26 @@
           </div>
         </div>
 
+        <div class="modal-overlay" id="pmTcLineEditModal">
+          <div class="modal modal-md pm-tc-line-edit-modal">
+            <div class="modal-header">
+              <h3><i class="fas fa-pen-to-square" style="color:var(--primary)"></i> Time Charge 라인 편집</h3>
+              <button class="btn-close" onclick="closeModal('pmTcLineEditModal')">×</button>
+            </div>
+            <div class="modal-body pm-tc-line-edit-modal-body">
+              <div class="pm-tc-line-edit-meta" id="pm-tc-line-edit-meta">선택한 라인의 수행업무를 크게 확인하고 수정합니다.</div>
+              <div class="form-group">
+                <label class="form-label" for="pm-tc-line-edit-desc">수행업무</label>
+                <textarea id="pm-tc-line-edit-desc" class="form-control pm-tc-line-edit-textarea" rows="5" placeholder="수행업무를 입력하세요."></textarea>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-sm btn-ghost" onclick="closeModal('pmTcLineEditModal')">취소</button>
+              <button type="button" class="btn btn-sm btn-primary" id="pm-tc-line-edit-apply-btn"><i class="fas fa-check"></i> 적용</button>
+            </div>
+          </div>
+        </div>
+
         <div class="modal-overlay" id="pmTcInvoiceModal">
           <div class="modal pm-tc-invoice-modal">
             <div class="modal-header">
@@ -3554,7 +3574,7 @@
                             <th style="width:120px">용역일자</th>
                             <th style="width:140px">컨설턴트</th>
                             <th style="width:130px">수행시간</th>
-                            <th style="width:95px">투입시간</th>
+                            <th style="width:95px">투입시간(h)</th>
                             <th>수행업무</th>
                             <th style="width:100px">상태</th>
                             <th style="width:92px">관리</th>
@@ -3627,11 +3647,11 @@
                                 <th style="width:130px">용역일자</th>
                                 <th style="width:140px">컨설턴트</th>
                                 <th style="width:130px">Position</th>
-                                <th style="width:110px;text-align:right">투입시간</th>
+                                <th style="width:110px;text-align:right">투입시간(h)</th>
                                 <th style="width:120px;text-align:right">단가</th>
                                 <th style="width:130px;text-align:right">청구금액</th>
                                 <th style="width:90px">청구여부</th>
-                                <th>수행업무/조정사유</th>
+                                <th>수행업무</th>
                                 <th style="width:82px">삭제</th>
                               </tr>
                             </thead>

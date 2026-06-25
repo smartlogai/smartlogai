@@ -27,6 +27,7 @@ const PM_STATE = {
   timechargeDetailConsultantKey: '',
   timechargeInvoiceGeneratedByBatch: {},
   timechargeInvoiceStaleByBatch: {},
+  timechargeEditingLineId: '',
   invoiceBillableExpanded: false,
   invoicePreviewConfirmed: false,
   invoicePreviewProjectCode: '',
@@ -2977,13 +2978,32 @@ function _pmStripTimechargeMetaFromDescription(raw) {
     .trim();
 }
 
+function _pmStripTimeRangeFromDescription(raw) {
+  return String(raw || '')
+    .replace(/(?:^|\/)\s*시간대:[^/]+/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function _pmTimeChargeDescriptionContent(raw) {
+  return _pmTimechargeDisplayParts({ description: raw }).content;
+}
+
+function _pmTimeChargeDescriptionForSave(contentEdited, originalRaw) {
+  const base = _pmStripTimechargeMetaFromDescription(contentEdited);
+  let out = base;
+  const placeMatch = String(originalRaw || '').match(/(?:^|\/)\s*장소:([^/]+)/);
+  const noteMatch = String(originalRaw || '').match(/(?:^|\/)\s*비고:([^/]+)/);
+  if (placeMatch) out += ` / 장소:${String(placeMatch[1] || '').trim()}`;
+  if (noteMatch) out += ` / 비고:${String(noteMatch[1] || '').trim()}`;
+  return out.slice(0, 240);
+}
+
 function _pmBuildTimechargeDescription(note, startTs, endTs, extras = {}) {
   const text = _pmStripTimechargeMetaFromDescription(note);
-  const range = _pmFormatTimeRangeFromTs(startTs, endTs);
   const place = String(extras.place || '').trim();
   const remark = String(extras.note || '').trim();
   let out = text;
-  if (range) out += ` / 시간대:${range}`;
   if (place) out += ` / 장소:${place}`;
   if (remark) out += ` / 비고:${remark}`;
   return out.slice(0, 240);
@@ -4003,7 +4023,32 @@ function _pmRenderTimeChargeInvoiceEmptyGuide() {
 
 function _pmHoursText(minutes) {
   const h = Number(minutes || 0) / 60;
-  return `${h.toFixed(1)}h`;
+  if (!Number.isFinite(h) || h <= 0) return '0h';
+  const rounded = Math.round(h * 10) / 10;
+  if (Math.abs(rounded - Math.round(rounded)) < 0.05) return `${Math.round(rounded)}h`;
+  return `${rounded.toFixed(1)}h`;
+}
+
+function _pmHoursInputValue(minutes) {
+  return _pmHoursText(minutes);
+}
+
+function _pmMinutesFromHoursInput(value) {
+  const raw = String(value || '').replace(/h\s*$/i, '').replace(',', '.').trim();
+  const h = Number(raw);
+  if (!Number.isFinite(h) || h <= 0) return 0;
+  return Math.round(h * 60);
+}
+
+function _pmFormatTimeChargeHoursInput(input) {
+  if (!input) return;
+  const minutes = _pmMinutesFromHoursInput(input.value);
+  input.value = _pmHoursText(minutes);
+}
+
+function _pmFormatTimeChargeAmountInput(input) {
+  if (!input) return;
+  input.value = _pmFormatPaidAmountInput(input.value);
 }
 
 function pmTimeChargeSwitchDocTab(tab) {
@@ -5055,7 +5100,13 @@ async function init_project_management() {
     document.getElementById('pm-tc-upload-save-btn')?.addEventListener('click', pmCommitPendingTimeChargeUpload);
     document.getElementById('pm-tc-upload-cancel-btn')?.addEventListener('click', pmCancelPendingTimeChargeUpload);
     document.getElementById('pm-tc-pending-add-btn')?.addEventListener('click', pmAddPendingTimeChargeUploadRow);
+    document.getElementById('pm-tc-line-edit-apply-btn')?.addEventListener('click', pmApplyTimeChargeLineTextEdit);
     document.getElementById('pm-tc-lines-body')?.addEventListener('click', (e) => {
+      const editBtn = e.target?.closest?.('.pm-tc-edit-line-text-btn');
+      if (editBtn) {
+        pmOpenTimeChargeLineTextEdit(editBtn.dataset.lineId || '');
+        return;
+      }
       const btn = e.target?.closest?.('.pm-tc-delete-line-btn');
       if (btn) pmDeleteTimeChargeLine(btn.dataset.lineId || '');
     });
@@ -5063,6 +5114,13 @@ async function init_project_management() {
       const input = e.target?.closest?.('.pm-tc-line-input');
       if (input) _pmHandleTimeChargeLineInput(input);
     });
+    document.getElementById('pm-tc-lines-body')?.addEventListener('blur', (e) => {
+      const input = e.target?.closest?.('.pm-tc-line-input');
+      if (!input) return;
+      const field = String(input.dataset.f || '').trim();
+      if (field === 'hours') _pmFormatTimeChargeHoursInput(input);
+      else if (field === 'rate' || field === 'amount') _pmFormatTimeChargeAmountInput(input);
+    }, true);
     document.getElementById('pm-tc-pending-body')?.addEventListener('click', (e) => {
       const btn = e.target?.closest?.('.pm-tc-pending-delete-btn');
       if (btn) pmDeletePendingTimeChargeUploadRow(Number(btn.dataset.index || -1));
@@ -5071,6 +5129,10 @@ async function init_project_management() {
       const input = e.target?.closest?.('.pm-tc-pending-input');
       if (input) _pmHandlePendingTimeChargeInput(input);
     });
+    document.getElementById('pm-tc-pending-body')?.addEventListener('blur', (e) => {
+      const input = e.target?.closest?.('[data-f="final_hours"]');
+      if (input) _pmFormatTimeChargeHoursInput(input);
+    }, true);
     document.getElementById('pm-tc-generate-print-btn')?.addEventListener('click', pmGenerateAndPrintTimeChargeDocument);
     document.getElementById('pm-tc-invoice-print-btn')?.addEventListener('click', pmPrintTimeChargeInvoice);
     document.getElementById('pm-tc-invoice-pdf-btn')?.addEventListener('click', pmDownloadTimeChargePdf);
@@ -7120,7 +7182,7 @@ function _pmRenderTimechargeUploadPendingState() {
           </div>
           <div class="pm-tc-line-source">${_pmEsc(parts.timeRange)}</div>
         </td>
-        <td><input type="number" min="1" step="1" class="form-control pm-tc-pending-input pm-tc-number-input" data-index="${idx}" data-f="final_minutes" value="${_pmEsc(Number(r.final_minutes || r.base_minutes || 0))}"></td>
+        <td><input type="text" inputmode="decimal" class="form-control pm-tc-pending-input pm-tc-hours-input" data-index="${idx}" data-f="final_hours" value="${_pmEsc(_pmHoursText(Number(r.final_minutes || r.base_minutes || 0)))}"></td>
         <td><input type="text" class="form-control pm-tc-pending-input" data-index="${idx}" data-f="description" value="${_pmEsc(parts.content === '-' ? '' : parts.content)}"></td>
         <td style="text-align:center"><span class="badge badge-blue">검토대기</span></td>
         <td style="text-align:center"><button type="button" class="btn btn-xs btn-ghost pm-tc-pending-delete-btn" data-index="${idx}"><i class="fas fa-trash"></i></button></td>
@@ -7137,7 +7199,7 @@ function _pmBuildPendingTimeChargeDescription(row, content) {
   const endTime = String(row?.end_time || '').trim();
   const site = parts.site && parts.site !== '-' ? parts.site : '';
   const note = parts.note && parts.note !== '-' ? parts.note : '';
-  return `${desc}${startTime && endTime ? ` / 시간대:${startTime}~${endTime}` : ''}${site ? ` / 장소:${site}` : ''}${note ? ` / 비고:${note}` : ''}`.slice(0, 240);
+  return `${desc}${site ? ` / 장소:${site}` : ''}${note ? ` / 비고:${note}` : ''}`.slice(0, 240);
 }
 
 function _pmRefreshPendingTimeChargeKeysAndMeta() {
@@ -7198,8 +7260,8 @@ async function _pmHandlePendingTimeChargeInput(input) {
   const rows = PM_STATE.pendingTimeChargeUploadRows || [];
   const row = rows[idx];
   if (!row || !field) return;
-  if (field === 'final_minutes') {
-    const minutes = Math.max(1, Math.round(Number(input.value || 0)));
+  if (field === 'final_hours') {
+    const minutes = Math.max(1, _pmMinutesFromHoursInput(input.value));
     row.base_minutes = minutes;
     row.final_minutes = minutes;
   } else if (field === 'description') {
@@ -7402,6 +7464,12 @@ function _pmTimeChargeSetSaveButtonVisible(visible) {
   if (btn) btn.style.display = visible ? '' : 'none';
 }
 
+function _pmTimeChargeTextPreview(text, maxLen = 70) {
+  const clean = _pmTimeChargeDescriptionContent(text).replace(/\s+/g, ' ').trim();
+  if (!clean || clean === '-') return '-';
+  return clean.length > maxLen ? `${clean.slice(0, maxLen)}...` : clean;
+}
+
 function _pmRenderTimeChargeEditableLines(lines, message = '') {
   const body = document.getElementById('pm-tc-lines-body');
   if (!body) return;
@@ -7431,19 +7499,23 @@ function _pmRenderTimeChargeEditableLines(lines, message = '') {
     const id = String(row?.id || '').trim();
     const baseMinutes = Number(row?.base_minutes || 0);
     const finalMinutes = Number(row?.final_minutes || baseMinutes || 0);
+    const finalHours = _pmHoursText(finalMinutes);
     const unitRate = Math.round(Number(row?.unit_rate || 0));
     const finalAmount = Math.round(Number(row?.final_amount || 0));
     const billable = row?.is_billable !== false;
     const sourceLabel = _pmTimeChargeLineSourceLabel(row);
     const manualClass = _pmIsManualTimeChargeLine(row) ? ' is-manual' : '';
+    const descRaw = String(row?.description || '').trim();
+    const desc = _pmStripTimeRangeFromDescription(descRaw);
+    const descContent = _pmTimeChargeDescriptionContent(descRaw);
     return `<tr class="pm-tc-line-row${manualClass}" data-line-id="${_pmEsc(id)}" data-base-minutes="${_pmEsc(baseMinutes)}" data-base-amount="${_pmEsc(Number(row?.base_amount || 0))}" data-rate-source="${_pmEsc(row?.rate_source || '')}" data-source-key="${_pmEsc(row?.source_key || '')}">
       <td style="text-align:center">${idx + 1}<div class="pm-tc-line-source">${_pmEsc(sourceLabel)}</div></td>
       <td><input type="date" class="form-control pm-tc-line-input" data-f="work_date" value="${_pmEsc(row?.work_date || '')}"${disabledAttr}></td>
       <td><input type="text" class="form-control pm-tc-line-input" data-f="user_name" value="${_pmEsc(row?.user_name || '')}"${disabledAttr}></td>
       <td><select class="form-control pm-tc-line-input" data-f="role_key"${disabledAttr}>${_pmTimeChargeRoleOptionsHtml(row?.role_key || '')}</select></td>
-      <td><input type="number" min="0" step="1" class="form-control pm-tc-line-input pm-tc-number-input" data-f="minutes" value="${_pmEsc(finalMinutes)}"${disabledAttr}></td>
-      <td><input type="number" min="0" step="1000" class="form-control pm-tc-line-input pm-tc-number-input" data-f="rate" value="${_pmEsc(unitRate)}"${disabledAttr}></td>
-      <td><input type="number" min="0" step="1000" class="form-control pm-tc-line-input pm-tc-number-input" data-f="amount" value="${_pmEsc(finalAmount)}"${disabledAttr}></td>
+      <td><input type="text" inputmode="decimal" class="form-control pm-tc-line-input pm-tc-hours-input" data-f="hours" value="${_pmEsc(finalHours)}" title="시간(h) 입력 · 예: 0.5h, 1h"${disabledAttr}></td>
+      <td><input type="text" inputmode="numeric" class="form-control pm-tc-line-input pm-tc-number-input" data-f="rate" value="${_pmEsc(_pmFormatPaidAmountInput(unitRate))}"${disabledAttr}></td>
+      <td><input type="text" inputmode="numeric" class="form-control pm-tc-line-input pm-tc-number-input" data-f="amount" value="${_pmEsc(_pmFormatPaidAmountInput(finalAmount))}"${disabledAttr}></td>
       <td>
         <select class="form-control pm-tc-line-input" data-f="billable"${disabledAttr}>
           <option value="Y"${billable ? ' selected' : ''}>청구</option>
@@ -7451,8 +7523,9 @@ function _pmRenderTimeChargeEditableLines(lines, message = '') {
         </select>
       </td>
       <td>
-        <input type="text" class="form-control pm-tc-line-input" data-f="description" value="${_pmEsc(row?.description || '')}" placeholder="수행업무"${disabledAttr}>
-        <input type="text" class="form-control pm-tc-line-input pm-tc-reason-input" data-f="reason" value="${_pmEsc(row?.adjust_reason || '')}" placeholder="조정사유"${disabledAttr}>
+        <input type="hidden" class="pm-tc-line-input" data-f="description" value="${_pmEsc(desc)}">
+        <div class="pm-tc-line-text-preview" data-preview="description" title="${_pmEsc(descContent)}">${_pmEsc(_pmTimeChargeTextPreview(descRaw))}</div>
+        <button type="button" class="btn btn-xs btn-outline pm-tc-edit-line-text-btn" data-line-id="${_pmEsc(id)}"${disabledAttr}><i class="fas fa-pen"></i> 크게 편집</button>
       </td>
       <td style="text-align:center">
         <button type="button" class="btn btn-xs btn-ghost pm-tc-delete-line-btn" data-line-id="${_pmEsc(id)}"${disabledAttr}><i class="fas fa-trash"></i></button>
@@ -7466,15 +7539,65 @@ function _pmHandleTimeChargeLineInput(input) {
   const tr = input?.closest?.('tr[data-line-id]');
   if (!tr) return;
   const field = String(input.dataset.f || '').trim();
-  if (field === 'minutes' || field === 'rate') {
-    const minutes = Number(tr.querySelector('[data-f="minutes"]')?.value || 0);
-    const rate = Number(tr.querySelector('[data-f="rate"]')?.value || 0);
+  if (field === 'hours' || field === 'rate') {
+    const minutes = _pmMinutesFromHoursInput(tr.querySelector('[data-f="hours"]')?.value || '');
+    const rate = _pmParseAmountInput(tr.querySelector('[data-f="rate"]')?.value || '');
     const amountEl = tr.querySelector('[data-f="amount"]');
-    if (amountEl) amountEl.value = String(Math.round((minutes / 60) * rate));
+    if (amountEl) amountEl.value = _pmFormatPaidAmountInput(Math.round((minutes / 60) * rate));
   }
   tr.dataset.rateSource = 'manual';
   tr.classList.add('is-manual');
   _pmTimeChargeSetSaveButtonVisible(true);
+}
+
+function _pmFindTimeChargeLineTr(lineId) {
+  const id = String(lineId || '').trim();
+  if (!id) return null;
+  return Array.from(document.querySelectorAll('#pm-tc-lines-body tr[data-line-id]'))
+    .find((tr) => String(tr.dataset.lineId || '') === id) || null;
+}
+
+function pmOpenTimeChargeLineTextEdit(lineId) {
+  const id = String(lineId || '').trim();
+  const tr = _pmFindTimeChargeLineTr(id);
+  if (!tr) return;
+  PM_STATE.timechargeEditingLineId = id;
+  const descEl = document.getElementById('pm-tc-line-edit-desc');
+  const metaEl = document.getElementById('pm-tc-line-edit-meta');
+  const row = (PM_STATE.currentLines || []).find((item) => String(item?.id || '') === id) || {};
+  const descRaw = tr.querySelector('[data-f="description"]')?.value || row.description || '';
+  if (descEl) descEl.value = _pmTimeChargeDescriptionContent(descRaw);
+  if (metaEl) {
+    const userName = tr.querySelector('[data-f="user_name"]')?.value || row.user_name || '-';
+    const workDate = tr.querySelector('[data-f="work_date"]')?.value || row.work_date || '-';
+    const minutes = _pmMinutesFromHoursInput(tr.querySelector('[data-f="hours"]')?.value || '')
+      || Number(row.final_minutes || row.base_minutes || 0);
+    metaEl.textContent = `${workDate} · ${userName} · ${_pmHoursText(minutes)}`;
+  }
+  if (typeof openModal === 'function') openModal('pmTcLineEditModal');
+}
+
+function pmApplyTimeChargeLineTextEdit() {
+  const id = String(PM_STATE.timechargeEditingLineId || '').trim();
+  const tr = _pmFindTimeChargeLineTr(id);
+  if (!tr) {
+    if (typeof closeModal === 'function') closeModal('pmTcLineEditModal');
+    return;
+  }
+  const originalDesc = tr.querySelector('[data-f="description"]')?.value || '';
+  const editedContent = String(document.getElementById('pm-tc-line-edit-desc')?.value || '').trim();
+  const desc = _pmTimeChargeDescriptionForSave(editedContent, originalDesc);
+  const descInput = tr.querySelector('[data-f="description"]');
+  const descPreview = tr.querySelector('[data-preview="description"]');
+  if (descInput) descInput.value = desc;
+  if (descPreview) {
+    descPreview.textContent = _pmTimeChargeTextPreview(desc);
+    descPreview.title = _pmTimeChargeDescriptionContent(desc);
+  }
+  tr.dataset.rateSource = 'manual';
+  tr.classList.add('is-manual');
+  _pmTimeChargeSetSaveButtonVisible(true);
+  if (typeof closeModal === 'function') closeModal('pmTcLineEditModal');
 }
 
 function pmTimeChargeOpenBillingDetail() {
@@ -7618,7 +7741,7 @@ async function pmUploadTimeChargeExcel(fileInput) {
         work_date: workDate,
         work_category_name: '엑셀업로드',
         work_subcategory_name: '',
-        description: `${desc}${startTime && endTime ? ` / 시간대:${startTime}~${endTime}` : ''}${place ? ` / 장소:${place}` : ''}${note ? ` / 비고:${note}` : ''}`.slice(0, 240),
+        description: `${desc}${place ? ` / 장소:${place}` : ''}${note ? ` / 비고:${note}` : ''}`.slice(0, 240),
         start_time: startTime,
         end_time: endTime,
         base_minutes: baseMinutes,
@@ -7720,7 +7843,7 @@ async function pmCommitPendingTimeChargeUpload() {
         adjusted_amount: Number(row.adjusted_amount || 0),
         final_amount: Number(row.final_amount || 0),
         is_billable: row.is_billable !== false,
-        adjust_reason: '엑셀 업로드',
+        adjust_reason: '',
         created_by: session.id,
         created_by_name: session.name || '',
       };
@@ -8257,7 +8380,7 @@ async function importTimeChargeFromEntries() {
         payload.adjusted_amount = Number(existingRow.adjusted_amount || 0);
         payload.final_amount = Number(existingRow.final_amount || 0);
         payload.is_billable = existingRow.is_billable !== false;
-        payload.adjust_reason = String(existingRow.adjust_reason || '');
+        payload.adjust_reason = '';
       }
       if (existingByKey[row.source_key]) await API.patch('project_timecharge_lines', existingByKey[row.source_key].id, payload);
       else await API.create('project_timecharge_lines', payload);
@@ -8281,23 +8404,21 @@ function _pmReadLineRow(tr) {
   const original = (PM_STATE.currentLines || []).find((row) => String(row?.id || '') === String(id)) || {};
   const baseMinutes = Number(tr.dataset.baseMinutes || 0);
   const baseAmount = Number(tr.dataset.baseAmount || original.base_amount || 0);
-  const minutes = Number(tr.querySelector('[data-f="minutes"]')?.value || 0);
-  const rate = Number(tr.querySelector('[data-f="rate"]')?.value || 0);
-  const amountInput = Number(tr.querySelector('[data-f="amount"]')?.value || 0);
+  const minutes = _pmMinutesFromHoursInput(tr.querySelector('[data-f="hours"]')?.value || '');
+  const rate = _pmParseAmountInput(tr.querySelector('[data-f="rate"]')?.value || '');
+  const amountInput = _pmParseAmountInput(tr.querySelector('[data-f="amount"]')?.value || '');
   const calcAmount = (minutes / 60) * rate;
   const finalAmount = Math.round(amountInput);
   const workDate = String(tr.querySelector('[data-f="work_date"]')?.value || '').trim();
   const userName = String(tr.querySelector('[data-f="user_name"]')?.value || '').trim();
   const roleKey = _pmNormalizeTimeChargeTitleKey(tr.querySelector('[data-f="role_key"]')?.value || '', userName);
   const description = String(tr.querySelector('[data-f="description"]')?.value || '').trim().slice(0, 240);
-  const reason = String(tr.querySelector('[data-f="reason"]')?.value || '').trim().slice(0, 240);
   const wasManual = _pmIsManualTimeChargeLine(original);
   const originalBillable = original.is_billable !== false;
   const nextBillable = tr.querySelector('[data-f="billable"]')?.value === 'Y';
   const changedFinancials = Math.abs(Number(original.final_minutes || original.base_minutes || 0) - minutes) > 0.01
     || Math.abs(Number(original.unit_rate || 0) - rate) > 0.01
     || Math.abs(Number(original.final_amount || 0) - finalAmount) > 0.01
-    || String(original.adjust_reason || '') !== reason
     || originalBillable !== nextBillable;
   const isManual = wasManual || changedFinancials || Math.abs(finalAmount - calcAmount) >= 1;
   const usersByName = {};
@@ -8321,7 +8442,6 @@ function _pmReadLineRow(tr) {
     calcAmount,
     finalAmount,
     isBillable: nextBillable,
-    reason,
     source: isManual ? 'manual' : (tr.dataset.rateSource || 'user_base'),
     baseAmount,
     adjustedMinutes: minutes - baseMinutes,
@@ -8377,7 +8497,7 @@ async function saveTimeChargeLines() {
         unit_rate: row.rate,
         adjusted_amount: row.adjustedAmount,
         final_amount: row.finalAmount,
-        adjust_reason: row.reason,
+        adjust_reason: '',
         is_billable: row.isBillable,
       };
       await API.patch('project_timecharge_lines', row.id, payload);
@@ -8456,7 +8576,7 @@ async function pmAddTimeChargeLine() {
       base_amount: amount,
       adjusted_amount: 0,
       final_amount: amount,
-      adjust_reason: '수동 추가',
+      adjust_reason: '',
       is_billable: true,
       created_by: String(session?.id || ''),
       created_by_name: String(session?.name || ''),
