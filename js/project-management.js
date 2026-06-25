@@ -7662,9 +7662,10 @@ function pmTimeChargeOpenInvoiceFromSummary() {
 }
 
 function _pmTimechargeContractCap(projectCode) {
-  const milestones = _pmCollectBillingMilestones(PM_STATE.projectByCode[projectCode] || {});
-  const cap = milestones.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-  return Number.isFinite(cap) ? cap : 0;
+  const project = PM_STATE.projectByCode[String(projectCode || '').trim()] || {};
+  const billing = _pmBillingScheduleObject(project.billing_schedule);
+  const amount = Number(billing?.additional?.amount || 0);
+  return Number.isFinite(amount) && amount > 0 ? Math.round(amount) : 0;
 }
 
 async function pmDownloadTimeChargeTemplate() {
