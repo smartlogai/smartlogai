@@ -742,6 +742,8 @@ function _rowSheetType(e) {
 /** 일일 시트 대분류 (통관 제외) */
 const ENTRY_DAILY_CATEGORY_ALLOW = ['프로젝트업무', '일반자문업무', '회사내부업무'];
 let _dailyOpenProjectRows = [];
+let _entryRegisteredProjectRowsAll = [];
+let _entryProjectFilterWorkDate = '';
 let _dailyOpenProjectListFiltered = [];
 let _entryProjectPickerFiltered = [];
 const _ENTRY_DAILY_PROJECT_MIN_QUERY = 2;
@@ -837,15 +839,63 @@ function _entryEffectiveTimeCategory(catType, catName) {
   return catType || 'client';
 }
 
-function _entryRegisteredProjectOngoing(r) {
+function _entryTodayYmd() {
+  const t = new Date();
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+}
+
+/** 타임시트 작성일(시간제·일일·일괄) — 프로젝트 수행기간 필터 기준 */
+function _entryResolveProjectWorkDate() {
+  if (_entryEffectiveInputMode() === 'by_batch') return _entryBatchResolveTimelineDate();
+  if (entryFormSheetType() === 'daily') {
+    const from = String((document.getElementById('entry-daily-from') || {}).value || '').trim().slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(from)) return from;
+    const to = String((document.getElementById('entry-daily-to') || {}).value || '').trim().slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(to)) return to;
+  }
+  return _entryResolveWorkDate();
+}
+
+function _entryProjectIsClosed(r) {
+  if (!r) return true;
+  const st = String(r.lifecycle_status_override || '').trim().toLowerCase();
+  if (st === 'work_closed' || st === 'settled_done') return true;
+  if (Number(r.work_closed_at || 0) > 0) return true;
+  if (Number(r.settled_at || 0) > 0) return true;
+  return false;
+}
+
+/** 승인·미종료 프로젝트 중, 작성일이 수행 시작일 이후인 항목만 노출 (period_end는 예상일이라 미종료 시 제한하지 않음) */
+function _entryRegisteredProjectOngoing(r, workDateYmd) {
   if (!r || String(r.registration_status || '').trim().toLowerCase() !== 'approved') return false;
-  const pe = r.period_end;
-  if (pe == null || String(pe).trim() === '') return true;
-  const endDay = String(pe).slice(0, 10);
-  const endMs = new Date(`${endDay}T23:59:59`).getTime();
-  const startToday = new Date();
-  startToday.setHours(0, 0, 0, 0);
-  return endMs >= startToday.getTime();
+  if (_entryProjectIsClosed(r)) return false;
+  const ymd = String(workDateYmd || _entryResolveProjectWorkDate() || _entryTodayYmd()).trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return true;
+  const ps = r.period_start;
+  if (ps == null || String(ps).trim() === '') return true;
+  const startDay = String(ps).slice(0, 10);
+  return ymd >= startDay;
+}
+
+function _entryApplyOpenProjectDateFilter(workDateYmd) {
+  const ymd = String(workDateYmd || _entryResolveProjectWorkDate() || _entryTodayYmd()).trim().slice(0, 10);
+  _entryProjectFilterWorkDate = ymd;
+  _dailyOpenProjectRows = (_entryRegisteredProjectRowsAll || []).filter((r) => _entryRegisteredProjectOngoing(r, ymd));
+  _dailyOpenProjectRows.sort((a, b) => String(a.project_code || '').localeCompare(String(b.project_code || '')));
+  _entryInitProjectClientFilterFromRows();
+  _entryFillDailyProjMainFilter();
+  _entryRefreshDailyProjectList();
+  if (_entryEffectiveInputMode() === 'by_batch') _entryBatchRenderRows();
+}
+
+async function _entryRefreshOpenProjectsForWorkDate() {
+  const ymd = _entryResolveProjectWorkDate();
+  if (_entryRegisteredProjectRowsAll.length && _entryProjectFilterWorkDate === ymd) return;
+  if (!_entryRegisteredProjectRowsAll.length) {
+    await _entryLoadDailyOpenProjects();
+    return;
+  }
+  _entryApplyOpenProjectDateFilter(ymd);
 }
 
 /** 일 단위: 시작일~종료일(포함) 캘린더 일수 */
@@ -1217,6 +1267,7 @@ function entryBatchTimelineOnDateChange(nextDate) {
   _entryBatchTimelineDate = ymd;
   _entryBatchTimelineClearOverlay();
   _entryBatchRenderTimeline();
+  _entryRefreshOpenProjectsForWorkDate().catch((e) => console.warn('[entry batch] project rows refresh failed', e));
 }
 
 function entryBatchSelectRow(idx) {
@@ -2415,6 +2466,7 @@ async function _entryFillDailyProjMainFilter() {
 }
 
 async function _entryLoadDailyOpenProjects() {
+  _entryRegisteredProjectRowsAll = [];
   _dailyOpenProjectRows = [];
   try {
     const [rows, types] = await Promise.all([
@@ -2424,25 +2476,24 @@ async function _entryLoadDailyOpenProjects() {
     const typeById = {};
     (types || []).forEach((t) => { if (t && t.id) typeById[t.id] = t; });
     (rows || []).forEach((r) => {
-      if (!_entryRegisteredProjectOngoing(r)) return;
       const typ = r.project_code_type_id && typeById[r.project_code_type_id];
       const mc = typ ? (typ.main_code || '') : '';
       const mcat = typ ? (typ.main_category || '') : '';
       const mlabel = typ ? `${mcat || ''} (${mc || ''})`.trim() : '';
-      _dailyOpenProjectRows.push({
+      _entryRegisteredProjectRowsAll.push({
         ...r,
         _main_label: mlabel || '(분류 없음)',
         _main_code: mc,
         _main_cat: mcat,
       });
     });
-    _dailyOpenProjectRows.sort((a, b) => String(a.project_code || '').localeCompare(String(b.project_code || '')));
+    _entryApplyOpenProjectDateFilter(_entryResolveProjectWorkDate());
   } catch (e) {
     console.warn('[entry] open projects', e);
+    _entryInitProjectClientFilterFromRows();
+    await _entryFillDailyProjMainFilter();
+    _entryRefreshDailyProjectList();
   }
-  _entryInitProjectClientFilterFromRows();
-  await _entryFillDailyProjMainFilter();
-  _entryRefreshDailyProjectList();
 }
 
 function _syncEntrySheetTypeBadge() {
@@ -2565,6 +2616,7 @@ function applyDailyPeriodFromInput() {
 function onDailyPeriodChange() {
   if (entryFormSheetType() !== 'daily') return;
   applyDailyPeriodFromInput();
+  _entryRefreshOpenProjectsForWorkDate().catch((e) => console.warn('[entry] project rows refresh failed', e));
 }
 
 /** @deprecated 호환용 — 일일 기간 동기화로 위임 */
@@ -3746,6 +3798,7 @@ function _overlapMessage(conflict, newStart, newEnd) {
 let _overlapWarnTimer = null; // 디바운스용
 
 async function calcDuration() {
+  _entryRefreshOpenProjectsForWorkDate().catch((e) => console.warn('[entry] project rows refresh failed', e));
   if (entryFormSheetType() === 'daily' && _entryDailyEffectivePeriodMode() !== 'by_hour') {
     applyDailyWorkDateFromInput();
     return;
