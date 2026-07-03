@@ -1918,8 +1918,25 @@ function _pmInvoiceOutputFromForm(projectCode, billingMonth, form, batch = null)
   };
 }
 
+function _pmCustomerInvoiceTaxTotals(invoice) {
+  const supply = Math.max(0, Math.round(Number(invoice?.supply_amount || 0)));
+  const vatRate = Number(invoice?.vat_rate);
+  const rate = Number.isFinite(vatRate) ? vatRate : 0.1;
+  const storedVat = Math.max(0, Math.round(Number(invoice?.vat_amount || 0)));
+  const storedTotal = Math.max(0, Math.round(Number(invoice?.total_amount || 0)));
+  if (storedVat > 0 && storedTotal >= supply) {
+    return { supply, vat: storedVat, total: storedTotal, vatRate: rate };
+  }
+  const tax = _pmInvoiceTaxAmounts(supply, rate);
+  return { supply: tax.supply, vat: tax.vat, total: tax.total, vatRate: tax.vatRate };
+}
+
 function _pmRenderCustomerInvoiceHtml(invoice) {
-  const tableTotal = Math.max(0, Math.round(Number(invoice.supply_amount || 0)));
+  const taxTotals = _pmCustomerInvoiceTaxTotals(invoice);
+  const tableTotal = taxTotals.supply;
+  const vatAmount = taxTotals.vat;
+  const payTotal = taxTotals.total;
+  const vatPct = Math.round((taxTotals.vatRate || 0) * 100);
   const items = Array.isArray(invoice.invoice_items) ? invoice.invoice_items : [];
   const showNoteCol = items.some((item) => String(item?.note || '').trim());
   const itemRows = items.map((item, i) => {
@@ -1945,11 +1962,24 @@ function _pmRenderCustomerInvoiceHtml(invoice) {
     <td style="border:1px solid #d1d5db;padding:8px">-</td>
     ${showNoteCol ? '<td style="border:1px solid #d1d5db;padding:8px">-</td>' : ''}
   </tr>`;
+  const summaryCellStyle = 'border:1px solid #d1d5db;padding:8px;background:#f8fafc';
   const totalRow = `<tr>
-    <td colspan="3" style="border:1px solid #d1d5db;padding:8px;text-align:center;font-weight:700;background:#f8fafc">비용합계</td>
-    <td style="border:1px solid #d1d5db;padding:8px;text-align:right;font-weight:700;background:#f8fafc">${_pmEsc(_pmKrw(tableTotal))}</td>
-    <td style="border:1px solid #d1d5db;padding:8px;background:#f8fafc"></td>
-    ${showNoteCol ? '<td style="border:1px solid #d1d5db;padding:8px;background:#f8fafc"></td>' : ''}
+    <td colspan="3" style="${summaryCellStyle};text-align:center;font-weight:700">비용합계 (공급가액)</td>
+    <td style="${summaryCellStyle};text-align:right;font-weight:700">${_pmEsc(_pmKrw(tableTotal))}</td>
+    <td style="${summaryCellStyle}"></td>
+    ${showNoteCol ? `<td style="${summaryCellStyle}"></td>` : ''}
+  </tr>
+  <tr>
+    <td colspan="3" style="${summaryCellStyle};text-align:center;font-weight:700">부가세 (VAT ${vatPct}%)</td>
+    <td style="${summaryCellStyle};text-align:right;font-weight:700">${_pmEsc(_pmKrw(vatAmount))}</td>
+    <td style="${summaryCellStyle}"></td>
+    ${showNoteCol ? `<td style="${summaryCellStyle}"></td>` : ''}
+  </tr>
+  <tr>
+    <td colspan="3" style="${summaryCellStyle};text-align:center;font-weight:700;background:#eef2ff">총 지급액 (VAT 포함)</td>
+    <td style="${summaryCellStyle};text-align:right;font-weight:700;background:#eef2ff">${_pmEsc(_pmKrw(payTotal))}</td>
+    <td style="${summaryCellStyle};background:#eef2ff"></td>
+    ${showNoteCol ? `<td style="${summaryCellStyle};background:#eef2ff"></td>` : ''}
   </tr>`;
   const recipientText = String(invoice.recipient_email || '').trim()
     ? `${_pmEsc(invoice.recipient_name || '-')} (${_pmEsc(invoice.recipient_email || '-')})`
@@ -1965,7 +1995,9 @@ function _pmRenderCustomerInvoiceHtml(invoice) {
     `<div><b>고객사</b> ${_pmEsc(invoice.client_name || invoice.buyer_company_name || '-')}</div>`,
     `<div><b>수신자</b> ${recipientText}</div>`,
     `<div><b>작성일</b> ${_pmEsc(invoice.planned_issue_date || '-')}</div>`,
-    `<div><b>청구금액</b> ${_pmEsc(_pmKrw(invoice.supply_amount || 0))}</div>`,
+    `<div><b>공급가액</b> ${_pmEsc(_pmKrw(tableTotal))}</div>`,
+    `<div><b>부가세 (VAT ${vatPct}%)</b> ${_pmEsc(_pmKrw(vatAmount))}</div>`,
+    `<div style="grid-column:1 / -1;font-weight:700;color:#1e3a8a"><b>총 지급액 (VAT 포함)</b> ${_pmEsc(_pmKrw(payTotal))}</div>`,
     '</div>',
     '<table style="width:100%;border-collapse:collapse;margin:8px 0 12px 0;font-size:13px">',
     '<thead><tr>',
@@ -1991,8 +2023,8 @@ function _pmRenderCustomerInvoiceSummaryText(invoice) {
     `청구월: ${invoice.billing_month || '-'}`,
     `수신자: ${invoice.recipient_name || '-'} (${invoice.recipient_email || '-'})`,
     `공급가액: ${_pmKrw(invoice.supply_amount || 0)}`,
-    `부가세: ${_pmKrw(invoice.vat_amount || 0)}`,
-    `합계: ${_pmKrw(invoice.total_amount || 0)}`,
+    `부가세 (VAT 10%): ${_pmKrw(invoice.vat_amount || 0)}`,
+    `총 지급액 (VAT 포함): ${_pmKrw(invoice.total_amount || 0)}`,
   ];
   if (invoice.legal_note) lines.push(`메모: ${invoice.legal_note}`);
   return lines.join('\n');
@@ -4251,6 +4283,7 @@ function _pmBuildTimeChargeBillingBlocks(projectCode, summaryRich) {
   const subtotal = summaryRows.reduce((sum, r) => sum + Number(r._amount || 0), 0);
   const cap = _pmTimechargeContractCap(projectCode);
   const claim = cap > 0 ? Math.min(subtotal, cap) : subtotal;
+  const claimTax = _pmInvoiceTaxAmounts(claim);
   const rowsHtml = summaryRows.map((r, i) => `<tr>
     <td style="text-align:center">${i + 1}</td>
     <td style="text-align:center">${_pmEsc(r.Consultant || '-')}</td>
@@ -4340,6 +4373,14 @@ function _pmBuildTimeChargeBillingBlocks(projectCode, summaryRich) {
         <tr class="pm-tc-invoice-total-claim-row">
           <th style="text-align:center">최종 청구 보수액</th>
           <td style="text-align:right">${_pmKrw(claim)}</td>
+        </tr>
+        <tr class="pm-tc-invoice-total-vat-row">
+          <th style="text-align:center">부가세 (VAT 10%)</th>
+          <td style="text-align:right">${_pmKrw(claimTax.vat)}</td>
+        </tr>
+        <tr class="pm-tc-invoice-total-pay-row">
+          <th style="text-align:center">총 청구금액 (VAT 포함)</th>
+          <td style="text-align:right">${_pmKrw(claimTax.total)}</td>
         </tr>
       </tbody>
     </table>
@@ -4502,6 +4543,7 @@ ${scope} .data-table thead th{background:#fff!important;font-weight:500!importan
 ${scope} .data-table tbody tr:hover{background:transparent!important}
 ${scope} .pm-tc-invoice-total-table tbody th,${scope} .pm-tc-invoice-total-table tbody td{background:#fff!important}
 ${scope} .pm-tc-invoice-total-table .pm-tc-invoice-total-claim-row th,${scope} .pm-tc-invoice-total-table .pm-tc-invoice-total-claim-row td{background:#fff!important;font-weight:600!important;color:#0f172a!important}
+${scope} .pm-tc-invoice-total-table .pm-tc-invoice-total-pay-row th,${scope} .pm-tc-invoice-total-table .pm-tc-invoice-total-pay-row td{background:#eef2ff!important;font-weight:700!important;color:#1e3a8a!important}
 ${scope} .pm-tc-subtotal-row td{background:#fff!important}
 ${scope} .pm-tc-invoice-detail-table td:nth-child(5){text-align:left!important}
 ${scope} .pm-tc-invoice-summary-table td:nth-child(4),${scope} .pm-tc-invoice-summary-table td:nth-child(6),${scope} .pm-tc-invoice-detail-table td:nth-child(6){text-align:right!important}`;
@@ -8225,6 +8267,7 @@ async function pmExportTimeChargeInvoiceWorkbook() {
   const subtotal = summaryRows.reduce((sum, r) => sum + Number(r['Time Charge'] || 0), 0);
   const cap = _pmTimechargeContractCap(projectCode);
   const claim = cap > 0 ? Math.min(subtotal, cap) : subtotal;
+  const claimTax = _pmInvoiceTaxAmounts(claim);
   const wb = XLSX.utils.book_new();
   const invoiceMeta = XLSX.utils.json_to_sheet([
     { 항목: '발행사', 값: PM_TC_COMPANY.legalName },
@@ -8245,7 +8288,9 @@ async function pmExportTimeChargeInvoiceWorkbook() {
     {},
     { Consultant: '용역 보수액', Position: '', 'Time Rate': '', Time: '', 'Time Charge': Math.round(subtotal) },
     { Consultant: '청구 한도액', Position: '', 'Time Rate': '', Time: '', 'Time Charge': Math.round(cap) },
-    { Consultant: '청구 보수액', Position: '', 'Time Rate': '', Time: '', 'Time Charge': Math.round(claim) },
+    { Consultant: '최종 청구 보수액', Position: '', 'Time Rate': '', Time: '', 'Time Charge': Math.round(claim) },
+    { Consultant: '부가세 (VAT 10%)', Position: '', 'Time Rate': '', Time: '', 'Time Charge': Math.round(claimTax.vat) },
+    { Consultant: '총 청구금액 (VAT 포함)', Position: '', 'Time Rate': '', Time: '', 'Time Charge': Math.round(claimTax.total) },
   ]));
   XLSX.utils.book_append_sheet(wb, invoiceSummary, '청구서');
   await _pmSaveTimeChargeInvoiceSnapshot({ batch, project, summaryRows, subtotal, cap, claim });
@@ -10230,7 +10275,12 @@ function _pmRenderCustomerInvoicePreview() {
   if (!draft || !previewEl) return;
   const mergedRows = _pmCustomerInvoiceMergedRows(draft);
   const supplyAmount = mergedRows.reduce((sum, r) => sum + Math.max(0, Number(r.amount || 0)), 0);
-  if (summaryEl) summaryEl.textContent = '';
+  const tax = _pmInvoiceTaxAmounts(supplyAmount);
+  if (summaryEl) {
+    summaryEl.textContent = tax.supply > 0
+      ? `공급가액 ${_pmKrw(tax.supply)} · 부가세 ${_pmKrw(tax.vat)} · 총 지급액 ${_pmKrw(tax.total)}`
+      : '';
+  }
   const invoice = {
     project_code: draft.project_code,
     project_name: draft.project_name,
@@ -10240,9 +10290,9 @@ function _pmRenderCustomerInvoicePreview() {
     expected_payment_date: '',
     recipient_name: draft.recipient_name || '',
     recipient_email: draft.recipient_email || '',
-    supply_amount: supplyAmount,
-    vat_amount: 0,
-    total_amount: supplyAmount,
+    supply_amount: tax.supply,
+    vat_amount: tax.vat,
+    total_amount: tax.total,
     item_name: draft.project_name || '고객청구서',
     legal_note: draft.note || '',
     invoice_items: mergedRows.map((r) => ({
@@ -10404,6 +10454,7 @@ async function pmSaveCustomerInvoiceDocument() {
   }
   const mergedRows = _pmCustomerInvoiceMergedRows(draft);
   const supplyAmount = mergedRows.reduce((sum, r) => sum + Math.max(0, Number(r.amount || 0)), 0);
+  const tax = _pmInvoiceTaxAmounts(supplyAmount);
   const invoice = {
     project_code: draft.project_code,
     project_name: draft.project_name,
@@ -10412,9 +10463,9 @@ async function pmSaveCustomerInvoiceDocument() {
     planned_issue_date: draft.doc_date,
     recipient_name: draft.recipient_name || '',
     recipient_email: draft.recipient_email || '',
-    supply_amount: supplyAmount,
-    vat_amount: 0,
-    total_amount: supplyAmount,
+    supply_amount: tax.supply,
+    vat_amount: tax.vat,
+    total_amount: tax.total,
     item_name: draft.project_name || '고객청구서',
     legal_note: draft.note || '',
     invoice_items: mergedRows.map((r) => ({
@@ -10437,11 +10488,14 @@ async function pmSaveCustomerInvoiceDocument() {
       document_date: draft.doc_date,
       status: 'saved',
       note: draft.note || '',
-      total_amount: Math.round(supplyAmount),
+      total_amount: Math.round(tax.total),
       payload: {
         recipient_name: draft.recipient_name || '',
         recipient_email: draft.recipient_email || '',
         rows: mergedRows,
+        supply_amount: tax.supply,
+        vat_amount: tax.vat,
+        total_amount: tax.total,
         html: htmlSnapshot,
       },
       created_by: session?.id || '',
