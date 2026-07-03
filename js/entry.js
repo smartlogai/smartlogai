@@ -865,6 +865,40 @@ function _entryProjectIsClosed(r) {
   return false;
 }
 
+function _entryProjectRowFreshness(r) {
+  const u = Number(r?.updated_at || 0);
+  const c = Number(r?.created_at || 0);
+  if (Number.isFinite(u) && u > 0) return u;
+  if (Number.isFinite(c) && c > 0) return c;
+  const parsed = Date.parse(String(r?.updated_at || r?.created_at || ''));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** registered_projects에 동일 project_code가 여러 건일 때 최신·미종료 1건만 유지 */
+function _entryDedupeRegisteredProjects(rows) {
+  const byCode = new Map();
+  (rows || []).forEach((r) => {
+    const code = String(r?.project_code || '').trim();
+    if (!code) return;
+    const prev = byCode.get(code);
+    if (!prev) {
+      byCode.set(code, r);
+      return;
+    }
+    const prevClosed = _entryProjectIsClosed(prev);
+    const nextClosed = _entryProjectIsClosed(r);
+    if (prevClosed && !nextClosed) {
+      byCode.set(code, r);
+      return;
+    }
+    if (!prevClosed && nextClosed) return;
+    if (_entryProjectRowFreshness(r) >= _entryProjectRowFreshness(prev)) {
+      byCode.set(code, r);
+    }
+  });
+  return [...byCode.values()];
+}
+
 /** 승인·미종료 프로젝트 중, 작성일이 수행 시작일 이후인 항목만 노출 (period_end는 예상일이라 미종료 시 제한하지 않음) */
 function _entryRegisteredProjectOngoing(r, workDateYmd) {
   if (!r || String(r.registration_status || '').trim().toLowerCase() !== 'approved') return false;
@@ -1445,10 +1479,12 @@ function _entryBatchProjectCodeOptionsHtml(clientId, selectedCode) {
     return '<option value="">선택 가능한 프로젝트 없음</option>';
   }
   const opts = ['<option value="">프로젝트코드</option>'];
+  const seenCodes = new Set();
   rows.forEach((r) => {
     const code = String(r.project_code || '').trim();
     const name = String(r.project_name || '').trim();
-    if (!code) return;
+    if (!code || seenCodes.has(code)) return;
+    seenCodes.add(code);
     const label = Utils.escHtml(name ? `${code} - ${name}` : code);
     opts.push(`<option value="${Utils.escHtml(code)}"${code === curCode ? ' selected' : ''}>${label}</option>`);
   });
@@ -2487,6 +2523,7 @@ async function _entryLoadDailyOpenProjects() {
         _main_cat: mcat,
       });
     });
+    _entryRegisteredProjectRowsAll = _entryDedupeRegisteredProjects(_entryRegisteredProjectRowsAll);
     _entryApplyOpenProjectDateFilter(_entryResolveProjectWorkDate());
   } catch (e) {
     console.warn('[entry] open projects', e);
