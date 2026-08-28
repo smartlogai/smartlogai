@@ -4737,7 +4737,9 @@ function _pmAppendTimeChargeDetailSectionPages(doc, section, pageState) {
     const trial = buildChunk([...chunk, row], false, appendedChunks);
     const trialHeight = _pmMeasureTimeChargeNodeHeight(doc, trial, frameWidth);
     const currentHeight = pageState.page.offsetHeight;
-    const overflow = pageState.page.childNodes.length > 0 && currentHeight + trialHeight > maxPageHeight;
+    const pageHasContent = pageState.page.childNodes.length > 0;
+    // 빈 페이지에서도 높이 검사 (이전: childNodes.length > 0 조건으로 남은 행이 한 장에 몰림)
+    const overflow = currentHeight + trialHeight > maxPageHeight;
     if (overflow && chunk.length > 0) {
       appendChunk(chunk, false);
       _pmStartTimeChargePdfPage(doc, pageState);
@@ -4745,7 +4747,10 @@ function _pmAppendTimeChargeDetailSectionPages(doc, section, pageState) {
       return;
     }
     if (overflow && chunk.length === 0) {
-      _pmStartTimeChargePdfPage(doc, pageState);
+      // 분할 불가한 단일 행: 현재 페이지에 내용이 있을 때만 새 페이지로 넘김
+      if (pageHasContent) {
+        _pmStartTimeChargePdfPage(doc, pageState);
+      }
       chunk = [row];
       return;
     }
@@ -4908,7 +4913,9 @@ async function _pmDownloadTimeChargeHtmlPdf(html, filenameBase) {
     const pageEls = Array.isArray(pages) && pages.length ? pages : [mounted.captureEl];
     const pdfDoc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' });
     const pageW = pdfDoc.internal.pageSize.getWidth();
+    const pageH = pdfDoc.internal.pageSize.getHeight();
     const usableW = pageW - margin * 2;
+    const usableH = pageH - margin * 2;
     for (let i = 0; i < pageEls.length; i += 1) {
       const pageEl = pageEls[i];
       const pageHeight = Math.max(pageEl.scrollHeight, pageEl.offsetHeight, 1) + 8;
@@ -4929,7 +4936,12 @@ async function _pmDownloadTimeChargeHtmlPdf(html, filenameBase) {
       });
       if (i > 0) pdfDoc.addPage();
       const imgH = (canvas.height * usableW) / canvas.width;
-      pdfDoc.addImage(canvas.toDataURL('image/png'), 'PNG', margin, margin, usableW, imgH, undefined, 'FAST');
+      // DOM 분할이 어긋나 캔버스가 A4를 넘으면 추가 페이지로 잘라 하단 잘림 방지
+      if (imgH > usableH + 1) {
+        _pmAddCanvasPagesToPdf(pdfDoc, canvas, margin);
+      } else {
+        pdfDoc.addImage(canvas.toDataURL('image/png'), 'PNG', margin, margin, usableW, imgH, undefined, 'FAST');
+      }
     }
     pdfDoc.save(`${filenameBase}.pdf`);
   } catch (e) {
